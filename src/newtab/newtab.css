@@ -175,6 +175,11 @@ body.effect-noise .background::after {
   padding: 0;
 }
 
+.button--ghost {
+  border: 1px solid var(--card-border);
+  background: transparent;
+}
+
 .button:hover {
   background: rgb(255 255 255 / 0.22);
 }
@@ -293,6 +298,48 @@ body.settings-hover .settings-button {
 body.settings-hover:hover .settings-button,
 .settings-button:focus-visible {
   opacity: 1;
+}
+
+.onboarding {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(2 6 23 / 0.72);
+  backdrop-filter: blur(16px);
+}
+
+.onboarding__panel {
+  width: min(620px, 100%);
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  background: rgb(15 23 42 / 0.92);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.35);
+  padding: 24px;
+}
+
+.onboarding__panel h1 {
+  margin: 0 0 8px;
+  font-size: 1.4rem;
+}
+
+.onboarding__panel p {
+  margin: 0 0 18px;
+  color: var(--muted);
+}
+
+.onboarding__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.onboarding__actions .button,
+.onboarding__panel > .button {
+  min-height: 38px;
 }
 
 @keyframes drift {
