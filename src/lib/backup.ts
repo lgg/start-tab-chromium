@@ -94,7 +94,8 @@ export async function importBackup(value: unknown): Promise<void> {
     }
   }
 
-  await chrome.storage.local.set(nextStorage);
+  await chrome.storage.local.remove([...STORAGE_KEYS]);
+  if (Object.keys(nextStorage).length > 0) await chrome.storage.local.set(nextStorage);
   await syncRules();
 }
 
