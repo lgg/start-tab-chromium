@@ -3,6 +3,8 @@ export type SettingsButtonVisibility = "always" | "hover";
 export type SearchProviderId = "google" | "yandex" | "perplexity" | "duckduckgo" | "brave";
 export type DateTimeMode = "both" | "date" | "time";
 export type LinkPageDirection = "horizontal" | "vertical";
+export type WeatherDisplayMode = "current" | "day" | "week";
+export type WeatherProviderId = "open-meteo";
 export type BlockType =
   | "dateTime"
   | "ip"
@@ -81,6 +83,17 @@ export interface StartPageSettings {
     provider: SearchProviderId;
     providers: SearchProvider[];
   };
+  googleCalendar: {
+    calendarId: string;
+    maxResults: number;
+  };
+  weather: {
+    provider: WeatherProviderId;
+    city: string;
+    latitude: number;
+    longitude: number;
+    displayMode: WeatherDisplayMode;
+  };
   timers: {
     timerSeconds: number;
     pomodoroWorkSeconds: number;
@@ -157,6 +170,17 @@ export const DEFAULT_SETTINGS: StartPageSettings = {
       { id: "brave", title: "Brave", urlTemplate: "https://search.brave.com/search?q={query}" }
     ],
   },
+  googleCalendar: {
+    calendarId: "primary",
+    maxResults: 6,
+  },
+  weather: {
+    provider: "open-meteo",
+    city: "Amsterdam",
+    latitude: 52.3676,
+    longitude: 4.9041,
+    displayMode: "current",
+  },
   timers: {
     timerSeconds: 5 * 60,
     pomodoroWorkSeconds: 25 * 60,
@@ -208,6 +232,8 @@ function mergeSettings(base: StartPageSettings, value: unknown): StartPageSettin
     links: { ...base.links, ...(isRecord(value.links) ? value.links : {}) },
     startPinned: { ...base.startPinned, ...(isRecord(value.startPinned) ? value.startPinned : {}) },
     search: { ...base.search, ...(isRecord(value.search) ? value.search : {}) },
+    googleCalendar: { ...base.googleCalendar, ...(isRecord(value.googleCalendar) ? value.googleCalendar : {}) },
+    weather: { ...base.weather, ...(isRecord(value.weather) ? value.weather : {}) },
     timers: { ...base.timers, ...(isRecord(value.timers) ? value.timers : {}) },
     focusStats: { ...base.focusStats, ...(isRecord(value.focusStats) ? value.focusStats : {}) },
     layout: { ...base.layout, ...(isRecord(value.layout) ? value.layout : {}) },
