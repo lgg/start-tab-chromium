@@ -15,6 +15,8 @@ const entryPoints = {
   "service-worker": "src/service-worker.ts",
   popup: "src/popup/popup.ts",
   blocked: "src/blocked/blocked.ts",
+  newtab: "src/newtab/newtab.ts",
+  options: "src/options/options.ts",
 };
 
 /** Static files copied verbatim: [from, to] relative to root/outdir. */
@@ -25,6 +27,10 @@ const staticAssets = [
   ["src/popup/popup.css", "popup.css"],
   ["src/blocked/blocked.html", "blocked.html"],
   ["src/blocked/blocked.css", "blocked.css"],
+  ["src/newtab/newtab.html", "newtab.html"],
+  ["src/newtab/newtab.css", "newtab.css"],
+  ["src/options/options.html", "options.html"],
+  ["src/options/options.css", "options.css"],
   ["icons", "icons"],
 ];
 
