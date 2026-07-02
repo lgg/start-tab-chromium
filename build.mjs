@@ -1,15 +1,17 @@
 // Build script: bundles the TypeScript entry points with esbuild and copies
-// the static assets into a flat `build/` dir that can be loaded unpacked in
+// the static assets into a flat build dir that can be loaded unpacked in
 // Chrome or zipped for the Web Store.
 
 import * as esbuild from "esbuild";
-import { cp, mkdir, rm } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = dirname(fileURLToPath(import.meta.url));
-const outdir = resolve(root, "build");
 const watch = process.argv.includes("--watch");
+const withoutNewTab = process.argv.includes("--without-newtab");
+const outdirFlag = process.argv.find((arg) => arg.startsWith("--outdir="));
+const outdir = resolve(root, outdirFlag?.slice("--outdir=".length) || "build");
 
 const entryPoints = {
   "service-worker": "src/service-worker.ts",
@@ -22,7 +24,6 @@ const entryPoints = {
 
 /** Static files copied verbatim: [from, to] relative to root/outdir. */
 const staticAssets = [
-  ["src/manifest.json", "manifest.json"],
   ["src/_locales", "_locales"],
   ["src/popup/popup.html", "popup.html"],
   ["src/popup/popup.css", "popup.css"],
@@ -35,12 +36,20 @@ const staticAssets = [
   ["icons", "icons"],
 ];
 
+async function copyManifest() {
+  const manifestPath = resolve(root, "src/manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  if (withoutNewTab) delete manifest.chrome_url_overrides;
+  await writeFile(resolve(outdir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
 async function copyStatic() {
   await Promise.all(
     staticAssets.map(([from, to]) =>
       cp(resolve(root, from), resolve(outdir, to), { recursive: true }),
     ),
   );
+  await copyManifest();
 }
 
 const copyStaticPlugin = {
