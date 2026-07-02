@@ -1,6 +1,6 @@
 // Build script: bundles the TypeScript entry points with esbuild and copies
-// the static assets (HTML, CSS, icons, manifest) into a flat `build/` dir
-// that can be loaded unpacked in Chrome or zipped for the Web Store.
+// the static assets into a flat `build/` dir that can be loaded unpacked in
+// Chrome or zipped for the Web Store.
 
 import * as esbuild from "esbuild";
 import { cp, mkdir, rm } from "node:fs/promises";
@@ -20,6 +20,7 @@ const entryPoints = {
 /** Static files copied verbatim: [from, to] relative to root/outdir. */
 const staticAssets = [
   ["src/manifest.json", "manifest.json"],
+  ["src/_locales", "_locales"],
   ["src/popup/popup.html", "popup.html"],
   ["src/popup/popup.css", "popup.css"],
   ["src/blocked/blocked.html", "blocked.html"],
@@ -41,7 +42,7 @@ const copyStaticPlugin = {
     build.onEnd(async (result) => {
       if (result.errors.length === 0) {
         await copyStatic();
-        console.log(`Built extension → ${outdir}`);
+        console.log(`Built extension -> ${outdir}`);
       }
     });
   },
