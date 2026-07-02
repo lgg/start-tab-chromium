@@ -20,8 +20,11 @@ Start Tab is a Manifest V3 extension for Chromium-based browsers. It combines a 
 - Timer, stopwatch, and Pomodoro state persistence across closed and reopened new tabs.
 - Optional notifications for timer and Pomodoro completion.
 - Options page with localization, backup, appearance, search, IP, Google Calendar, weather, links, timers, focus stats, and drag/drop layout controls.
-- Manual JSON export/import for all local extension data.
-- Browser sync backup through chunked `chrome.storage.sync`.
+- Layout presets for focus, dashboard, minimal, development, and rest workflows.
+- Layout editor ordering, enabling, disabling, numeric geometry editing, and visual width/height resize controls.
+- Command block actions for opening settings, exporting a backup, resetting clocks, and resetting focus statistics.
+- Manual JSON export/import for all local extension data with a versioned backup schema and v1 migration path.
+- Browser sync backup through chunked `chrome.storage.sync`, checksum validation, device metadata, and latest-wins smart sync.
 - Google Drive backup/restore through Drive `appDataFolder` when OAuth is configured.
 - Google Calendar event block when OAuth is configured.
 - Weather block powered by Open-Meteo with current, daily, and weekly display modes.
@@ -72,7 +75,7 @@ Inside the full build, the start page itself is configurable through settings.
 - `src/lib/blocklist.ts` - shared blocklist and redirect logic.
 - `src/lib/focus-stats.ts` - focus and blocking statistics.
 - `src/lib/backup.ts` - versioned manual backup export/import.
-- `src/lib/chrome-sync.ts` - chunked browser sync backup.
+- `src/lib/chrome-sync.ts` - chunked browser sync backup and latest-wins smart sync.
 - `src/lib/google-integration.ts` - Google Calendar and Drive helpers.
 - `src/lib/i18n.ts` - runtime locale detection and message formatting.
 - `src/popup/` - browser action popup.
@@ -85,11 +88,12 @@ Inside the full build, the start page itself is configurable through settings.
 
 ## Roadmap
 
-- Add schema migrations for future backup versions beyond v1.
-- Add sync conflict handling for settings changed on multiple devices, including latest-wins MVP and later per-section merge.
-- Add richer layout presets, such as rest, development, and minimal variants per workflow.
-- Add visual resize handles to the layout editor; the current editor supports ordering, enabling, disabling, and numeric geometry edits.
-- Add richer command palette actions.
+Implemented roadmap foundation is now in the extension. Remaining follow-up improvements are quality and UX depth rather than missing core scope:
+
+- Add a per-section conflict viewer and manual merge UI for browser sync conflicts beyond the current latest-wins smart sync.
+- Add deeper command block extensibility, such as user-defined actions and keyboard-first command search.
+- Add richer layout editing affordances, such as direct drag resizing on the start page preview.
+- Add production OAuth setup documentation once the final Google Cloud project and store listing are ready.
 
 ## License
 

@@ -1,5 +1,5 @@
 import { backupFileName, exportBackup, importBackup } from "../lib/backup.js";
-import { restoreChromeSyncBackup, uploadChromeSyncBackup } from "../lib/chrome-sync.js";
+import { restoreChromeSyncBackup, syncChromeSyncBackup, uploadChromeSyncBackup } from "../lib/chrome-sync.js";
 import {
   isGoogleIntegrationConfigured,
   restoreDriveBackup,
@@ -247,10 +247,20 @@ function backupControls(): HTMLElement {
   const importButton = actionButton("importBackup", () => handleImport(file.files?.[0]));
   const chromeSyncUploadButton = actionButton("chromeSyncUpload", handleChromeSyncUpload);
   const chromeSyncRestoreButton = actionButton("chromeSyncRestore", handleChromeSyncRestore);
+  const chromeSyncSmartButton = actionButton("chromeSyncSmartSync", handleChromeSyncSmartSync);
   const driveUploadButton = actionButton("driveBackupUpload", handleDriveUpload);
   const driveRestoreButton = actionButton("driveBackupRestore", handleDriveRestore);
 
-  wrapper.append(exportButton, file, importButton, chromeSyncUploadButton, chromeSyncRestoreButton, driveUploadButton, driveRestoreButton);
+  wrapper.append(
+    exportButton,
+    file,
+    importButton,
+    chromeSyncSmartButton,
+    chromeSyncUploadButton,
+    chromeSyncRestoreButton,
+    driveUploadButton,
+    driveRestoreButton,
+  );
   return wrapper;
 }
 
@@ -339,6 +349,7 @@ function layoutEditorRow(block: LayoutBlock): HTMLElement {
     number.dataset.field = key;
     row.append(number);
   }
+  row.append(resizeControls());
 
   row.addEventListener("dragstart", () => row.classList.add("layout-row--dragging"));
   row.addEventListener("dragend", () => {
@@ -356,8 +367,42 @@ function layoutEditorRow(block: LayoutBlock): HTMLElement {
   });
   row.addEventListener("input", syncLayoutJsonFromEditor);
   row.addEventListener("change", syncLayoutJsonFromEditor);
+  row.addEventListener("click", handleResizeClick);
 
   return row;
+}
+
+function resizeControls(): HTMLElement {
+  const controls = document.createElement("div");
+  controls.className = "layout-row__resize";
+  for (const [fieldName, delta, label, title] of [
+    ["width", -1, "W-", `${i18n.t("layoutWidth")} -1`],
+    ["width", 1, "W+", `${i18n.t("layoutWidth")} +1`],
+    ["height", -1, "H-", `${i18n.t("layoutHeight")} -1`],
+    ["height", 1, "H+", `${i18n.t("layoutHeight")} +1`],
+  ] as const) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.title = title;
+    button.dataset.resizeField = fieldName;
+    button.dataset.resizeDelta = String(delta);
+    controls.append(button);
+  }
+  return controls;
+}
+
+function handleResizeClick(event: MouseEvent): void {
+  const button = event.target instanceof HTMLButtonElement ? event.target : null;
+  if (!button?.dataset.resizeField || !button.dataset.resizeDelta) return;
+  const row = button.closest<HTMLElement>(".layout-row");
+  if (!row) return;
+  const target = row.querySelector<HTMLInputElement>(`[data-field="${button.dataset.resizeField}"]`);
+  if (!target) return;
+  const delta = Number(button.dataset.resizeDelta);
+  const current = Number(target.value);
+  target.value = String(Math.max(1, (Number.isFinite(current) ? current : 1) + delta));
+  syncLayoutJsonFromEditor();
 }
 
 function syncLayoutJsonFromEditor(): void {
@@ -438,6 +483,16 @@ async function handleImport(file: File | undefined): Promise<void> {
   await importBackup(JSON.parse(text));
   await reloadSettings();
   statusEl.textContent = i18n.t("backupImported");
+}
+
+async function handleChromeSyncSmartSync(): Promise<void> {
+  try {
+    const result = await syncChromeSyncBackup();
+    if (result === "restored") await reloadSettings();
+    statusEl.textContent = i18n.t(result === "restored" ? "chromeSyncSmartRestored" : "chromeSyncSmartUploaded");
+  } catch (error) {
+    statusEl.textContent = error instanceof Error ? error.message : String(error);
+  }
 }
 
 async function handleChromeSyncUpload(): Promise<void> {

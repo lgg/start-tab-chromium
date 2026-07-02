@@ -5,7 +5,7 @@ export type DateTimeMode = "both" | "date" | "time";
 export type LinkPageDirection = "horizontal" | "vertical";
 export type WeatherDisplayMode = "current" | "day" | "week";
 export type WeatherProviderId = "open-meteo";
-export type LayoutPresetId = "work" | "minimal" | "focus" | "dashboard";
+export type LayoutPresetId = "work" | "minimal" | "focus" | "dashboard" | "development" | "rest";
 export type BlockType =
   | "dateTime"
   | "ip"
@@ -195,6 +195,32 @@ export const LAYOUT_PRESETS: LayoutPreset[] = [
       { id: "recent", type: "recent", title: "Recent History", enabled: true, column: 10, row: 3, width: 3, height: 3 },
       { id: "browserPinned", type: "browserPinned", title: "Browser Pinned", enabled: true, column: 7, row: 6, width: 3, height: 2 },
       { id: "startPinned", type: "startPinned", title: "Start Tab Pinned", enabled: true, column: 10, row: 6, width: 3, height: 2 },
+    ],
+  },
+  {
+    id: "development",
+    title: "Development",
+    columns: 12,
+    blocks: [
+      { id: "search", type: "search", title: "Search", enabled: true, column: 1, row: 1, width: 5, height: 2 },
+      { id: "links", type: "links", title: "Links", enabled: true, column: 1, row: 3, width: 5, height: 4 },
+      { id: "note", type: "note", title: "Scratchpad", enabled: true, column: 6, row: 1, width: 4, height: 4 },
+      { id: "localTasks", type: "localTasks", title: "Local Tasks", enabled: true, column: 10, row: 1, width: 3, height: 4 },
+      { id: "recent", type: "recent", title: "Recent History", enabled: true, column: 6, row: 5, width: 3, height: 2 },
+      { id: "commands", type: "commands", title: "Commands", enabled: true, column: 9, row: 5, width: 4, height: 2 },
+    ],
+  },
+  {
+    id: "rest",
+    title: "Rest",
+    columns: 12,
+    blocks: [
+      { id: "dateTime", type: "dateTime", title: "Date & Time", enabled: true, column: 1, row: 1, width: 4, height: 2 },
+      { id: "weather", type: "weather", title: "Weather", enabled: true, column: 5, row: 1, width: 4, height: 2 },
+      { id: "links", type: "links", title: "Links", enabled: true, column: 1, row: 3, width: 5, height: 4 },
+      { id: "startPinned", type: "startPinned", title: "Start Tab Pinned", enabled: true, column: 6, row: 3, width: 3, height: 2 },
+      { id: "timer", type: "timer", title: "Timer", enabled: true, column: 9, row: 3, width: 2, height: 2 },
+      { id: "commands", type: "commands", title: "Commands", enabled: true, column: 6, row: 5, width: 5, height: 2 },
     ],
   },
 ];

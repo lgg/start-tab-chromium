@@ -142,7 +142,7 @@ textarea {
 
 .layout-row {
   display: grid;
-  grid-template-columns: 28px 24px minmax(130px, 1fr) minmax(90px, 0.7fr) repeat(4, minmax(58px, 0.45fr));
+  grid-template-columns: 28px 24px minmax(130px, 1fr) minmax(90px, 0.7fr) repeat(4, minmax(58px, 0.45fr)) minmax(128px, 0.8fr);
   align-items: center;
   gap: 8px;
   border: 1px solid var(--border);
@@ -173,6 +173,23 @@ textarea {
 .layout-row input[type="number"] {
   height: 34px;
   padding: 0 8px;
+}
+
+.layout-row__resize {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.layout-row__resize button {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.08);
+  color: var(--text);
+  cursor: pointer;
+  font: 700 0.72rem/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .button {
@@ -219,7 +236,8 @@ textarea {
     grid-template-columns: 24px 24px 1fr 1fr;
   }
 
-  .layout-row input[type="number"] {
+  .layout-row input[type="number"],
+  .layout-row__resize {
     grid-column: span 2;
   }
 }
