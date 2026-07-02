@@ -339,6 +339,7 @@ function layoutEditorRow(block: LayoutBlock): HTMLElement {
     number.dataset.field = key;
     row.append(number);
   }
+  row.append(resizeControls());
 
   row.addEventListener("dragstart", () => row.classList.add("layout-row--dragging"));
   row.addEventListener("dragend", () => {
@@ -356,8 +357,42 @@ function layoutEditorRow(block: LayoutBlock): HTMLElement {
   });
   row.addEventListener("input", syncLayoutJsonFromEditor);
   row.addEventListener("change", syncLayoutJsonFromEditor);
+  row.addEventListener("click", handleResizeClick);
 
   return row;
+}
+
+function resizeControls(): HTMLElement {
+  const controls = document.createElement("div");
+  controls.className = "layout-row__resize";
+  for (const [fieldName, delta, label, title] of [
+    ["width", -1, "W-", `${i18n.t("layoutWidth")} -1`],
+    ["width", 1, "W+", `${i18n.t("layoutWidth")} +1`],
+    ["height", -1, "H-", `${i18n.t("layoutHeight")} -1`],
+    ["height", 1, "H+", `${i18n.t("layoutHeight")} +1`],
+  ] as const) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.title = title;
+    button.dataset.resizeField = fieldName;
+    button.dataset.resizeDelta = String(delta);
+    controls.append(button);
+  }
+  return controls;
+}
+
+function handleResizeClick(event: MouseEvent): void {
+  const button = event.target instanceof HTMLButtonElement ? event.target : null;
+  if (!button?.dataset.resizeField || !button.dataset.resizeDelta) return;
+  const row = button.closest<HTMLElement>(".layout-row");
+  if (!row) return;
+  const target = row.querySelector<HTMLInputElement>(`[data-field="${button.dataset.resizeField}"]`);
+  if (!target) return;
+  const delta = Number(button.dataset.resizeDelta);
+  const current = Number(target.value);
+  target.value = String(Math.max(1, (Number.isFinite(current) ? current : 1) + delta));
+  syncLayoutJsonFromEditor();
 }
 
 function syncLayoutJsonFromEditor(): void {
