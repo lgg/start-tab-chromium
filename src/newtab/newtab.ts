@@ -1,8 +1,10 @@
+import { backupFileName, exportBackup } from "../lib/backup.js";
 import {
   getFocusStats,
   recordFocusSessionCompleted,
   recordFocusSessionInterrupted,
   recordFocusSessionStarted,
+  resetFocusStats,
 } from "../lib/focus-stats.js";
 import {
   isGoogleIntegrationConfigured,
@@ -406,6 +408,14 @@ function resetClock(id: ClockId): void {
   updateDynamicBlocks();
 }
 
+function resetAllClocks(): void {
+  for (const id of ["timer", "stopwatch", "pomodoro"] as const) {
+    state.clocks[id] = defaultClock(id);
+  }
+  queueSaveState();
+  updateDynamicBlocks();
+}
+
 function updateDynamicBlocks(): void {
   updateDateTime();
   updateClocks();
@@ -739,11 +749,39 @@ function renderUrlItems(container: HTMLElement, items: Array<{ title: string; ur
   }
 }
 
-function renderCommands(container: HTMLElement): void {
-  const button = el("button", "button", i18n.t("openSettings")) as HTMLButtonElement;
+function commandButton(label: string, handler: () => void | Promise<void>): HTMLButtonElement {
+  const button = el("button", "button", label) as HTMLButtonElement;
   button.type = "button";
-  button.addEventListener("click", () => void chrome.runtime.openOptionsPage());
-  container.append(el("p", "placeholder", i18n.t("commandsPlaceholder")), button);
+  button.addEventListener("click", () => void handler());
+  return button;
+}
+
+async function downloadBackup(): Promise<void> {
+  const bundle = await exportBackup();
+  const url = URL.createObjectURL(new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = backupFileName();
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function handleResetStats(): Promise<void> {
+  await resetFocusStats();
+  await refreshStats();
+}
+
+function renderCommands(container: HTMLElement): void {
+  const actions = el("div", "clock-actions");
+  actions.append(
+    commandButton(i18n.t("openSettings"), () => chrome.runtime.openOptionsPage()),
+    commandButton(i18n.t("exportBackup"), downloadBackup),
+    commandButton(i18n.t("commandResetClocks"), resetAllClocks),
+    commandButton(i18n.t("commandResetStats"), handleResetStats),
+  );
+  container.append(el("p", "placeholder", i18n.t("commandsPlaceholder")), actions);
 }
 
 async function renderStats(container: HTMLElement): Promise<void> {
