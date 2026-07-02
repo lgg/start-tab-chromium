@@ -39,7 +39,12 @@ The production extension is built into `build/` and can be loaded as an unpacked
 ## Roadmap
 
 - Add a dedicated options page for richer settings management.
-- Add import/export for blocklists.
+- Add full manual export/import for all user data and settings: blocklist, layout, links, Start Tab pinned links, local tasks, timers, Pomodoro/focus state, focus statistics, weather settings, search settings, appearance, background settings, and localization preference.
+- Add a versioned backup format with migration support so older exported settings can be imported after future schema changes.
+- Add optional browser sync for small cross-device settings through `chrome.storage.sync` where quota limits allow it.
+- Add optional Google account sync for full settings backup and restore through Google Drive `appDataFolder`.
+- Add Google OAuth integration for Google Calendar and Google Drive sync, with separate permissions and explicit user opt-in.
+- Add sync conflict handling for settings changed on multiple devices, including latest-wins MVP and later per-section merge.
 - Add schedules or focus sessions for time-bounded blocking.
 - Add optional new tab replacement so installing the extension can provide a configurable custom start page.
 - Add configurable start page layout with movable/resizable blocks.
