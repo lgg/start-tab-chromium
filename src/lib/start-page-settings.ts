@@ -81,6 +81,11 @@ export interface StartPageSettings {
     pomodoroBreakSeconds: number;
     notifyOnComplete: boolean;
   };
+  focusStats: {
+    defaultMinutesPerAvoidedVisit: number;
+    avoidedVisitDedupeSeconds: number;
+    domainMinutes: Record<string, number>;
+  };
   layout: {
     columns: number;
     profile: string;
@@ -145,6 +150,11 @@ export const DEFAULT_SETTINGS: StartPageSettings = {
     pomodoroBreakSeconds: 5 * 60,
     notifyOnComplete: true,
   },
+  focusStats: {
+    defaultMinutesPerAvoidedVisit: 10,
+    avoidedVisitDedupeSeconds: 5 * 60,
+    domainMinutes: {},
+  },
   layout: {
     columns: 12,
     profile: "work",
@@ -182,6 +192,7 @@ function mergeSettings(base: StartPageSettings, value: unknown): StartPageSettin
     links: { ...base.links, ...(isRecord(value.links) ? value.links : {}) },
     search: { ...base.search, ...(isRecord(value.search) ? value.search : {}) },
     timers: { ...base.timers, ...(isRecord(value.timers) ? value.timers : {}) },
+    focusStats: { ...base.focusStats, ...(isRecord(value.focusStats) ? value.focusStats : {}) },
     layout: { ...base.layout, ...(isRecord(value.layout) ? value.layout : {}) },
   } as StartPageSettings;
 }
