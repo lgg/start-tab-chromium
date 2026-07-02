@@ -1,4 +1,5 @@
 import { backupFileName, exportBackup, importBackup } from "../lib/backup.js";
+import { restoreChromeSyncBackup, uploadChromeSyncBackup } from "../lib/chrome-sync.js";
 import {
   isGoogleIntegrationConfigured,
   restoreDriveBackup,
@@ -121,8 +122,8 @@ function render(): void {
     section(i18n.t("sectionWeather"), [
       field(i18n.t("weatherProvider"), makeSelect("weatherProvider", [["open-meteo", "Open-Meteo"]], settings.weather.provider)),
       field(i18n.t("weatherCity"), makeInput("weatherCity", settings.weather.city)),
-      field(i18n.t("weatherLatitude"), makeInput("weatherLatitude", String(settings.weather.latitude), "number")),
-      field(i18n.t("weatherLongitude"), makeInput("weatherLongitude", String(settings.weather.longitude), "number")),
+      field(i18n.t("weatherLatitude"), makeInput("weatherLatitude", String(settings.weather.latitude), "number", "-90")),
+      field(i18n.t("weatherLongitude"), makeInput("weatherLongitude", String(settings.weather.longitude), "number", "-180")),
       field(i18n.t("weatherDisplayMode"), makeSelect("weatherDisplayMode", [
         ["current", i18n.t("weatherModeCurrent")],
         ["day", i18n.t("weatherModeDay")],
@@ -185,12 +186,12 @@ function field(labelText: string, control: HTMLElement, wide = false): HTMLEleme
   return wrapper;
 }
 
-function makeInput(id: string, value: string, type = "text"): HTMLInputElement {
+function makeInput(id: string, value: string, type = "text", min = type === "number" ? "1" : ""): HTMLInputElement {
   const element = document.createElement("input");
   element.id = id;
   element.type = type;
   element.value = value;
-  if (type === "number") element.min = "1";
+  if (min) element.min = min;
   return element;
 }
 
@@ -237,32 +238,24 @@ function backupControls(): HTMLElement {
   file.type = "file";
   file.accept = "application/json,.json";
 
-  const exportButton = document.createElement("button");
-  exportButton.className = "button button--secondary";
-  exportButton.type = "button";
-  exportButton.textContent = i18n.t("exportBackup");
-  exportButton.addEventListener("click", () => void handleExport());
+  const exportButton = actionButton("exportBackup", handleExport);
+  const importButton = actionButton("importBackup", () => handleImport(file.files?.[0]));
+  const chromeSyncUploadButton = actionButton("chromeSyncUpload", handleChromeSyncUpload);
+  const chromeSyncRestoreButton = actionButton("chromeSyncRestore", handleChromeSyncRestore);
+  const driveUploadButton = actionButton("driveBackupUpload", handleDriveUpload);
+  const driveRestoreButton = actionButton("driveBackupRestore", handleDriveRestore);
 
-  const importButton = document.createElement("button");
-  importButton.className = "button button--secondary";
-  importButton.type = "button";
-  importButton.textContent = i18n.t("importBackup");
-  importButton.addEventListener("click", () => void handleImport(file.files?.[0]));
-
-  const driveUploadButton = document.createElement("button");
-  driveUploadButton.className = "button button--secondary";
-  driveUploadButton.type = "button";
-  driveUploadButton.textContent = i18n.t("driveBackupUpload");
-  driveUploadButton.addEventListener("click", () => void handleDriveUpload());
-
-  const driveRestoreButton = document.createElement("button");
-  driveRestoreButton.className = "button button--secondary";
-  driveRestoreButton.type = "button";
-  driveRestoreButton.textContent = i18n.t("driveBackupRestore");
-  driveRestoreButton.addEventListener("click", () => void handleDriveRestore());
-
-  wrapper.append(exportButton, file, importButton, driveUploadButton, driveRestoreButton);
+  wrapper.append(exportButton, file, importButton, chromeSyncUploadButton, chromeSyncRestoreButton, driveUploadButton, driveRestoreButton);
   return wrapper;
+}
+
+function actionButton(labelKey: string, handler: () => Promise<void>): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.className = "button button--secondary";
+  button.type = "button";
+  button.textContent = i18n.t(labelKey);
+  button.addEventListener("click", () => void handler());
+  return button;
 }
 
 function layoutEditor(): HTMLElement {
@@ -400,6 +393,25 @@ async function handleImport(file: File | undefined): Promise<void> {
   await importBackup(JSON.parse(text));
   await reloadSettings();
   statusEl.textContent = i18n.t("backupImported");
+}
+
+async function handleChromeSyncUpload(): Promise<void> {
+  try {
+    await uploadChromeSyncBackup();
+    statusEl.textContent = i18n.t("chromeSyncUploaded");
+  } catch (error) {
+    statusEl.textContent = error instanceof Error ? error.message : String(error);
+  }
+}
+
+async function handleChromeSyncRestore(): Promise<void> {
+  try {
+    await restoreChromeSyncBackup();
+    await reloadSettings();
+    statusEl.textContent = i18n.t("chromeSyncRestored");
+  } catch (error) {
+    statusEl.textContent = error instanceof Error ? error.message : String(error);
+  }
 }
 
 async function handleDriveUpload(): Promise<void> {
