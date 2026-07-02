@@ -124,9 +124,14 @@ async function loadRuntimeState(): Promise<RuntimeState> {
   };
 }
 
+function saveStateNow(): void {
+  window.clearTimeout(saveTimer);
+  void chrome.storage.local.set({ [STATE_KEY]: state });
+}
+
 function queueSaveState(): void {
   window.clearTimeout(saveTimer);
-  saveTimer = window.setTimeout(() => void chrome.storage.local.set({ [STATE_KEY]: state }), 120);
+  saveTimer = window.setTimeout(saveStateNow, 120);
 }
 
 function applyAppearance(): void {
@@ -382,7 +387,7 @@ function startClock(id: ClockId): void {
   }
   clock.running = true;
   clock.startedAt = Date.now();
-  queueSaveState();
+  saveStateNow();
   updateDynamicBlocks();
 }
 
@@ -391,7 +396,7 @@ function pauseClock(id: ClockId): void {
   clock.elapsedMs = clockElapsed(clock);
   clock.running = false;
   clock.startedAt = null;
-  queueSaveState();
+  saveStateNow();
   updateDynamicBlocks();
 }
 
@@ -404,7 +409,7 @@ function resetClock(id: ClockId): void {
   const fresh = defaultClock(id);
   if (id === "pomodoro") fresh.pomodoroPhase = clock.pomodoroPhase ?? "work";
   state.clocks[id] = fresh;
-  queueSaveState();
+  saveStateNow();
   updateDynamicBlocks();
 }
 
@@ -412,7 +417,7 @@ function resetAllClocks(): void {
   for (const id of ["timer", "stopwatch", "pomodoro"] as const) {
     state.clocks[id] = defaultClock(id);
   }
-  queueSaveState();
+  saveStateNow();
   updateDynamicBlocks();
 }
 
@@ -466,7 +471,7 @@ function finishClock(id: ClockId, clock: ClockState): void {
       : settings.timers.pomodoroBreakSeconds);
     clock.elapsedMs = 0;
   }
-  queueSaveState();
+  saveStateNow();
   if (settings.timers.notifyOnComplete) void notify(i18n.t(`${id}Done`));
   void refreshStats();
 }
@@ -601,7 +606,7 @@ async function resolveWeatherLocation(): Promise<WeatherLocation> {
   if (!city) return fallback;
 
   try {
-    const url = new URL("https://geocoding-api.open-meteo.com/v1/search");
+    const url = new URL(settings.weather.geocodingEndpoint);
     url.searchParams.set("name", city);
     url.searchParams.set("count", "1");
     url.searchParams.set("language", i18n.locale);
@@ -623,7 +628,7 @@ async function resolveWeatherLocation(): Promise<WeatherLocation> {
 }
 
 async function fetchWeather(location: WeatherLocation): Promise<WeatherResponse> {
-  const url = new URL("https://api.open-meteo.com/v1/forecast");
+  const url = new URL(settings.weather.forecastEndpoint);
   url.searchParams.set("latitude", String(location.latitude));
   url.searchParams.set("longitude", String(location.longitude));
   url.searchParams.set("current", "temperature_2m,weather_code");
@@ -858,5 +863,6 @@ void (async () => {
   settingsEl.title = i18n.t("openSettings");
   applyAppearance();
   render();
+  window.addEventListener("pagehide", saveStateNow);
   window.setInterval(updateDynamicBlocks, 1000);
 })();
