@@ -1,3 +1,3 @@
 # Start Tab
 
-Start Tab for Chromium-based browsers.
+Start Tab for chromium browsers.
