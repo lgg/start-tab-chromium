@@ -67,7 +67,10 @@ The production extension is built into `build/` and can be loaded as an unpacked
 - Add a recent browser history block.
 - Add a browser pinned items block.
 - Add a Start Tab pinned links block managed inside the extension.
-- Add focus statistics: daily block hits, avoided visits, focus sessions, unblocks, and estimated time saved.
+- Add focus statistics with separate raw block hit counts and deduplicated avoided visit counts.
+- Estimate time saved from avoided visits with per-domain minute values and a default value of 10 minutes per avoided visit.
+- Track Pomodoro/focus session statistics: started sessions, completed sessions, interrupted sessions, and total focus time.
+- Track unblock statistics for sites the user unlocks after the countdown.
 - Prepare release packaging and store submission notes.
 
 ## License
