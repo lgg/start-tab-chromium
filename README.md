@@ -43,6 +43,8 @@ The production extension is built into `build/` and can be loaded as an unpacked
 - Add schedules or focus sessions for time-bounded blocking.
 - Add optional new tab replacement so installing the extension can provide a configurable custom start page.
 - Add configurable start page layout with movable/resizable blocks.
+- Add a drag-and-drop layout editor for positioning, resizing, enabling, disabling, and ordering start page blocks.
+- Add layout profiles or presets, such as work, rest, development, and minimal.
 - Add a date/time block with display mode settings: date and time, date only, or time only, plus flexible date/time formatting.
 - Add an external IP block that detects the public IP address and the country resolved from that IP.
 - Add a links block with configurable rows and columns, per-link icon, URL, and title, block-level font size and font family settings, and optional paged navigation inside the block.
@@ -55,12 +57,17 @@ The production extension is built into `build/` and can be loaded as an unpacked
 - Include built-in background effects such as animated gradient, soft aurora, subtle mesh gradient, slow spotlight, and calm noise texture.
 - Add a settings entry button with gear icon visibility options: always visible or visible only on hover over a configured page area.
 - Add a quick note or scratchpad block.
-- Add a calendar or daily agenda block.
-- Add a weather block.
+- Add a local tasks block for a browser-local task list stored in extension storage.
+- Add a Google Calendar block for connected calendar events.
+- Allow local tasks and Google Calendar to be enabled at the same time as separate blocks.
+- Add a weather block powered by a configurable free public weather provider.
+- Allow manual city selection for the weather block.
+- Add weather display modes: compact current weather, daily forecast, and weekly forecast.
 - Add a command palette or quick actions block.
-- Add recently visited or pinned tabs block.
-- Add focus statistics: daily block hits, avoided visits, and estimated time saved.
-- Add layout profiles or presets, such as work, rest, development, and minimal.
+- Add a recent browser history block.
+- Add a browser pinned items block.
+- Add a Start Tab pinned links block managed inside the extension.
+- Add focus statistics: daily block hits, avoided visits, focus sessions, unblocks, and estimated time saved.
 - Prepare release packaging and store submission notes.
 
 ## License
