@@ -130,8 +130,49 @@ textarea {
 
 .actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.layout-editor {
+  display: grid;
+  gap: 8px;
+}
+
+.layout-row {
+  display: grid;
+  grid-template-columns: 28px 24px minmax(130px, 1fr) minmax(90px, 0.7fr) repeat(4, minmax(58px, 0.45fr));
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.04);
+  padding: 8px;
+}
+
+.layout-row--dragging {
+  opacity: 0.55;
+}
+
+.layout-row__drag {
+  color: var(--muted);
+  cursor: grab;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 800;
+  text-align: center;
+}
+
+.layout-row small {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layout-row input[type="number"] {
+  height: 34px;
+  padding: 0 8px;
 }
 
 .button {
@@ -163,5 +204,22 @@ textarea {
 
   .field {
     margin-bottom: 14px;
+  }
+
+  .actions {
+    justify-content: stretch;
+  }
+
+  .button,
+  .actions input[type="file"] {
+    width: 100%;
+  }
+
+  .layout-row {
+    grid-template-columns: 24px 24px 1fr 1fr;
+  }
+
+  .layout-row input[type="number"] {
+    grid-column: span 2;
   }
 }
