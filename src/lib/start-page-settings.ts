@@ -101,6 +101,8 @@ export interface StartPageSettings {
     latitude: number;
     longitude: number;
     displayMode: WeatherDisplayMode;
+    forecastEndpoint: string;
+    geocodingEndpoint: string;
   };
   timers: {
     timerSeconds: number;
@@ -285,6 +287,8 @@ export const DEFAULT_SETTINGS: StartPageSettings = {
     latitude: 52.3676,
     longitude: 4.9041,
     displayMode: "current",
+    forecastEndpoint: "https://api.open-meteo.com/v1/forecast",
+    geocodingEndpoint: "https://geocoding-api.open-meteo.com/v1/search",
   },
   timers: {
     timerSeconds: 5 * 60,

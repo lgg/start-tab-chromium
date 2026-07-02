@@ -163,6 +163,8 @@
   "weatherLatitude": { "message": "Fallback latitude" },
   "weatherLongitude": { "message": "Fallback longitude" },
   "weatherDisplayMode": { "message": "Display mode" },
+  "weatherForecastEndpoint": { "message": "Forecast endpoint" },
+  "weatherGeocodingEndpoint": { "message": "Geocoding endpoint" },
   "weatherModeCurrent": { "message": "Current" },
   "weatherModeDay": { "message": "Today" },
   "weatherModeWeek": { "message": "Week" },

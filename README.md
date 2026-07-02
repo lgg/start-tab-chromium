@@ -27,7 +27,7 @@ Start Tab is a Manifest V3 extension for Chromium-based browsers. It combines a 
 - Browser sync backup through chunked `chrome.storage.sync`, checksum validation, device metadata, and latest-wins smart sync.
 - Google Drive backup/restore through Drive `appDataFolder` when OAuth is configured.
 - Google Calendar event block when OAuth is configured.
-- Weather block powered by Open-Meteo with current, daily, and weekly display modes.
+- Weather block powered by Open-Meteo with current, daily, and weekly display modes plus configurable forecast and geocoding endpoints.
 - Two build variants: full Start Tab with custom new tab override, and blocker-only without replacing the browser new tab page.
 - Release packaging and store permission notes in `docs/release.md`.
 - Migration from the legacy `blocked` storage key to the current host-only blocklist.

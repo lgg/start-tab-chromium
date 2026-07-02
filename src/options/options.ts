@@ -133,6 +133,8 @@ function render(): void {
         ["day", i18n.t("weatherModeDay")],
         ["week", i18n.t("weatherModeWeek")],
       ], settings.weather.displayMode)),
+      field(i18n.t("weatherForecastEndpoint"), makeInput("weatherForecastEndpoint", settings.weather.forecastEndpoint, "url"), true),
+      field(i18n.t("weatherGeocodingEndpoint"), makeInput("weatherGeocodingEndpoint", settings.weather.geocodingEndpoint, "url"), true),
     ]),
     section(i18n.t("sectionLinks"), [
       field(i18n.t("linkColumns"), makeInput("linkColumns", String(settings.links.columns), "number")),
@@ -600,6 +602,8 @@ formEl.addEventListener("submit", async (event) => {
         latitude: numberValue("weatherLatitude", settings.weather.latitude),
         longitude: numberValue("weatherLongitude", settings.weather.longitude),
         displayMode: select("weatherDisplayMode").value as WeatherDisplayMode,
+        forecastEndpoint: input("weatherForecastEndpoint").value.trim() || settings.weather.forecastEndpoint,
+        geocodingEndpoint: input("weatherGeocodingEndpoint").value.trim() || settings.weather.geocodingEndpoint,
       },
       timers: {
         timerSeconds: numberValue("timerSeconds", settings.timers.timerSeconds),
