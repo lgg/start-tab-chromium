@@ -299,7 +299,7 @@ function layoutEditorRow(block: LayoutBlock, index: number): HTMLElement {
     number.type = "number";
     number.min = "1";
     number.value = String(block[key]);
-    number.title = i18n.t(`layout${key[0].toUpperCase()}${key.slice(1)}`);
+    number.title = i18n.t(`layout${key.charAt(0).toUpperCase()}${key.slice(1)}`);
     number.dataset.field = key;
     row.append(number);
   }
