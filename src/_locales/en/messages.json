@@ -1,6 +1,6 @@
 {
   "appName": { "message": "Start Tab" },
-  "appDescription": { "message": "Start Tab for Chromium-based browsers." },
+  "appDescription": { "message": "Start Tab for Chromium Browsers." },
   "popupTitle": { "message": "Start Tab" },
   "currentSiteLabel": { "message": "Current site:" },
   "blockThisSite": { "message": "Block this site" },
@@ -8,6 +8,10 @@
   "clearBlocklist": { "message": "Clear entire blocklist" },
   "unsupportedPage": { "message": "This page can't be blocked." },
   "somethingWentWrong": { "message": "Something went wrong." },
+  "languageLabel": { "message": "Language" },
+  "languageAuto": { "message": "Auto" },
+  "languageEnglish": { "message": "English" },
+  "languageRussian": { "message": "Russian" },
   "blockedPageTitle": { "message": "Blocked" },
   "unblockThisSite": { "message": "Unblock this site" },
   "cancelUnblocking": { "message": "Cancel unblocking" },
