@@ -86,14 +86,9 @@ Inside the full build, the start page itself is configurable through settings.
 - `docs/release.md` - release checklist and permission notes.
 - `icons/` - extension icons.
 
-## Roadmap
+## Roadmap Status
 
-Implemented roadmap foundation is now in the extension. Remaining follow-up improvements are quality and UX depth rather than missing core scope:
-
-- Add a per-section conflict viewer and manual merge UI for browser sync conflicts beyond the current latest-wins smart sync.
-- Add deeper command block extensibility, such as user-defined actions and keyboard-first command search.
-- Add richer layout editing affordances, such as direct drag resizing on the start page preview.
-- Add production OAuth setup documentation once the final Google Cloud project and store listing are ready.
+The requested roadmap foundation is implemented in the extension. Future work should be tracked as separate scoped issues or PRs rather than as unfinished roadmap items in this README.
 
 ## License
 
