@@ -1,4 +1,5 @@
 import { getLastBlockedUrl, normalizeHost } from "../lib/blocklist.js";
+import { recordUnblockAfterCountdown } from "../lib/focus-stats.js";
 import { loadI18n, type I18n } from "../lib/i18n.js";
 import { sendMessage } from "../lib/messages.js";
 
@@ -73,6 +74,7 @@ async function finishUnblock(): Promise<void> {
     countdownEl.hidden = true;
     return;
   }
+  await recordUnblockAfterCountdown(host);
   location.replace(redirectUrl);
 }
 

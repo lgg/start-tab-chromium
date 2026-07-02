@@ -7,14 +7,15 @@
  */
 
 import {
+  blockedSiteForUrl,
   blockHost,
   clearAll,
-  isBlocked,
   migrateLegacyStorage,
   rememberBlockedNavigation,
   syncRules,
   unblockHost,
 } from "./lib/blocklist.js";
+import { recordBlockedNavigation } from "./lib/focus-stats.js";
 import { isMessage, type Ack, type Message } from "./lib/messages.js";
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -62,9 +63,10 @@ async function handle(message: Message): Promise<void> {
 }
 
 async function rememberIfBlocked(url: string): Promise<void> {
-  if (await isBlocked(url)) {
-    await rememberBlockedNavigation(url);
-  }
+  const host = await blockedSiteForUrl(url);
+  if (!host) return;
+  await rememberBlockedNavigation(url);
+  await recordBlockedNavigation(host);
 }
 
 async function migrateAndSyncRules(): Promise<void> {

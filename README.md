@@ -2,17 +2,31 @@
 
 Start Tab for Chromium Browsers.
 
-Start Tab is a Manifest V3 extension for Chromium-based browsers. Today it works as a focused website blocker: open the popup on any HTTP or HTTPS page, add the current host to the blocklist, and future top-level navigations to that host are redirected to the extension's blocked page.
+Start Tab is a Manifest V3 extension for Chromium-based browsers. It combines a focused website blocker with a configurable custom new tab page.
 
-## Features
+## Current Features
 
 - Block or unblock the current site from the browser action popup.
 - Store the blocklist locally with `chrome.storage.local`.
 - Enforce blocking with Manifest V3 `declarativeNetRequest` dynamic rules.
 - Redirect blocked navigations to an extension-owned blocked page.
-- Delay unblocking from the blocked page with a short countdown.
+- Delay unblocking from the blocked page with a countdown.
+- Track focus statistics: raw block hits, deduplicated avoided visits, estimated time saved, Pomodoro sessions, interrupted focus sessions, and countdown unblocks.
 - Localized UI with English and Russian catalogs.
-- Language setting in the popup: Auto, English, or Russian.
+- Configurable custom new tab page with date/time, IP, links, search, timer, stopwatch, Pomodoro, notes, local tasks, recent history, browser pinned tabs, Start Tab pinned links, Google Calendar, weather, command, and focus stats blocks.
+- First-run layout onboarding for the custom new tab page.
+- Start page appearance settings: font, text color, background color, background image, and built-in background effects.
+- Link grid settings: rows, columns, icon size, font size, and horizontal or vertical paged navigation.
+- Timer, stopwatch, and Pomodoro state persistence across closed and reopened new tabs.
+- Optional notifications for timer and Pomodoro completion.
+- Options page with localization, backup, appearance, search, IP, Google Calendar, weather, links, timers, focus stats, and drag/drop layout controls.
+- Manual JSON export/import for all local extension data.
+- Browser sync backup through chunked `chrome.storage.sync`.
+- Google Drive backup/restore through Drive `appDataFolder` when OAuth is configured.
+- Google Calendar event block when OAuth is configured.
+- Weather block powered by Open-Meteo with current, daily, and weekly display modes.
+- Two build variants: full Start Tab with custom new tab override, and blocker-only without replacing the browser new tab page.
+- Release packaging and store permission notes in `docs/release.md`.
 - Migration from the legacy `blocked` storage key to the current host-only blocklist.
 
 ## Development
@@ -21,40 +35,61 @@ Start Tab is a Manifest V3 extension for Chromium-based browsers. Today it works
 npm ci
 npm run typecheck
 npm run build
+npm run build:blocker-only
 ```
 
-The production extension is built into `build/` and can be loaded as an unpacked Chromium extension.
+The full production extension is built into `build/` and can be loaded as an unpacked Chromium extension. The blocker-only variant is built into `build-blocker-only/` and omits `chrome_url_overrides.newtab` from the generated manifest.
+
+## Google Integrations
+
+Google Calendar and Google Drive sync require a real OAuth client ID in `src/manifest.json`:
+
+```json
+"oauth2": {
+  "client_id": "REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com",
+  "scopes": [
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/drive.appdata"
+  ]
+}
+```
+
+Until the placeholder is replaced, Google-backed blocks and Drive sync show a configuration message instead of requesting auth.
+
+## Chromium New Tab Limitation
+
+Chromium does not provide a runtime API to toggle `chrome_url_overrides.newtab` on and off after an extension is installed. Start Tab supports this as a build-time choice:
+
+- `npm run build` creates the full extension with the custom new tab page enabled.
+- `npm run build:blocker-only` creates the blocker-only extension without replacing the browser new tab page.
+
+Inside the full build, the start page itself is configurable through settings.
 
 ## Project Layout
 
 - `src/manifest.json` - Chromium extension manifest.
-- `src/service-worker.ts` - blocklist mutations, storage migration, and DNR rule sync.
+- `src/service-worker.ts` - blocklist mutations, storage migration, DNR rule sync, and block-hit tracking.
 - `src/lib/blocklist.ts` - shared blocklist and redirect logic.
+- `src/lib/focus-stats.ts` - focus and blocking statistics.
+- `src/lib/backup.ts` - versioned manual backup export/import.
+- `src/lib/chrome-sync.ts` - chunked browser sync backup.
+- `src/lib/google-integration.ts` - Google Calendar and Drive helpers.
 - `src/lib/i18n.ts` - runtime locale detection and message formatting.
 - `src/popup/` - browser action popup.
 - `src/blocked/` - blocked-site interstitial page.
+- `src/newtab/` - custom start page.
+- `src/options/` - settings page.
 - `src/_locales/` - English and Russian localization catalogs.
+- `docs/release.md` - release checklist and permission notes.
 - `icons/` - extension icons.
 
 ## Roadmap
 
-- Add a dedicated options page for richer settings management.
-- Add import/export for blocklists.
-- Add schedules or focus sessions for time-bounded blocking.
-- Add optional new tab replacement so installing the extension can provide a configurable custom start page.
-- Add configurable start page layout with movable/resizable blocks.
-- Add a date/time block with display mode settings: date and time, date only, or time only, plus flexible date/time formatting.
-- Add an external IP block that detects the public IP address and the country resolved from that IP.
-- Add a links block with configurable rows and columns, per-link icon, URL, and title, block-level font size and font family settings, and optional paged navigation inside the block.
-- Support horizontal or vertical swipe/page navigation for multi-page links blocks.
-- Add a search block with a text field and configurable search provider, including Google, Yandex, Perplexity, DuckDuckGo, and other providers.
-- Add timer, stopwatch, and Pomodoro blocks.
-- Persist timer, stopwatch, and Pomodoro state across closed/reopened new tabs and different browser windows.
-- Add optional completion notifications for timer, stopwatch, and Pomodoro blocks.
-- Add visual customization settings: font family, text color, font sizes, solid background color, custom background image, and built-in animated background effects.
-- Include built-in background effects such as animated gradient, soft aurora, subtle mesh gradient, slow spotlight, and calm noise texture.
-- Add a settings entry button with gear icon visibility options: always visible or visible only on hover over a configured page area.
-- Prepare release packaging and store submission notes.
+- Add schema migrations for future backup versions beyond v1.
+- Add sync conflict handling for settings changed on multiple devices, including latest-wins MVP and later per-section merge.
+- Add richer layout presets, such as rest, development, and minimal variants per workflow.
+- Add visual resize handles to the layout editor; the current editor supports ordering, enabling, disabling, and numeric geometry edits.
+- Add richer command palette actions.
 
 ## License
 
