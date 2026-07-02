@@ -7,6 +7,7 @@ import {
 } from "../lib/start-page-settings.js";
 
 const STATE_KEY = "startPageRuntimeState";
+const SWIPE_THRESHOLD = 44;
 
 type ClockId = "timer" | "stopwatch" | "pomodoro";
 type PomodoroPhase = "work" | "break";
@@ -217,7 +218,7 @@ function renderLinks(container: HTMLElement): void {
   container.style.setProperty("--link-font-size", `${settings.links.fontSize}px`);
   container.style.setProperty("--link-icon-size", `${settings.links.iconSize}px`);
   const list = document.createElement("div");
-  list.className = "links";
+  list.className = `links links--${settings.links.pageDirection}`;
   const perPage = Math.max(1, settings.links.columns * settings.links.rows);
   const totalPages = Math.max(1, Math.ceil(settings.links.items.length / perPage));
   const page = Math.min(state.linkPages.links ?? 0, totalPages - 1);
@@ -234,6 +235,7 @@ function renderLinks(container: HTMLElement): void {
     if (title) title.textContent = link.title;
     list.append(anchor);
   }
+  if (totalPages > 1) attachLinkSwipe(list, totalPages);
   container.append(list);
 
   if (totalPages > 1) {
@@ -248,6 +250,22 @@ function renderLinks(container: HTMLElement): void {
     pager.append(previous, label, next);
     container.append(pager);
   }
+}
+
+function attachLinkSwipe(element: HTMLElement, totalPages: number): void {
+  let startX = 0;
+  let startY = 0;
+  element.addEventListener("pointerdown", (event) => {
+    startX = event.clientX;
+    startY = event.clientY;
+  });
+  element.addEventListener("pointerup", (event) => {
+    const deltaX = event.clientX - startX;
+    const deltaY = event.clientY - startY;
+    const primaryDelta = settings.links.pageDirection === "vertical" ? deltaY : deltaX;
+    if (Math.abs(primaryDelta) < SWIPE_THRESHOLD) return;
+    changeLinkPage(totalPages, primaryDelta < 0 ? 1 : -1);
+  });
 }
 
 function changeLinkPage(totalPages: number, delta: number): void {
