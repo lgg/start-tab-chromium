@@ -9,6 +9,7 @@ import {
   getStartPageSettings,
   type LayoutBlock,
   type SearchProvider,
+  type StartLink,
   type StartPageSettings,
 } from "../lib/start-page-settings.js";
 
@@ -27,10 +28,17 @@ interface ClockState {
   focusSessionStarted?: boolean;
 }
 
+interface LocalTask {
+  id: string;
+  title: string;
+  done: boolean;
+}
+
 interface RuntimeState {
   clocks: Record<string, ClockState>;
   notes: Record<string, string>;
   linkPages: Record<string, number>;
+  localTasks: LocalTask[];
 }
 
 const gridEl = requireElement<HTMLDivElement>("grid");
@@ -73,6 +81,7 @@ async function loadRuntimeState(): Promise<RuntimeState> {
     clocks: stored?.clocks ?? {},
     notes: stored?.notes ?? {},
     linkPages: stored?.linkPages ?? {},
+    localTasks: Array.isArray(stored?.localTasks) ? stored.localTasks : [],
   };
 }
 
@@ -149,8 +158,11 @@ function renderBlock(block: LayoutBlock, element: HTMLElement): void {
     case "note":
       renderNote(block.id, element);
       break;
-    case "agenda":
-      element.append(el("p", "placeholder", i18n.t("agendaPlaceholder")));
+    case "localTasks":
+      renderLocalTasks(element);
+      break;
+    case "googleCalendar":
+      renderGoogleCalendar(element);
       break;
     case "weather":
       element.append(el("p", "placeholder", i18n.t("weatherPlaceholder")));
@@ -159,7 +171,13 @@ function renderBlock(block: LayoutBlock, element: HTMLElement): void {
       renderCommands(element);
       break;
     case "recent":
-      element.append(el("p", "placeholder", i18n.t("recentPlaceholder")));
+      void renderRecent(element);
+      break;
+    case "browserPinned":
+      void renderBrowserPinned(element);
+      break;
+    case "startPinned":
+      renderStartPinned(element);
       break;
     case "stats":
       void renderStats(element);
@@ -231,18 +249,7 @@ function renderLinks(container: HTMLElement): void {
   const totalPages = Math.max(1, Math.ceil(settings.links.items.length / perPage));
   const page = Math.min(state.linkPages.links ?? 0, totalPages - 1);
   state.linkPages.links = page;
-  const items = settings.links.items.slice(page * perPage, (page + 1) * perPage);
-  for (const link of items) {
-    const anchor = document.createElement("a");
-    anchor.className = "link-tile";
-    anchor.href = link.url;
-    anchor.innerHTML = `<span class="link-tile__icon"></span><span class="link-tile__title"></span>`;
-    const icon = anchor.querySelector(".link-tile__icon");
-    const title = anchor.querySelector(".link-tile__title");
-    if (icon) icon.textContent = link.icon;
-    if (title) title.textContent = link.title;
-    list.append(anchor);
-  }
+  appendLinkTiles(list, settings.links.items.slice(page * perPage, (page + 1) * perPage));
   if (totalPages > 1) attachLinkSwipe(list, totalPages);
   container.append(list);
 
@@ -257,6 +264,20 @@ function renderLinks(container: HTMLElement): void {
     next.addEventListener("click", () => changeLinkPage(totalPages, 1));
     pager.append(previous, label, next);
     container.append(pager);
+  }
+}
+
+function appendLinkTiles(container: HTMLElement, links: StartLink[]): void {
+  for (const link of links) {
+    const anchor = document.createElement("a");
+    anchor.className = "link-tile";
+    anchor.href = link.url;
+    anchor.innerHTML = `<span class="link-tile__icon"></span><span class="link-tile__title"></span>`;
+    const icon = anchor.querySelector(".link-tile__icon");
+    const title = anchor.querySelector(".link-tile__title");
+    if (icon) icon.textContent = link.icon;
+    if (title) title.textContent = link.title;
+    container.append(anchor);
   }
 }
 
@@ -422,6 +443,106 @@ function renderNote(id: string, container: HTMLElement): void {
     queueSaveState();
   });
   container.append(textarea);
+}
+
+function renderLocalTasks(container: HTMLElement): void {
+  const form = document.createElement("form");
+  form.className = "inline-form";
+  const input = el("input", "input") as HTMLInputElement;
+  input.placeholder = i18n.t("localTaskPlaceholder");
+  const add = el("button", "button", i18n.t("addTask")) as HTMLButtonElement;
+  add.type = "submit";
+  form.append(input, add);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const title = input.value.trim();
+    if (!title) return;
+    state.localTasks.unshift({ id: taskId(), title, done: false });
+    queueSaveState();
+    render();
+  });
+
+  const list = el("div", "task-list");
+  for (const task of state.localTasks.slice(0, 8)) {
+    const label = document.createElement("label");
+    label.className = "task-item";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = task.done;
+    checkbox.addEventListener("change", () => {
+      task.done = checkbox.checked;
+      queueSaveState();
+    });
+    const title = el("span", "task-item__title", task.title);
+    const remove = el("button", "button button--tiny", "×") as HTMLButtonElement;
+    remove.type = "button";
+    remove.title = i18n.t("removeTask");
+    remove.addEventListener("click", () => {
+      state.localTasks = state.localTasks.filter((item) => item.id !== task.id);
+      queueSaveState();
+      render();
+    });
+    label.append(checkbox, title, remove);
+    list.append(label);
+  }
+
+  container.append(form, list);
+}
+
+function taskId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function renderGoogleCalendar(container: HTMLElement): void {
+  container.append(el("p", "placeholder", i18n.t("googleCalendarPlaceholder")));
+  const button = el("button", "button", i18n.t("openSettings")) as HTMLButtonElement;
+  button.type = "button";
+  button.addEventListener("click", () => void chrome.runtime.openOptionsPage());
+  container.append(button);
+}
+
+async function renderRecent(container: HTMLElement): Promise<void> {
+  const list = el("div", "compact-list", i18n.t("recentLoading"));
+  container.append(list);
+  try {
+    const results = await chrome.history.search({ text: "", maxResults: 6, startTime: Date.now() - 1000 * 60 * 60 * 24 * 14 });
+    renderUrlItems(list, results.map((item) => ({ title: item.title || item.url || "", url: item.url || "" })));
+  } catch {
+    list.textContent = i18n.t("recentUnavailable");
+  }
+}
+
+async function renderBrowserPinned(container: HTMLElement): Promise<void> {
+  const list = el("div", "compact-list", i18n.t("browserPinnedLoading"));
+  container.append(list);
+  try {
+    const tabs = await chrome.tabs.query({ pinned: true });
+    renderUrlItems(list, tabs.map((tab) => ({ title: tab.title || tab.url || "", url: tab.url || "" })));
+  } catch {
+    list.textContent = i18n.t("browserPinnedUnavailable");
+  }
+}
+
+function renderStartPinned(container: HTMLElement): void {
+  const list = el("div", "compact-list");
+  renderUrlItems(list, settings.startPinned.items);
+  container.append(list);
+}
+
+function renderUrlItems(container: HTMLElement, items: Array<{ title: string; url: string }>): void {
+  container.textContent = "";
+  const valid = items.filter((item) => item.url.startsWith("http://") || item.url.startsWith("https://"));
+  if (valid.length === 0) {
+    container.textContent = i18n.t("emptyList");
+    return;
+  }
+  for (const item of valid) {
+    const anchor = document.createElement("a");
+    anchor.className = "compact-list__item";
+    anchor.href = item.url;
+    anchor.textContent = item.title || item.url;
+    container.append(anchor);
+  }
 }
 
 function renderCommands(container: HTMLElement): void {
