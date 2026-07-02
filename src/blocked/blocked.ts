@@ -1,4 +1,5 @@
 import { getLastBlockedUrl, normalizeHost } from "../lib/blocklist.js";
+import { loadI18n, type I18n } from "../lib/i18n.js";
 import { sendMessage } from "../lib/messages.js";
 
 const WAIT_SECONDS = 10;
@@ -12,33 +13,24 @@ const cancelEl = document.getElementById("cancel") as HTMLButtonElement;
 
 const host = normalizeHost(new URLSearchParams(location.search).get("site") ?? "");
 let interval: number | undefined;
-
-function msg(key: string): string {
-  return chrome.i18n.getMessage(key) || key;
-}
-
-function fill(text: string, values: Record<string, string | number>): string {
-  let result = text;
-  for (const [key, value] of Object.entries(values)) {
-    result = result.split("{" + key + "}").join(String(value));
-  }
-  return result;
-}
+let i18n: I18n;
 
 function unit(value: number): string {
-  const lang = chrome.i18n.getUILanguage().toLowerCase().split("-")[0];
-  if (lang !== "ru") return msg(value === 1 ? "secondOne" : "secondMany");
+  if (i18n.locale !== "ru") return i18n.t(value === 1 ? "secondOne" : "secondMany");
+
   const mod10 = value % 10;
   const mod100 = value % 100;
-  if (mod10 === 1 && mod100 !== 11) return msg("secondOne");
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return msg("secondFew");
-  return msg("secondMany");
+  if (mod10 === 1 && mod100 !== 11) return i18n.t("secondOne");
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return i18n.t("secondFew");
+  return i18n.t("secondMany");
 }
 
 function renderMessage(): void {
-  const phrases = msg("motivationPhrases").split("|").filter(Boolean);
-  messageEl.textContent = phrases[Math.floor(Math.random() * phrases.length)] ?? msg("blockedUnknownSiteMessage");
-  siteEl.textContent = host ? fill(msg("blockedSiteMessage"), { host }) : msg("blockedUnknownSiteMessage");
+  const phrases = i18n.list("motivationPhrases");
+  messageEl.textContent = phrases[Math.floor(Math.random() * phrases.length)] ?? i18n.t("blockedUnknownSiteMessage");
+  siteEl.textContent = host
+    ? i18n.t("blockedSiteMessage", { host })
+    : i18n.t("blockedUnknownSiteMessage");
 }
 
 function startCountdown(): void {
@@ -46,8 +38,9 @@ function startCountdown(): void {
   actionsEl.hidden = true;
   countdownEl.hidden = false;
   let remaining = WAIT_SECONDS;
+
   const tick = (): void => {
-    countdownTextEl.textContent = fill(msg("unblockingCountdown"), {
+    countdownTextEl.textContent = i18n.t("unblockingCountdown", {
       host,
       remaining,
       unit: unit(remaining),
@@ -59,6 +52,7 @@ function startCountdown(): void {
     }
     remaining -= 1;
   };
+
   tick();
   interval = window.setInterval(tick, 1000);
 }
@@ -70,11 +64,11 @@ function cancelCountdown(): void {
 }
 
 async function finishUnblock(): Promise<void> {
-  countdownTextEl.textContent = fill(msg("unblockingNow"), { host });
+  countdownTextEl.textContent = i18n.t("unblockingNow", { host });
   const redirectUrl = (await getLastBlockedUrl(host)) ?? `https://${host}/`;
   const ack = await sendMessage({ type: "unblock", host });
   if (!ack.ok) {
-    countdownTextEl.textContent = msg("failedToUnblock");
+    countdownTextEl.textContent = i18n.t("failedToUnblock");
     actionsEl.hidden = false;
     countdownEl.hidden = true;
     return;
@@ -82,9 +76,14 @@ async function finishUnblock(): Promise<void> {
   location.replace(redirectUrl);
 }
 
-document.title = msg("blockedPageTitle");
-unblockEl.textContent = msg("unblockThisSite");
-cancelEl.textContent = msg("cancelUnblocking");
-unblockEl.addEventListener("click", startCountdown);
-cancelEl.addEventListener("click", cancelCountdown);
-renderMessage();
+async function init(): Promise<void> {
+  i18n = await loadI18n();
+  document.title = i18n.t("blockedPageTitle");
+  unblockEl.textContent = i18n.t("unblockThisSite");
+  cancelEl.textContent = i18n.t("cancelUnblocking");
+  unblockEl.addEventListener("click", startCountdown);
+  cancelEl.addEventListener("click", cancelCountdown);
+  renderMessage();
+}
+
+void init();
