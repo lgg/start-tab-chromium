@@ -33,7 +33,7 @@ interface DriveListResponse {
 }
 
 function googleConfigReady(): boolean {
-  const manifest = chrome.runtime.getManifest() as chrome.runtime.Manifest & { oauth2?: { client_id?: string } };
+  const manifest = chrome.runtime.getManifest() as { oauth2?: { client_id?: string } };
   const clientId = manifest.oauth2?.client_id;
   return Boolean(clientId && !clientId.includes("REPLACE") && !clientId.includes("TODO"));
 }
@@ -54,12 +54,12 @@ async function getToken(interactive: boolean): Promise<string> {
 
 async function googleFetch<T>(url: string, init: RequestInit = {}, interactive = false): Promise<T> {
   const token = await getToken(interactive);
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+
   const response = await fetch(url, {
     ...init,
-    headers: {
-      ...(init.headers ?? {}),
-      Authorization: `Bearer ${token}`,
-    },
+    headers,
   });
   if (!response.ok) throw new Error(`Google API request failed: ${response.status}`);
   return (await response.json()) as T;
