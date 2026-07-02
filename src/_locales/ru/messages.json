@@ -163,6 +163,8 @@
   "weatherLatitude": { "message": "Запасная широта" },
   "weatherLongitude": { "message": "Запасная долгота" },
   "weatherDisplayMode": { "message": "Формат блока" },
+  "weatherForecastEndpoint": { "message": "Endpoint прогноза" },
+  "weatherGeocodingEndpoint": { "message": "Endpoint геокодинга" },
   "weatherModeCurrent": { "message": "Сейчас" },
   "weatherModeDay": { "message": "На день" },
   "weatherModeWeek": { "message": "На неделю" },
