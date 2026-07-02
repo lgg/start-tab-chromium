@@ -36,12 +36,16 @@ export async function setLocalePreference(preference: LocalePreference): Promise
   await chrome.storage.local.set({ [LOCALE_OVERRIDE_KEY]: preference });
 }
 
+function browserLanguages(): string[] {
+  const languages = Array.isArray(navigator.languages) ? navigator.languages : [];
+  return languages.length > 0 ? [...languages] : [navigator.language].filter(Boolean);
+}
+
 async function detectLocale(): Promise<SupportedLocale> {
   const override = await readLocaleOverride();
   if (override) return override;
 
-  const languages = navigator.languages.length > 0 ? navigator.languages : [navigator.language];
-  for (const language of languages) {
+  for (const language of browserLanguages()) {
     const supported = normalizeLocale(language);
     if (supported) return supported;
   }
