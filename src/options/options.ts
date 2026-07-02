@@ -1,5 +1,10 @@
 import { backupFileName, exportBackup, importBackup } from "../lib/backup.js";
 import {
+  isGoogleIntegrationConfigured,
+  restoreDriveBackup,
+  uploadDriveBackup,
+} from "../lib/google-integration.js";
+import {
   getLocalePreference,
   loadI18n,
   setLocalePreference,
@@ -18,6 +23,7 @@ import {
   type SettingsButtonVisibility,
   type StartLink,
   type StartPageSettings,
+  type WeatherDisplayMode,
 } from "../lib/start-page-settings.js";
 
 const titleEl = requireElement<HTMLHeadingElement>("title");
@@ -108,6 +114,21 @@ function render(): void {
       )),
       field(i18n.t("ipEndpoint"), makeInput("ipEndpoint", settings.ip.endpoint, "url"), true),
     ]),
+    section(i18n.t("sectionGoogleCalendar"), [
+      field(i18n.t("calendarId"), makeInput("calendarId", settings.googleCalendar.calendarId)),
+      field(i18n.t("calendarMaxResults"), makeInput("calendarMaxResults", String(settings.googleCalendar.maxResults), "number")),
+    ]),
+    section(i18n.t("sectionWeather"), [
+      field(i18n.t("weatherProvider"), makeSelect("weatherProvider", [["open-meteo", "Open-Meteo"]], settings.weather.provider)),
+      field(i18n.t("weatherCity"), makeInput("weatherCity", settings.weather.city)),
+      field(i18n.t("weatherLatitude"), makeInput("weatherLatitude", String(settings.weather.latitude), "number")),
+      field(i18n.t("weatherLongitude"), makeInput("weatherLongitude", String(settings.weather.longitude), "number")),
+      field(i18n.t("weatherDisplayMode"), makeSelect("weatherDisplayMode", [
+        ["current", i18n.t("weatherModeCurrent")],
+        ["day", i18n.t("weatherModeDay")],
+        ["week", i18n.t("weatherModeWeek")],
+      ], settings.weather.displayMode)),
+    ]),
     section(i18n.t("sectionLinks"), [
       field(i18n.t("linkColumns"), makeInput("linkColumns", String(settings.links.columns), "number")),
       field(i18n.t("linkRows"), makeInput("linkRows", String(settings.links.rows), "number")),
@@ -136,6 +157,7 @@ function render(): void {
     section(i18n.t("sectionLayout"), [
       field(i18n.t("layoutColumns"), makeInput("layoutColumns", String(settings.layout.columns), "number")),
       field(i18n.t("layoutProfile"), makeInput("layoutProfile", settings.layout.profile)),
+      layoutEditor(),
       field(i18n.t("layoutBlocksJson"), makeTextarea("layoutBlocksJson", JSON.stringify(settings.layout.blocks, null, 2)), true),
     ]),
     actions(),
@@ -227,8 +249,116 @@ function backupControls(): HTMLElement {
   importButton.textContent = i18n.t("importBackup");
   importButton.addEventListener("click", () => void handleImport(file.files?.[0]));
 
-  wrapper.append(exportButton, file, importButton);
+  const driveUploadButton = document.createElement("button");
+  driveUploadButton.className = "button button--secondary";
+  driveUploadButton.type = "button";
+  driveUploadButton.textContent = i18n.t("driveBackupUpload");
+  driveUploadButton.addEventListener("click", () => void handleDriveUpload());
+
+  const driveRestoreButton = document.createElement("button");
+  driveRestoreButton.className = "button button--secondary";
+  driveRestoreButton.type = "button";
+  driveRestoreButton.textContent = i18n.t("driveBackupRestore");
+  driveRestoreButton.addEventListener("click", () => void handleDriveRestore());
+
+  wrapper.append(exportButton, file, importButton, driveUploadButton, driveRestoreButton);
   return wrapper;
+}
+
+function layoutEditor(): HTMLElement {
+  const wrapper = document.createElement("div");
+  wrapper.className = "layout-editor field--wide";
+  wrapper.id = "layoutEditor";
+
+  for (let index = 0; index < settings.layout.blocks.length; index += 1) {
+    const block = settings.layout.blocks[index];
+    if (!block) continue;
+    wrapper.append(layoutEditorRow(block, index));
+  }
+
+  return wrapper;
+}
+
+function layoutEditorRow(block: LayoutBlock, index: number): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "layout-row";
+  row.draggable = true;
+  row.dataset.index = String(index);
+
+  const drag = document.createElement("span");
+  drag.className = "layout-row__drag";
+  drag.textContent = "::";
+
+  const enabled = document.createElement("input");
+  enabled.type = "checkbox";
+  enabled.checked = block.enabled;
+  enabled.dataset.field = "enabled";
+
+  const title = document.createElement("strong");
+  title.textContent = block.title;
+
+  const type = document.createElement("small");
+  type.textContent = block.type;
+
+  row.append(drag, enabled, title, type);
+  for (const key of ["column", "row", "width", "height"] as const) {
+    const number = document.createElement("input");
+    number.type = "number";
+    number.min = "1";
+    number.value = String(block[key]);
+    number.title = i18n.t(`layout${key[0].toUpperCase()}${key.slice(1)}`);
+    number.dataset.field = key;
+    row.append(number);
+  }
+
+  row.addEventListener("dragstart", () => row.classList.add("layout-row--dragging"));
+  row.addEventListener("dragend", () => {
+    row.classList.remove("layout-row--dragging");
+    syncLayoutJsonFromEditor();
+  });
+  row.addEventListener("dragover", (event) => event.preventDefault());
+  row.addEventListener("drop", (event) => {
+    event.preventDefault();
+    const editor = requireElement<HTMLDivElement>("layoutEditor");
+    const dragged = editor.querySelector<HTMLElement>(".layout-row--dragging");
+    if (!dragged || dragged === row) return;
+    editor.insertBefore(dragged, row);
+    syncLayoutJsonFromEditor();
+  });
+  row.addEventListener("input", syncLayoutJsonFromEditor);
+  row.addEventListener("change", syncLayoutJsonFromEditor);
+
+  return row;
+}
+
+function syncLayoutJsonFromEditor(): void {
+  const target = document.getElementById("layoutBlocksJson") as HTMLTextAreaElement | null;
+  const editor = document.getElementById("layoutEditor");
+  if (!target || !editor) return;
+  const blocks = readLayoutBlocksFromEditor(editor);
+  target.value = JSON.stringify(blocks, null, 2);
+}
+
+function readLayoutBlocksFromEditor(editor: HTMLElement): LayoutBlock[] {
+  const blocks: LayoutBlock[] = [];
+  for (const row of Array.from(editor.querySelectorAll<HTMLElement>(".layout-row"))) {
+    const original = settings.layout.blocks[Number(row.dataset.index)];
+    if (!original) continue;
+    blocks.push({
+      ...original,
+      enabled: row.querySelector<HTMLInputElement>('[data-field="enabled"]')?.checked ?? original.enabled,
+      column: fieldNumber(row, "column", original.column),
+      row: fieldNumber(row, "row", original.row),
+      width: fieldNumber(row, "width", original.width),
+      height: fieldNumber(row, "height", original.height),
+    });
+  }
+  return blocks;
+}
+
+function fieldNumber(row: HTMLElement, fieldName: string, fallback: number): number {
+  const value = Number(row.querySelector<HTMLInputElement>(`[data-field="${fieldName}"]`)?.value);
+  return Number.isFinite(value) ? Math.max(1, value) : fallback;
 }
 
 function actions(): HTMLElement {
@@ -268,14 +398,46 @@ async function handleImport(file: File | undefined): Promise<void> {
   }
   const text = await file.text();
   await importBackup(JSON.parse(text));
+  await reloadSettings();
+  statusEl.textContent = i18n.t("backupImported");
+}
+
+async function handleDriveUpload(): Promise<void> {
+  if (!isGoogleIntegrationConfigured()) {
+    statusEl.textContent = i18n.t("googleNotConfigured");
+    return;
+  }
+  try {
+    await uploadDriveBackup();
+    statusEl.textContent = i18n.t("driveBackupUploaded");
+  } catch (error) {
+    statusEl.textContent = error instanceof Error ? error.message : String(error);
+  }
+}
+
+async function handleDriveRestore(): Promise<void> {
+  if (!isGoogleIntegrationConfigured()) {
+    statusEl.textContent = i18n.t("googleNotConfigured");
+    return;
+  }
+  try {
+    await restoreDriveBackup();
+    await reloadSettings();
+    statusEl.textContent = i18n.t("driveBackupRestored");
+  } catch (error) {
+    statusEl.textContent = error instanceof Error ? error.message : String(error);
+  }
+}
+
+async function reloadSettings(): Promise<void> {
   settings = await getStartPageSettings();
   localePreference = await getLocalePreference();
   render();
-  statusEl.textContent = i18n.t("backupImported");
 }
 
 formEl.addEventListener("submit", async (event) => {
   event.preventDefault();
+  syncLayoutJsonFromEditor();
   try {
     const next: StartPageSettings = {
       ...settings,
@@ -315,6 +477,17 @@ formEl.addEventListener("submit", async (event) => {
       search: {
         ...settings.search,
         provider: select("searchProvider").value as SearchProviderId,
+      },
+      googleCalendar: {
+        calendarId: input("calendarId").value.trim() || settings.googleCalendar.calendarId,
+        maxResults: numberValue("calendarMaxResults", settings.googleCalendar.maxResults),
+      },
+      weather: {
+        provider: "open-meteo",
+        city: input("weatherCity").value.trim() || settings.weather.city,
+        latitude: numberValue("weatherLatitude", settings.weather.latitude),
+        longitude: numberValue("weatherLongitude", settings.weather.longitude),
+        displayMode: select("weatherDisplayMode").value as WeatherDisplayMode,
       },
       timers: {
         timerSeconds: numberValue("timerSeconds", settings.timers.timerSeconds),
