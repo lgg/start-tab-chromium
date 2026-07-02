@@ -4,6 +4,11 @@ import {
   recordFocusSessionInterrupted,
   recordFocusSessionStarted,
 } from "../lib/focus-stats.js";
+import {
+  isGoogleIntegrationConfigured,
+  listCalendarEvents,
+  type GoogleCalendarEvent,
+} from "../lib/google-integration.js";
 import { loadI18n, type I18n } from "../lib/i18n.js";
 import {
   getStartPageSettings,
@@ -39,6 +44,38 @@ interface RuntimeState {
   notes: Record<string, string>;
   linkPages: Record<string, number>;
   localTasks: LocalTask[];
+}
+
+interface WeatherLocation {
+  name: string;
+  country: string;
+  latitude: number;
+  longitude: number;
+}
+
+interface GeocodingResponse {
+  results?: Array<{
+    name?: string;
+    country?: string;
+    latitude?: number;
+    longitude?: number;
+  }>;
+}
+
+interface WeatherResponse {
+  current?: {
+    temperature_2m?: number;
+    weather_code?: number;
+  };
+  current_units?: {
+    temperature_2m?: string;
+  };
+  daily?: {
+    time?: string[];
+    temperature_2m_max?: number[];
+    temperature_2m_min?: number[];
+    weather_code?: number[];
+  };
 }
 
 const gridEl = requireElement<HTMLDivElement>("grid");
@@ -162,10 +199,10 @@ function renderBlock(block: LayoutBlock, element: HTMLElement): void {
       renderLocalTasks(element);
       break;
     case "googleCalendar":
-      renderGoogleCalendar(element);
+      void renderGoogleCalendar(element);
       break;
     case "weather":
-      element.append(el("p", "placeholder", i18n.t("weatherPlaceholder")));
+      void renderWeather(element);
       break;
     case "commands":
       renderCommands(element);
@@ -493,12 +530,169 @@ function taskId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function renderGoogleCalendar(container: HTMLElement): void {
-  container.append(el("p", "placeholder", i18n.t("googleCalendarPlaceholder")));
+async function renderGoogleCalendar(container: HTMLElement): Promise<void> {
+  const list = el("div", "compact-list", i18n.t("googleCalendarLoading"));
+  container.append(list);
+
+  if (!isGoogleIntegrationConfigured()) {
+    list.textContent = i18n.t("googleCalendarNotConfigured");
+    appendSettingsButton(container);
+    return;
+  }
+
+  try {
+    const events = await listCalendarEvents(settings.googleCalendar.calendarId, settings.googleCalendar.maxResults);
+    renderCalendarEvents(list, events);
+  } catch {
+    list.textContent = i18n.t("googleCalendarUnavailable");
+    appendSettingsButton(container);
+  }
+}
+
+function renderCalendarEvents(container: HTMLElement, events: GoogleCalendarEvent[]): void {
+  container.textContent = "";
+  if (events.length === 0) {
+    container.textContent = i18n.t("emptyList");
+    return;
+  }
+  for (const event of events) {
+    const item = el("div", "compact-list__item", `${formatEventTime(event.start)} · ${event.title}`);
+    container.append(item);
+  }
+}
+
+function appendSettingsButton(container: HTMLElement): void {
   const button = el("button", "button", i18n.t("openSettings")) as HTMLButtonElement;
   button.type = "button";
   button.addEventListener("click", () => void chrome.runtime.openOptionsPage());
   container.append(button);
+}
+
+async function renderWeather(container: HTMLElement): Promise<void> {
+  const target = el("div", "compact-list", i18n.t("weatherLoading"));
+  container.append(target);
+  try {
+    const location = await resolveWeatherLocation();
+    const forecast = await fetchWeather(location);
+    renderWeatherForecast(target, location, forecast);
+  } catch {
+    target.textContent = i18n.t("weatherUnavailable");
+  }
+}
+
+async function resolveWeatherLocation(): Promise<WeatherLocation> {
+  const fallback = {
+    name: settings.weather.city,
+    country: "",
+    latitude: settings.weather.latitude,
+    longitude: settings.weather.longitude,
+  };
+  const city = settings.weather.city.trim();
+  if (!city) return fallback;
+
+  try {
+    const url = new URL("https://geocoding-api.open-meteo.com/v1/search");
+    url.searchParams.set("name", city);
+    url.searchParams.set("count", "1");
+    url.searchParams.set("language", i18n.locale);
+    url.searchParams.set("format", "json");
+    const response = await fetch(url.toString(), { cache: "force-cache" });
+    if (!response.ok) return fallback;
+    const payload = await response.json() as GeocodingResponse;
+    const result = payload.results?.[0];
+    if (typeof result?.latitude !== "number" || typeof result.longitude !== "number") return fallback;
+    return {
+      name: result.name ?? city,
+      country: result.country ?? "",
+      latitude: result.latitude,
+      longitude: result.longitude,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+async function fetchWeather(location: WeatherLocation): Promise<WeatherResponse> {
+  const url = new URL("https://api.open-meteo.com/v1/forecast");
+  url.searchParams.set("latitude", String(location.latitude));
+  url.searchParams.set("longitude", String(location.longitude));
+  url.searchParams.set("current", "temperature_2m,weather_code");
+  url.searchParams.set("daily", "temperature_2m_max,temperature_2m_min,weather_code");
+  url.searchParams.set("timezone", "auto");
+  url.searchParams.set("forecast_days", "7");
+  const response = await fetch(url.toString(), { cache: "no-store" });
+  if (!response.ok) throw new Error(`Weather request failed: ${response.status}`);
+  return (await response.json()) as WeatherResponse;
+}
+
+function renderWeatherForecast(container: HTMLElement, location: WeatherLocation, forecast: WeatherResponse): void {
+  container.textContent = "";
+  const title = location.country ? `${location.name}, ${location.country}` : location.name;
+  container.append(el("div", "compact-list__item", title));
+
+  const unit = forecast.current_units?.temperature_2m ?? "°C";
+  const currentTemp = forecast.current?.temperature_2m;
+  const currentCode = forecast.current?.weather_code;
+  if (typeof currentTemp === "number") {
+    container.append(el("div", "compact-list__item", i18n.t("weatherCurrent", {
+      temp: Math.round(currentTemp),
+      unit,
+      summary: weatherSummary(currentCode),
+    })));
+  }
+
+  if (settings.weather.displayMode === "current") return;
+
+  const dayCount = settings.weather.displayMode === "day" ? 1 : 7;
+  const daily = forecast.daily;
+  const days = daily?.time ?? [];
+  const max = daily?.temperature_2m_max ?? [];
+  const min = daily?.temperature_2m_min ?? [];
+  const codes = daily?.weather_code ?? [];
+
+  for (let index = 0; index < Math.min(dayCount, days.length); index += 1) {
+    const day = days[index];
+    if (!day) continue;
+    const maxTemp = max[index];
+    const minTemp = min[index];
+    const code = codes[index];
+    if (typeof maxTemp !== "number" || typeof minTemp !== "number") continue;
+    container.append(el("div", "compact-list__item", i18n.t("weatherDay", {
+      day: formatShortDate(day),
+      max: Math.round(maxTemp),
+      min: Math.round(minTemp),
+      unit,
+      summary: weatherSummary(code),
+    })));
+  }
+}
+
+function weatherSummary(code: number | undefined): string {
+  if (code === 0) return i18n.t("weatherClear");
+  if (code === 1 || code === 2 || code === 3) return i18n.t("weatherCloudy");
+  if (code === 45 || code === 48) return i18n.t("weatherFog");
+  if (code !== undefined && code >= 51 && code <= 67) return i18n.t("weatherRain");
+  if (code !== undefined && code >= 71 && code <= 77) return i18n.t("weatherSnow");
+  if (code !== undefined && code >= 80 && code <= 82) return i18n.t("weatherShowers");
+  if (code !== undefined && code >= 95) return i18n.t("weatherThunderstorm");
+  return i18n.t("weatherUnknown");
+}
+
+function formatShortDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(i18n.locale, { weekday: "short", day: "numeric" }).format(date);
+}
+
+function formatEventTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || i18n.t("calendarAllDay");
+  return new Intl.DateTimeFormat(i18n.locale, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }
 
 async function renderRecent(container: HTMLElement): Promise<void> {
