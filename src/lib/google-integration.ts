@@ -32,6 +32,8 @@ interface DriveListResponse {
   files?: DriveFile[];
 }
 
+type AuthTokenResponse = string | { token?: string };
+
 function googleConfigReady(): boolean {
   const manifest = chrome.runtime.getManifest() as { oauth2?: { client_id?: string } };
   const clientId = manifest.oauth2?.client_id;
@@ -46,9 +48,9 @@ async function getToken(interactive: boolean): Promise<string> {
   if (!googleConfigReady()) {
     throw new Error("Google OAuth client_id is not configured in manifest.json");
   }
-  const response = await chrome.identity.getAuthToken({ interactive });
+  const response = await chrome.identity.getAuthToken({ interactive }) as AuthTokenResponse;
   if (typeof response === "string") return response;
-  if (response?.token) return response.token;
+  if (response.token) return response.token;
   throw new Error("Unable to get Google OAuth token");
 }
 
