@@ -6,16 +6,19 @@
 npm ci
 npm run typecheck
 npm run build
+npm run build:blocker-only
 ```
 
-Load `build/` as an unpacked Chromium extension for manual QA.
+Load `build/` as the full Start Tab extension with the custom new tab page enabled. Load `build-blocker-only/` when the blocker should not replace the browser new tab page.
 
 ## Manual QA Checklist
 
 - Popup can block, unblock, and clear the blocklist.
 - Blocked page shows a countdown and returns to the last blocked URL after unblock.
 - Focus stats update after blocked navigations and countdown unblocks.
-- New tab renders enabled blocks without console errors.
+- Full build new tab renders enabled blocks without console errors.
+- Full build first-run onboarding can apply a layout preset or be skipped.
+- Blocker-only build manifest does not contain `chrome_url_overrides.newtab`.
 - Timer, stopwatch, and Pomodoro state survives closing and reopening a new tab.
 - Options page saves appearance, links, weather, calendar, timers, stats, and layout settings.
 - JSON export/import restores blocklist, settings, runtime state, locale, and stats.
@@ -35,4 +38,4 @@ Load `build/` as an unpacked Chromium extension for manual QA.
   - `identity`: optional Google Calendar and Google Drive integrations.
   - `<all_urls>`: block selected sites and call configured public IP/weather endpoints.
 - Google OAuth is optional. The extension must ship with a real Chrome extension OAuth client ID before Google-backed features can be used.
-- Chromium new tab override is static. A blocker-only release should be shipped as a separate build without `chrome_url_overrides.newtab`.
+- Chromium new tab override is static. Ship the blocker-only build when Start Tab should not replace the browser new tab page.
