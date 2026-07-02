@@ -7,10 +7,9 @@
  */
 
 import {
+  blockedSiteForUrl,
   blockHost,
   clearAll,
-  hostFromUrl,
-  isBlocked,
   migrateLegacyStorage,
   rememberBlockedNavigation,
   syncRules,
@@ -64,10 +63,10 @@ async function handle(message: Message): Promise<void> {
 }
 
 async function rememberIfBlocked(url: string): Promise<void> {
-  if (!(await isBlocked(url))) return;
-  const host = hostFromUrl(url);
+  const host = await blockedSiteForUrl(url);
+  if (!host) return;
   await rememberBlockedNavigation(url);
-  if (host) await recordBlockedNavigation(host);
+  await recordBlockedNavigation(host);
 }
 
 async function migrateAndSyncRules(): Promise<void> {
