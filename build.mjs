@@ -16,6 +16,7 @@ const entryPoints = {
   popup: "src/popup/popup.ts",
   blocked: "src/blocked/blocked.ts",
   newtab: "src/newtab/newtab.ts",
+  "newtab-onboarding": "src/newtab/onboarding.ts",
   options: "src/options/options.ts",
 };
 
