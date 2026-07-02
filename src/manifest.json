@@ -26,6 +26,13 @@
     "page": "options.html",
     "open_in_tab": true
   },
+  "oauth2": {
+    "client_id": "REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/calendar.readonly",
+      "https://www.googleapis.com/auth/drive.appdata"
+    ]
+  },
   "background": {
     "service_worker": "service-worker.js",
     "type": "module"
@@ -33,6 +40,7 @@
   "permissions": [
     "tabs",
     "history",
+    "identity",
     "storage",
     "notifications",
     "declarativeNetRequest",
