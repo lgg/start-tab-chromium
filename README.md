@@ -24,6 +24,7 @@ Start Tab is a Manifest V3 extension for Chromium-based browsers. It combines a 
 - Google Drive backup/restore through Drive `appDataFolder` when OAuth is configured.
 - Google Calendar event block when OAuth is configured.
 - Weather block powered by Open-Meteo with current, daily, and weekly display modes.
+- Release packaging and store permission notes in `docs/release.md`.
 - Migration from the legacy `blocked` storage key to the current host-only blocklist.
 
 ## Development
@@ -71,6 +72,7 @@ Chromium does not provide a runtime API to toggle `chrome_url_overrides.newtab` 
 - `src/newtab/` - custom start page.
 - `src/options/` - settings page.
 - `src/_locales/` - English and Russian localization catalogs.
+- `docs/release.md` - release checklist and permission notes.
 - `icons/` - extension icons.
 
 ## Roadmap
@@ -82,7 +84,6 @@ Chromium does not provide a runtime API to toggle `chrome_url_overrides.newtab` 
 - Add visual resize handles to the layout editor; the current editor supports ordering, enabling, disabling, and numeric geometry edits.
 - Add more built-in search providers and user-defined provider templates.
 - Add richer command palette actions.
-- Add release packaging and store submission notes.
 
 ## License
 
