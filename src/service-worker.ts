@@ -15,7 +15,7 @@ import {
   syncRules,
   unblockHost,
 } from "./lib/blocklist.js";
-import type { Ack, Message } from "./lib/messages.js";
+import { isMessage, type Ack, type Message } from "./lib/messages.js";
 
 chrome.runtime.onInstalled.addListener(() => {
   void migrateAndSyncRules();
@@ -31,7 +31,12 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
 });
 
 chrome.runtime.onMessage.addListener(
-  (message: Message, _sender, sendResponse: (ack: Ack) => void) => {
+  (message: unknown, _sender, sendResponse: (ack: Ack) => void) => {
+    if (!isMessage(message)) {
+      sendResponse({ ok: false, error: "Unsupported message" });
+      return false;
+    }
+
     handle(message)
       .then(() => sendResponse({ ok: true }))
       .catch((error: unknown) =>
