@@ -145,7 +145,7 @@ function titleFor(block: LayoutBlock): string {
   return translated === key ? block.title : translated;
 }
 
-function card(block: LayoutBlock): HTMLDivElement {
+function card(block: LayoutBlock): HTMLElement {
   const element = document.createElement("section");
   element.className = `card card--${block.type}`;
   element.style.gridColumn = `${block.column} / span ${block.width}`;
