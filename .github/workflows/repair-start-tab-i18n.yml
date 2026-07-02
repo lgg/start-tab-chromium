@@ -1,0 +1,279 @@
+name: Repair Start Tab i18n update
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Apply update and create missing i18n files
+        shell: bash
+        run: |
+          set -euo pipefail
+          awk '/^ZGlmZi/{print; found=1; next} /^PATCH_B64$/{exit} found{print}' .github/workflows/apply-start-tab-i18n.yml | base64 -d > /tmp/start-tab-i18n.patch
+          git apply /tmp/start-tab-i18n.patch
+
+          mkdir -p src/lib src/_locales/en src/_locales/ru
+          cat > src/lib/i18n.ts <<'EOF_I18N'
+const DEFAULT_LOCALE = "en";
+const SUPPORTED_LOCALES = ["en", "ru"] as const;
+
+type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
+
+interface LocaleMessage {
+  message: string;
+}
+
+type LocaleCatalog = Record<string, LocaleMessage>;
+
+export interface I18n {
+  locale: SupportedLocale;
+  t: (key: string, replacements?: Record<string, string | number>) => string;
+  list: (key: string) => string[];
+}
+
+function normalizeLocale(locale: string): SupportedLocale | null {
+  const normalized = locale.toLowerCase().replace("_", "-");
+  const [language] = normalized.split("-");
+  return SUPPORTED_LOCALES.find((supported) => supported === language) ?? null;
+}
+
+function detectLocale(): SupportedLocale {
+  const browserLanguages =
+    navigator.languages.length > 0 ? navigator.languages : [navigator.language];
+
+  for (const language of browserLanguages) {
+    const supported = normalizeLocale(language);
+    if (supported) return supported;
+  }
+
+  return DEFAULT_LOCALE;
+}
+
+async function loadCatalog(locale: SupportedLocale): Promise<LocaleCatalog> {
+  const response = await fetch(
+    chrome.runtime.getURL(`_locales/${locale}/messages.json`),
+  );
+  if (!response.ok) {
+    throw new Error(`Unable to load locale catalog: ${locale}`);
+  }
+  return (await response.json()) as LocaleCatalog;
+}
+
+export async function loadI18n(): Promise<I18n> {
+  const locale = detectLocale();
+  const catalog =
+    locale === DEFAULT_LOCALE
+      ? await loadCatalog(DEFAULT_LOCALE)
+      : { ...(await loadCatalog(DEFAULT_LOCALE)), ...(await loadCatalog(locale)) };
+
+  document.documentElement.lang = locale;
+
+  const t = (
+    key: string,
+    replacements: Record<string, string | number> = {},
+  ): string => {
+    const template = catalog[key]?.message ?? key;
+    return Object.entries(replacements).reduce(
+      (message, [name, value]) =>
+        message.replaceAll(`{${name}}`, String(value)),
+      template,
+    );
+  };
+
+  return {
+    locale,
+    t,
+    list: (key: string) => t(key).split("|").filter(Boolean),
+  };
+}
+
+export function translateDocument(i18n: I18n): void {
+  document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((element) => {
+    const key = element.dataset.i18n;
+    if (key) element.textContent = i18n.t(key);
+  });
+
+  document.querySelectorAll<HTMLElement>("[data-i18n-title]").forEach((element) => {
+    const key = element.dataset.i18nTitle;
+    if (key) element.title = i18n.t(key);
+  });
+}
+EOF_I18N
+
+          cat > src/_locales/en/messages.json <<'EOF_EN'
+{
+  "appName": {
+    "message": "Start Tab"
+  },
+  "appDescription": {
+    "message": "Start Tab for Chromium Browsers is a personal website blocker with a future custom new tab experience."
+  },
+  "popupTitle": {
+    "message": "Start Tab"
+  },
+  "currentSiteLabel": {
+    "message": "Current site:"
+  },
+  "blockThisSite": {
+    "message": "Block this site"
+  },
+  "removeFromBlocklist": {
+    "message": "Remove from blocklist"
+  },
+  "clearBlocklist": {
+    "message": "Clear entire blocklist"
+  },
+  "unsupportedPage": {
+    "message": "This page can't be blocked."
+  },
+  "somethingWentWrong": {
+    "message": "Something went wrong."
+  },
+  "blockedPageTitle": {
+    "message": "Blocked"
+  },
+  "unblockThisSite": {
+    "message": "Unblock this site"
+  },
+  "cancelUnblocking": {
+    "message": "Cancel unblocking"
+  },
+  "blockedSiteMessage": {
+    "message": "{host} is blocked."
+  },
+  "blockedUnknownSiteMessage": {
+    "message": "This site is blocked."
+  },
+  "unblockingCountdown": {
+    "message": "Unblocking {host} in {remaining} {unit}..."
+  },
+  "unblockingNow": {
+    "message": "Unblocking {host}..."
+  },
+  "failedToUnblock": {
+    "message": "Failed to unblock. Try again."
+  },
+  "secondOne": {
+    "message": "second"
+  },
+  "secondFew": {
+    "message": "seconds"
+  },
+  "secondMany": {
+    "message": "seconds"
+  },
+  "motivationPhrases": {
+    "message": "Do not waste time|Nothing terrible is happening, just start|Think about your family|Why are you doing this?|Why did you come here?|Come on, focus|You can do this|I believe in you|You will make it|Just start|Try starting|Stand up and breathe|Open the thing you actually need to do|What is wrong this time?|This is not serious|You need to make money|Do you need money?|How will you achieve anything like this?|How many more times?|Do it, do it, do it|My father worked a lot, my mother almost as much|I need more money|Just finish this|Get yourself together|Today is the day you change yourself|Time to change|Go work|Just Do It!|That dream car will not buy itself|Are you not embarrassed?|Yes, you came here, but you are doing fine. Go back to work|Stop procrastinating|Why are you procrastinating?|What is wrong?"
+  }
+}
+EOF_EN
+
+          cat > src/_locales/ru/messages.json <<'EOF_RU'
+{
+  "appName": {
+    "message": "Start Tab"
+  },
+  "appDescription": {
+    "message": "Start Tab for Chromium Browsers — персональный блокировщик сайтов с будущей кастомной новой вкладкой."
+  },
+  "popupTitle": {
+    "message": "Start Tab"
+  },
+  "currentSiteLabel": {
+    "message": "Текущий сайт:"
+  },
+  "blockThisSite": {
+    "message": "Заблокировать сайт"
+  },
+  "removeFromBlocklist": {
+    "message": "Убрать из блок-листа"
+  },
+  "clearBlocklist": {
+    "message": "Очистить весь блок-лист"
+  },
+  "unsupportedPage": {
+    "message": "Эту страницу нельзя заблокировать."
+  },
+  "somethingWentWrong": {
+    "message": "Что-то пошло не так."
+  },
+  "blockedPageTitle": {
+    "message": "Заблокировано"
+  },
+  "unblockThisSite": {
+    "message": "Разблокировать сайт"
+  },
+  "cancelUnblocking": {
+    "message": "Отменить разблокировку"
+  },
+  "blockedSiteMessage": {
+    "message": "{host} заблокирован."
+  },
+  "blockedUnknownSiteMessage": {
+    "message": "Этот сайт заблокирован."
+  },
+  "unblockingCountdown": {
+    "message": "Разблокировка {host} через {remaining} {unit}..."
+  },
+  "unblockingNow": {
+    "message": "Разблокировка {host}..."
+  },
+  "failedToUnblock": {
+    "message": "Не удалось разблокировать. Попробуй еще раз."
+  },
+  "secondOne": {
+    "message": "секунду"
+  },
+  "secondFew": {
+    "message": "секунды"
+  },
+  "secondMany": {
+    "message": "секунд"
+  },
+  "motivationPhrases": {
+    "message": "Не теряй время|Ничего страшного нет, просто начни|Подумай о семье|А зачем ты этим занимаешься?|Почему ты зашел сюда?|Давай, соберись|У тебя получится|Я верю в тебя|Ты сможешь|Просто начни|Попробуй начать|Встань и подыши|Просто открой то, что нужно сделать|Что не так в этот раз?|Это несерьезно|Надо делать деньги|Тебе нужны бабки?|И как ты достигнешь чего-то?|Да сколько можно?|Делай, делай, делай|Мой отец работал много, мать немногим меньше|Мне нужно больше денег|Просто закончи с этим|Возьми себя в руки|Сегодня именно тот день, когда ты изменишь себя|Пора меняться|У тебя все получится|Иди работай|Just Do It!|Ламба сама себя не купит|Не стыдно?|Да, ты зашел сюда, но ты молодец. Иди работай дальше|Хватит прокрастинировать|Почему ты прокрастинируешь?|Что не так?"
+  }
+}
+EOF_RU
+
+          git mv 'Screenshots/About to Blacklist.png' 'Screenshots/About Start Tab.png'
+          git mv 'Screenshots/Facebook Blacklist.png' 'Screenshots/Facebook Start Tab.png'
+          git mv 'Screenshots/Unlist Facebook.png' 'Screenshots/Unblock Facebook.png'
+          rm -f .github/workflows/apply-start-tab-i18n.yml .github/workflows/repair-start-tab-i18n.yml
+
+      - name: Verify update
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --cache /tmp/npm-cache --prefer-offline
+          npm run typecheck
+          npm run build
+          npm audit --cache /tmp/npm-cache --audit-level=moderate
+          node -e "for (const f of ['src/manifest.json','src/_locales/en/messages.json','src/_locales/ru/messages.json','build/manifest.json','build/_locales/en/messages.json','build/_locales/ru/messages.json']) { JSON.parse(require('node:fs').readFileSync(f,'utf8')); console.log('ok', f); }"
+          if find . -path './node_modules' -prune -o -path './build' -prune -o -type f -print0 | xargs -0 grep -nE 'Blacklist|Blacklisted|blacklisted|lgg/Blacklist|Unlist|unlist|unlisting'; then
+            echo 'Old branding or terminology remains.' >&2
+            exit 1
+          fi
+
+      - name: Commit and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Rename to Start Tab and add i18n"
+          git push
