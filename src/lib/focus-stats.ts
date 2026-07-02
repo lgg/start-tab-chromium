@@ -54,19 +54,25 @@ function dayKey(date = new Date()): string {
 
 function ensureDay(stats: FocusStats): CountSet {
   const key = dayKey();
-  stats.byDay[key] ??= { ...EMPTY_COUNTS };
-  return stats.byDay[key];
+  const existing = stats.byDay[key];
+  if (existing) return existing;
+  const created = { ...EMPTY_COUNTS };
+  stats.byDay[key] = created;
+  return created;
 }
 
 function ensureDomain(stats: FocusStats, host: string): DomainStats {
-  stats.byDomain[host] ??= {
+  const existing = stats.byDomain[host];
+  if (existing) return existing;
+  const created = {
     blockHits: 0,
     avoidedVisits: 0,
     estimatedMinutesSaved: 0,
     unblocksAfterCountdown: 0,
     lastAvoidedAt: 0,
   };
-  return stats.byDomain[host];
+  stats.byDomain[host] = created;
+  return created;
 }
 
 function isStats(value: unknown): value is FocusStats {
