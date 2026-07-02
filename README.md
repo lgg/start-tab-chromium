@@ -54,6 +54,13 @@ The production extension is built into `build/` and can be loaded as an unpacked
 - Add visual customization settings: font family, text color, font sizes, solid background color, custom background image, and built-in animated background effects.
 - Include built-in background effects such as animated gradient, soft aurora, subtle mesh gradient, slow spotlight, and calm noise texture.
 - Add a settings entry button with gear icon visibility options: always visible or visible only on hover over a configured page area.
+- Add a quick note or scratchpad block.
+- Add a calendar or daily agenda block.
+- Add a weather block.
+- Add a command palette or quick actions block.
+- Add recently visited or pinned tabs block.
+- Add focus statistics: daily block hits, avoided visits, and estimated time saved.
+- Add layout profiles or presets, such as work, rest, development, and minimal.
 - Prepare release packaging and store submission notes.
 
 ## License
