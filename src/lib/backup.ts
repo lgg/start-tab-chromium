@@ -1,7 +1,7 @@
 import { syncRules } from "./blocklist.js";
 import { FOCUS_STATS_KEY } from "./focus-stats.js";
 
-const BACKUP_VERSION = 1;
+const BACKUP_VERSION = 2;
 
 const STORAGE_KEYS = [
   "blockedSites",
@@ -16,14 +16,20 @@ export interface BackupBundle {
   app: "Start Tab";
   version: number;
   exportedAt: string;
+  schema: {
+    version: number;
+    storageKeys: string[];
+  };
   storage: Record<string, unknown>;
 }
+
+type LegacyBackupBundle = Omit<BackupBundle, "schema"> & { schema?: BackupBundle["schema"] };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function isBackupLike(value: unknown): value is BackupBundle {
+function isBackupLike(value: unknown): value is LegacyBackupBundle {
   return isRecord(value)
     && value.app === "Start Tab"
     && typeof value.version === "number"
@@ -34,17 +40,32 @@ function isBackupLike(value: unknown): value is BackupBundle {
     && isRecord(value.storage);
 }
 
-function migrateBackup(value: BackupBundle): BackupBundle {
-  let migrated = { ...value, storage: { ...value.storage } };
+function withCurrentSchema(value: LegacyBackupBundle): BackupBundle {
+  return {
+    ...value,
+    version: BACKUP_VERSION,
+    schema: {
+      version: BACKUP_VERSION,
+      storageKeys: [...STORAGE_KEYS],
+    },
+    storage: { ...value.storage },
+  };
+}
 
-  switch (migrated.version) {
+function migrateBackup(value: LegacyBackupBundle): BackupBundle {
+  let migrated: BackupBundle;
+
+  switch (value.version) {
     case 1:
+      migrated = withCurrentSchema(value);
+      break;
+    case 2:
+      migrated = withCurrentSchema(value);
       break;
     default:
-      throw new Error(`Unsupported Start Tab backup version: ${migrated.version}`);
+      throw new Error(`Unsupported Start Tab backup version: ${value.version}`);
   }
 
-  migrated = { ...migrated, version: BACKUP_VERSION };
   return migrated;
 }
 
@@ -54,6 +75,10 @@ export async function exportBackup(): Promise<BackupBundle> {
     app: "Start Tab",
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
+    schema: {
+      version: BACKUP_VERSION,
+      storageKeys: [...STORAGE_KEYS],
+    },
     storage,
   };
 }
