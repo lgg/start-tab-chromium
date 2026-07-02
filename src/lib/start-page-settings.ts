@@ -12,10 +12,13 @@ export type BlockType =
   | "stopwatch"
   | "pomodoro"
   | "note"
-  | "agenda"
+  | "localTasks"
+  | "googleCalendar"
   | "weather"
   | "commands"
   | "recent"
+  | "browserPinned"
+  | "startPinned"
   | "stats";
 
 export interface LayoutBlock {
@@ -69,6 +72,9 @@ export interface StartPageSettings {
     fontFamily: string;
     fontSize: number;
     iconSize: number;
+    items: StartLink[];
+  };
+  startPinned: {
     items: StartLink[];
   };
   search: {
@@ -134,6 +140,13 @@ export const DEFAULT_SETTINGS: StartPageSettings = {
       { icon: "DDG", title: "DuckDuckGo", url: "https://duckduckgo.com" }
     ],
   },
+  startPinned: {
+    items: [
+      { icon: "AI", title: "ChatGPT", url: "https://chatgpt.com" },
+      { icon: "GH", title: "GitHub", url: "https://github.com" },
+      { icon: "DOC", title: "Docs", url: "https://docs.google.com" }
+    ],
+  },
   search: {
     provider: "google",
     providers: [
@@ -167,11 +180,14 @@ export const DEFAULT_SETTINGS: StartPageSettings = {
       { id: "stopwatch", type: "stopwatch", title: "Stopwatch", enabled: true, column: 9, row: 3, width: 2, height: 2 },
       { id: "pomodoro", type: "pomodoro", title: "Pomodoro", enabled: true, column: 11, row: 3, width: 2, height: 2 },
       { id: "note", type: "note", title: "Scratchpad", enabled: true, column: 7, row: 5, width: 3, height: 3 },
-      { id: "agenda", type: "agenda", title: "Agenda", enabled: true, column: 10, row: 5, width: 3, height: 3 },
-      { id: "weather", type: "weather", title: "Weather", enabled: false, column: 1, row: 7, width: 3, height: 2 },
+      { id: "localTasks", type: "localTasks", title: "Local Tasks", enabled: true, column: 10, row: 5, width: 3, height: 3 },
+      { id: "startPinned", type: "startPinned", title: "Start Tab Pinned", enabled: true, column: 1, row: 7, width: 3, height: 2 },
       { id: "commands", type: "commands", title: "Commands", enabled: true, column: 4, row: 7, width: 3, height: 2 },
-      { id: "recent", type: "recent", title: "Recent", enabled: false, column: 7, row: 7, width: 3, height: 2 },
-      { id: "stats", type: "stats", title: "Focus Stats", enabled: true, column: 10, row: 7, width: 3, height: 2 }
+      { id: "recent", type: "recent", title: "Recent History", enabled: true, column: 7, row: 7, width: 3, height: 2 },
+      { id: "stats", type: "stats", title: "Focus Stats", enabled: true, column: 10, row: 7, width: 3, height: 2 },
+      { id: "browserPinned", type: "browserPinned", title: "Browser Pinned", enabled: false, column: 1, row: 9, width: 3, height: 2 },
+      { id: "googleCalendar", type: "googleCalendar", title: "Google Calendar", enabled: false, column: 4, row: 9, width: 3, height: 2 },
+      { id: "weather", type: "weather", title: "Weather", enabled: false, column: 7, row: 9, width: 3, height: 2 }
     ],
   },
 };
@@ -190,6 +206,7 @@ function mergeSettings(base: StartPageSettings, value: unknown): StartPageSettin
     dateTime: { ...base.dateTime, ...(isRecord(value.dateTime) ? value.dateTime : {}) },
     ip: { ...base.ip, ...(isRecord(value.ip) ? value.ip : {}) },
     links: { ...base.links, ...(isRecord(value.links) ? value.links : {}) },
+    startPinned: { ...base.startPinned, ...(isRecord(value.startPinned) ? value.startPinned : {}) },
     search: { ...base.search, ...(isRecord(value.search) ? value.search : {}) },
     timers: { ...base.timers, ...(isRecord(value.timers) ? value.timers : {}) },
     focusStats: { ...base.focusStats, ...(isRecord(value.focusStats) ? value.focusStats : {}) },
