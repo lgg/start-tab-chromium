@@ -1,10 +1,11 @@
 export type BackgroundEffect = "none" | "gradient" | "aurora" | "mesh" | "spotlight" | "noise";
 export type SettingsButtonVisibility = "always" | "hover";
-export type SearchProviderId = "google" | "yandex" | "perplexity" | "duckduckgo" | "brave";
+export type SearchProviderId = string;
 export type DateTimeMode = "both" | "date" | "time";
 export type LinkPageDirection = "horizontal" | "vertical";
 export type WeatherDisplayMode = "current" | "day" | "week";
 export type WeatherProviderId = "open-meteo";
+export type LayoutPresetId = "work" | "minimal" | "focus" | "dashboard";
 export type BlockType =
   | "dateTime"
   | "ip"
@@ -32,6 +33,13 @@ export interface LayoutBlock {
   row: number;
   width: number;
   height: number;
+}
+
+export interface LayoutPreset {
+  id: LayoutPresetId;
+  title: string;
+  columns: number;
+  blocks: LayoutBlock[];
 }
 
 export interface StartLink {
@@ -114,6 +122,79 @@ export interface StartPageSettings {
 
 const SETTINGS_KEY = "startPageSettings";
 
+export const DEFAULT_SEARCH_PROVIDERS: SearchProvider[] = [
+  { id: "google", title: "Google", urlTemplate: "https://www.google.com/search?q={query}" },
+  { id: "yandex", title: "Yandex", urlTemplate: "https://yandex.ru/search/?text={query}" },
+  { id: "perplexity", title: "Perplexity", urlTemplate: "https://www.perplexity.ai/search?q={query}" },
+  { id: "duckduckgo", title: "DuckDuckGo", urlTemplate: "https://duckduckgo.com/?q={query}" },
+  { id: "brave", title: "Brave", urlTemplate: "https://search.brave.com/search?q={query}" },
+  { id: "bing", title: "Bing", urlTemplate: "https://www.bing.com/search?q={query}" },
+  { id: "kagi", title: "Kagi", urlTemplate: "https://kagi.com/search?q={query}" },
+];
+
+export const DEFAULT_LAYOUT_BLOCKS: LayoutBlock[] = [
+  { id: "dateTime", type: "dateTime", title: "Date & Time", enabled: true, column: 1, row: 1, width: 4, height: 2 },
+  { id: "search", type: "search", title: "Search", enabled: true, column: 5, row: 1, width: 5, height: 2 },
+  { id: "ip", type: "ip", title: "IP", enabled: true, column: 10, row: 1, width: 3, height: 2 },
+  { id: "links", type: "links", title: "Links", enabled: true, column: 1, row: 3, width: 6, height: 4 },
+  { id: "timer", type: "timer", title: "Timer", enabled: true, column: 7, row: 3, width: 2, height: 2 },
+  { id: "stopwatch", type: "stopwatch", title: "Stopwatch", enabled: true, column: 9, row: 3, width: 2, height: 2 },
+  { id: "pomodoro", type: "pomodoro", title: "Pomodoro", enabled: true, column: 11, row: 3, width: 2, height: 2 },
+  { id: "note", type: "note", title: "Scratchpad", enabled: true, column: 7, row: 5, width: 3, height: 3 },
+  { id: "localTasks", type: "localTasks", title: "Local Tasks", enabled: true, column: 10, row: 5, width: 3, height: 3 },
+  { id: "startPinned", type: "startPinned", title: "Start Tab Pinned", enabled: true, column: 1, row: 7, width: 3, height: 2 },
+  { id: "commands", type: "commands", title: "Commands", enabled: true, column: 4, row: 7, width: 3, height: 2 },
+  { id: "recent", type: "recent", title: "Recent History", enabled: true, column: 7, row: 7, width: 3, height: 2 },
+  { id: "stats", type: "stats", title: "Focus Stats", enabled: true, column: 10, row: 7, width: 3, height: 2 },
+  { id: "browserPinned", type: "browserPinned", title: "Browser Pinned", enabled: false, column: 1, row: 9, width: 3, height: 2 },
+  { id: "googleCalendar", type: "googleCalendar", title: "Google Calendar", enabled: false, column: 4, row: 9, width: 3, height: 2 },
+  { id: "weather", type: "weather", title: "Weather", enabled: false, column: 7, row: 9, width: 3, height: 2 },
+];
+
+export const LAYOUT_PRESETS: LayoutPreset[] = [
+  { id: "work", title: "Work", columns: 12, blocks: DEFAULT_LAYOUT_BLOCKS },
+  {
+    id: "minimal",
+    title: "Minimal",
+    columns: 12,
+    blocks: [
+      { id: "dateTime", type: "dateTime", title: "Date & Time", enabled: true, column: 1, row: 1, width: 4, height: 2 },
+      { id: "search", type: "search", title: "Search", enabled: true, column: 5, row: 1, width: 5, height: 2 },
+      { id: "links", type: "links", title: "Links", enabled: true, column: 1, row: 3, width: 6, height: 4 },
+      { id: "commands", type: "commands", title: "Commands", enabled: true, column: 7, row: 3, width: 3, height: 2 },
+    ],
+  },
+  {
+    id: "focus",
+    title: "Focus",
+    columns: 12,
+    blocks: [
+      { id: "dateTime", type: "dateTime", title: "Date & Time", enabled: true, column: 1, row: 1, width: 3, height: 2 },
+      { id: "pomodoro", type: "pomodoro", title: "Pomodoro", enabled: true, column: 4, row: 1, width: 3, height: 2 },
+      { id: "timer", type: "timer", title: "Timer", enabled: true, column: 7, row: 1, width: 2, height: 2 },
+      { id: "note", type: "note", title: "Scratchpad", enabled: true, column: 1, row: 3, width: 5, height: 4 },
+      { id: "localTasks", type: "localTasks", title: "Local Tasks", enabled: true, column: 6, row: 3, width: 4, height: 4 },
+      { id: "stats", type: "stats", title: "Focus Stats", enabled: true, column: 10, row: 1, width: 3, height: 3 },
+    ],
+  },
+  {
+    id: "dashboard",
+    title: "Dashboard",
+    columns: 12,
+    blocks: [
+      { id: "dateTime", type: "dateTime", title: "Date & Time", enabled: true, column: 1, row: 1, width: 3, height: 2 },
+      { id: "weather", type: "weather", title: "Weather", enabled: true, column: 4, row: 1, width: 3, height: 2 },
+      { id: "ip", type: "ip", title: "IP", enabled: true, column: 7, row: 1, width: 3, height: 2 },
+      { id: "search", type: "search", title: "Search", enabled: true, column: 1, row: 3, width: 5, height: 2 },
+      { id: "links", type: "links", title: "Links", enabled: true, column: 1, row: 5, width: 6, height: 4 },
+      { id: "googleCalendar", type: "googleCalendar", title: "Google Calendar", enabled: true, column: 7, row: 3, width: 3, height: 3 },
+      { id: "recent", type: "recent", title: "Recent History", enabled: true, column: 10, row: 3, width: 3, height: 3 },
+      { id: "browserPinned", type: "browserPinned", title: "Browser Pinned", enabled: true, column: 7, row: 6, width: 3, height: 2 },
+      { id: "startPinned", type: "startPinned", title: "Start Tab Pinned", enabled: true, column: 10, row: 6, width: 3, height: 2 },
+    ],
+  },
+];
+
 export const DEFAULT_SETTINGS: StartPageSettings = {
   appearance: {
     fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
@@ -162,13 +243,7 @@ export const DEFAULT_SETTINGS: StartPageSettings = {
   },
   search: {
     provider: "google",
-    providers: [
-      { id: "google", title: "Google", urlTemplate: "https://www.google.com/search?q={query}" },
-      { id: "yandex", title: "Yandex", urlTemplate: "https://yandex.ru/search/?text={query}" },
-      { id: "perplexity", title: "Perplexity", urlTemplate: "https://www.perplexity.ai/search?q={query}" },
-      { id: "duckduckgo", title: "DuckDuckGo", urlTemplate: "https://duckduckgo.com/?q={query}" },
-      { id: "brave", title: "Brave", urlTemplate: "https://search.brave.com/search?q={query}" }
-    ],
+    providers: DEFAULT_SEARCH_PROVIDERS,
   },
   googleCalendar: {
     calendarId: "primary",
@@ -195,24 +270,7 @@ export const DEFAULT_SETTINGS: StartPageSettings = {
   layout: {
     columns: 12,
     profile: "work",
-    blocks: [
-      { id: "dateTime", type: "dateTime", title: "Date & Time", enabled: true, column: 1, row: 1, width: 4, height: 2 },
-      { id: "search", type: "search", title: "Search", enabled: true, column: 5, row: 1, width: 5, height: 2 },
-      { id: "ip", type: "ip", title: "IP", enabled: true, column: 10, row: 1, width: 3, height: 2 },
-      { id: "links", type: "links", title: "Links", enabled: true, column: 1, row: 3, width: 6, height: 4 },
-      { id: "timer", type: "timer", title: "Timer", enabled: true, column: 7, row: 3, width: 2, height: 2 },
-      { id: "stopwatch", type: "stopwatch", title: "Stopwatch", enabled: true, column: 9, row: 3, width: 2, height: 2 },
-      { id: "pomodoro", type: "pomodoro", title: "Pomodoro", enabled: true, column: 11, row: 3, width: 2, height: 2 },
-      { id: "note", type: "note", title: "Scratchpad", enabled: true, column: 7, row: 5, width: 3, height: 3 },
-      { id: "localTasks", type: "localTasks", title: "Local Tasks", enabled: true, column: 10, row: 5, width: 3, height: 3 },
-      { id: "startPinned", type: "startPinned", title: "Start Tab Pinned", enabled: true, column: 1, row: 7, width: 3, height: 2 },
-      { id: "commands", type: "commands", title: "Commands", enabled: true, column: 4, row: 7, width: 3, height: 2 },
-      { id: "recent", type: "recent", title: "Recent History", enabled: true, column: 7, row: 7, width: 3, height: 2 },
-      { id: "stats", type: "stats", title: "Focus Stats", enabled: true, column: 10, row: 7, width: 3, height: 2 },
-      { id: "browserPinned", type: "browserPinned", title: "Browser Pinned", enabled: false, column: 1, row: 9, width: 3, height: 2 },
-      { id: "googleCalendar", type: "googleCalendar", title: "Google Calendar", enabled: false, column: 4, row: 9, width: 3, height: 2 },
-      { id: "weather", type: "weather", title: "Weather", enabled: false, column: 7, row: 9, width: 3, height: 2 }
-    ],
+    blocks: DEFAULT_LAYOUT_BLOCKS,
   },
 };
 
@@ -238,6 +296,10 @@ function mergeSettings(base: StartPageSettings, value: unknown): StartPageSettin
     focusStats: { ...base.focusStats, ...(isRecord(value.focusStats) ? value.focusStats : {}) },
     layout: { ...base.layout, ...(isRecord(value.layout) ? value.layout : {}) },
   } as StartPageSettings;
+}
+
+export function cloneLayoutBlocks(blocks: LayoutBlock[]): LayoutBlock[] {
+  return blocks.map((block) => ({ ...block }));
 }
 
 export async function getStartPageSettings(): Promise<StartPageSettings> {
