@@ -67,6 +67,10 @@ function requireHost(host: string): string {
   return normalized;
 }
 
+function hostMatchesBlockedSite(host: string, site: string): boolean {
+  return host === site || host.endsWith(`.${site}`);
+}
+
 /** Read the current list of blocked hosts. */
 export async function getBlockedSites(): Promise<string[]> {
   await migrateLegacyStorage();
@@ -114,17 +118,21 @@ async function setBlockedSites(sites: string[]): Promise<void> {
   await chrome.storage.local.set({ [STORAGE_KEY]: normalizeSites(sites) });
 }
 
+export async function blockedSiteForUrl(url: string): Promise<string | null> {
+  const host = hostFromUrl(url);
+  if (!host) return null;
+  const sites = await getBlockedSites();
+  return sites.find((site) => hostMatchesBlockedSite(host, site)) ?? null;
+}
+
 /** Is the given URL currently blocked? */
 export async function isBlocked(url: string): Promise<boolean> {
-  const host = hostFromUrl(url);
-  if (!host) return false;
-  const sites = await getBlockedSites();
-  return sites.includes(host);
+  return (await blockedSiteForUrl(url)) !== null;
 }
 
 /** Remember the exact URL that triggered the block page for a host. */
 export async function rememberBlockedNavigation(url: string): Promise<void> {
-  const host = hostFromUrl(url);
+  const host = await blockedSiteForUrl(url);
   if (!host) return;
   const urls = await getLastBlockedUrls();
   urls[host] = url;
