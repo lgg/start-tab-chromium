@@ -124,7 +124,12 @@ body.effect-noise .background::after {
   color: var(--muted);
 }
 
-.search {
+.stats {
+  white-space: pre-line;
+}
+
+.search,
+.inline-form {
   display: flex;
   gap: 10px;
 }
@@ -162,6 +167,12 @@ body.effect-noise .background::after {
   font: inherit;
   font-weight: 700;
   padding: 0 14px;
+}
+
+.button--tiny {
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
 }
 
 .button:hover {
@@ -208,6 +219,36 @@ body.effect-noise .background::after {
   font-size: var(--link-font-size, 13px);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.task-list,
+.compact-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.task-item,
+.compact-list__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.task-item__title,
+.compact-list__item {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-item:has(input:checked) .task-item__title {
+  color: var(--muted);
+  text-decoration: line-through;
 }
 
 .pager,
