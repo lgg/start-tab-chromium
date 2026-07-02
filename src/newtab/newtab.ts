@@ -1,3 +1,9 @@
+import {
+  getFocusStats,
+  recordFocusSessionCompleted,
+  recordFocusSessionInterrupted,
+  recordFocusSessionStarted,
+} from "../lib/focus-stats.js";
 import { loadI18n, type I18n } from "../lib/i18n.js";
 import {
   getStartPageSettings,
@@ -18,6 +24,7 @@ interface ClockState {
   elapsedMs: number;
   durationMs: number;
   pomodoroPhase?: PomodoroPhase;
+  focusSessionStarted?: boolean;
 }
 
 interface RuntimeState {
@@ -55,6 +62,7 @@ function defaultClock(id: ClockId): ClockState {
     elapsedMs: 0,
     durationMs,
     pomodoroPhase: id === "pomodoro" ? "work" : undefined,
+    focusSessionStarted: false,
   };
 }
 
@@ -154,7 +162,7 @@ function renderBlock(block: LayoutBlock, element: HTMLElement): void {
       element.append(el("p", "placeholder", i18n.t("recentPlaceholder")));
       break;
     case "stats":
-      element.append(el("p", "stats", i18n.t("statsPlaceholder")));
+      void renderStats(element);
       break;
   }
 }
@@ -306,7 +314,12 @@ function clockElapsed(clock: ClockState): number {
 
 function startClock(id: ClockId): void {
   const clock = ensureClock(id);
-  if (id !== "stopwatch" && clockElapsed(clock) >= clock.durationMs) clock.elapsedMs = 0;
+  const elapsedBeforeStart = clockElapsed(clock);
+  if (id !== "stopwatch" && elapsedBeforeStart >= clock.durationMs) clock.elapsedMs = 0;
+  if (id === "pomodoro" && clock.pomodoroPhase !== "break" && !clock.focusSessionStarted && elapsedBeforeStart === 0) {
+    clock.focusSessionStarted = true;
+    void recordFocusSessionStarted();
+  }
   clock.running = true;
   clock.startedAt = Date.now();
   queueSaveState();
@@ -324,6 +337,10 @@ function pauseClock(id: ClockId): void {
 
 function resetClock(id: ClockId): void {
   const clock = ensureClock(id);
+  const elapsedMs = clockElapsed(clock);
+  if (id === "pomodoro" && clock.focusSessionStarted && clock.pomodoroPhase !== "break" && elapsedMs > 0 && elapsedMs < clock.durationMs) {
+    void recordFocusSessionInterrupted(elapsedMs);
+  }
   const fresh = defaultClock(id);
   if (id === "pomodoro") fresh.pomodoroPhase = clock.pomodoroPhase ?? "work";
   state.clocks[id] = fresh;
@@ -367,12 +384,15 @@ function updateClocks(): void {
 }
 
 function finishClock(id: ClockId, clock: ClockState): void {
+  const completedFocus = id === "pomodoro" && clock.focusSessionStarted && clock.pomodoroPhase !== "break";
   clock.running = false;
   clock.startedAt = null;
   clock.elapsedMs = clock.durationMs;
+  if (completedFocus) void recordFocusSessionCompleted(clock.durationMs);
   if (id === "pomodoro") {
     const nextPhase: PomodoroPhase = clock.pomodoroPhase === "break" ? "work" : "break";
     clock.pomodoroPhase = nextPhase;
+    clock.focusSessionStarted = false;
     clock.durationMs = secondsToMs(nextPhase === "work"
       ? settings.timers.pomodoroWorkSeconds
       : settings.timers.pomodoroBreakSeconds);
@@ -380,6 +400,7 @@ function finishClock(id: ClockId, clock: ClockState): void {
   }
   queueSaveState();
   if (settings.timers.notifyOnComplete) void notify(i18n.t(`${id}Done`));
+  void refreshStats();
 }
 
 async function notify(message: string): Promise<void> {
@@ -408,6 +429,26 @@ function renderCommands(container: HTMLElement): void {
   button.type = "button";
   button.addEventListener("click", () => void chrome.runtime.openOptionsPage());
   container.append(el("p", "placeholder", i18n.t("commandsPlaceholder")), button);
+}
+
+async function renderStats(container: HTMLElement): Promise<void> {
+  const stats = el("div", "stats", "", { id: "statsContent" });
+  container.append(stats);
+  await refreshStats();
+}
+
+async function refreshStats(): Promise<void> {
+  const target = document.getElementById("statsContent");
+  if (!target) return;
+  const { totals } = await getFocusStats();
+  target.textContent = [
+    i18n.t("statsBlockHits", { value: totals.blockHits }),
+    i18n.t("statsAvoidedVisits", { value: totals.avoidedVisits }),
+    i18n.t("statsTimeSaved", { value: totals.estimatedMinutesSaved }),
+    i18n.t("statsPomodoros", { value: totals.focusSessionsCompleted }),
+    i18n.t("statsInterrupted", { value: totals.focusSessionsInterrupted }),
+    i18n.t("statsUnblocks", { value: totals.unblocksAfterCountdown }),
+  ].join("\n");
 }
 
 function formatDuration(ms: number): string {
@@ -451,7 +492,7 @@ function replaceTokens(format: string, tokens: Record<string, string>): string {
     .reduce((result, token) => result.split(token).join(tokens[token] ?? ""), format);
 }
 
-settingsEl.title = "Settings";
+settingsEl.title = "";
 settingsEl.addEventListener("click", () => void chrome.runtime.openOptionsPage());
 
 void (async () => {
