@@ -119,6 +119,9 @@ function render(): void {
       field(i18n.t("linkIconSize"), makeInput("linkIconSize", String(settings.links.iconSize), "number")),
       field(i18n.t("linksJson"), makeTextarea("linksJson", JSON.stringify(settings.links.items, null, 2)), true),
     ]),
+    section(i18n.t("sectionPinned"), [
+      field(i18n.t("startPinnedJson"), makeTextarea("startPinnedJson", JSON.stringify(settings.startPinned.items, null, 2)), true),
+    ]),
     section(i18n.t("sectionTimers"), [
       field(i18n.t("timerSeconds"), makeInput("timerSeconds", String(settings.timers.timerSeconds), "number")),
       field(i18n.t("pomodoroWorkSeconds"), makeInput("pomodoroWorkSeconds", String(settings.timers.pomodoroWorkSeconds), "number")),
@@ -305,6 +308,9 @@ formEl.addEventListener("submit", async (event) => {
         fontSize: numberValue("linkFontSize", settings.links.fontSize),
         iconSize: numberValue("linkIconSize", settings.links.iconSize),
         items: parseJson<StartLink[]>("linksJson"),
+      },
+      startPinned: {
+        items: parseJson<StartLink[]>("startPinnedJson"),
       },
       search: {
         ...settings.search,
