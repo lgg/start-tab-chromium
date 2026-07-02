@@ -19,6 +19,13 @@
     "default_title": "__MSG_appName__",
     "default_popup": "popup.html"
   },
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
   "background": {
     "service_worker": "service-worker.js",
     "type": "module"
@@ -26,6 +33,7 @@
   "permissions": [
     "tabs",
     "storage",
+    "notifications",
     "declarativeNetRequest",
     "webNavigation"
   ],
