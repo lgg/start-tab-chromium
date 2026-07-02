@@ -1,5 +1,5 @@
 import { backupFileName, exportBackup, importBackup } from "../lib/backup.js";
-import { restoreChromeSyncBackup, uploadChromeSyncBackup } from "../lib/chrome-sync.js";
+import { restoreChromeSyncBackup, syncChromeSyncBackup, uploadChromeSyncBackup } from "../lib/chrome-sync.js";
 import {
   isGoogleIntegrationConfigured,
   restoreDriveBackup,
@@ -247,10 +247,20 @@ function backupControls(): HTMLElement {
   const importButton = actionButton("importBackup", () => handleImport(file.files?.[0]));
   const chromeSyncUploadButton = actionButton("chromeSyncUpload", handleChromeSyncUpload);
   const chromeSyncRestoreButton = actionButton("chromeSyncRestore", handleChromeSyncRestore);
+  const chromeSyncSmartButton = actionButton("chromeSyncSmartSync", handleChromeSyncSmartSync);
   const driveUploadButton = actionButton("driveBackupUpload", handleDriveUpload);
   const driveRestoreButton = actionButton("driveBackupRestore", handleDriveRestore);
 
-  wrapper.append(exportButton, file, importButton, chromeSyncUploadButton, chromeSyncRestoreButton, driveUploadButton, driveRestoreButton);
+  wrapper.append(
+    exportButton,
+    file,
+    importButton,
+    chromeSyncSmartButton,
+    chromeSyncUploadButton,
+    chromeSyncRestoreButton,
+    driveUploadButton,
+    driveRestoreButton,
+  );
   return wrapper;
 }
 
@@ -473,6 +483,16 @@ async function handleImport(file: File | undefined): Promise<void> {
   await importBackup(JSON.parse(text));
   await reloadSettings();
   statusEl.textContent = i18n.t("backupImported");
+}
+
+async function handleChromeSyncSmartSync(): Promise<void> {
+  try {
+    const result = await syncChromeSyncBackup();
+    if (result === "restored") await reloadSettings();
+    statusEl.textContent = i18n.t(result === "restored" ? "chromeSyncSmartRestored" : "chromeSyncSmartUploaded");
+  } catch (error) {
+    statusEl.textContent = error instanceof Error ? error.message : String(error);
+  }
 }
 
 async function handleChromeSyncUpload(): Promise<void> {
