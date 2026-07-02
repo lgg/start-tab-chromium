@@ -22,5 +22,7 @@ jobs:
         run: npm ci
       - name: Typecheck
         run: npm run typecheck
-      - name: Build
+      - name: Build full extension
         run: npm run build
+      - name: Build blocker-only extension
+        run: npm run build:blocker-only
