@@ -1,89 +1,56 @@
-/**
- * The page a blocked navigation lands on. It preserves the original UX: an
- * "unlist" action that forces a 10-second wait (with a cancel button) before
- * the site is removed from the blacklist and you're redirected back to it.
- */
-
 import { getLastBlockedUrl, normalizeHost } from "../lib/blocklist.js";
 import { sendMessage } from "../lib/messages.js";
 
-const UNLIST_SECONDS = 10;
-
-const motivationPhrases = [
-  "Не теряй время",
-  "Ничего страшного нет, просто начни",
-  "Подумай о семье",
-  "А зачем ты этим занимаешься?",
-  "Почему ты зашел сюда?",
-  "Давай, соберись",
-  "У тебя получится",
-  "Я верю в тебя",
-  "Ты сможешь",
-  "Просто начни",
-  "Попробуй начать",
-  "Встань и подыши",
-  "Просто открой то, что нужно сделать",
-  "Что не так в этот раз?",
-  "Это несерьезно",
-  "Надо делать деньги",
-  "Тебе нужны бабки?",
-  "И как ты достигнешь чего-то?",
-  "Да сколько можно?",
-  "Делай, делай, делай",
-  "Мой отец работал много, мать немногим меньше",
-  "Мне нужно больше денег",
-  "Просто закончи с этим",
-  "Возьми себя в руки",
-  "Сегодня именно тот день, когда ты изменишь себя",
-  "Пора меняться",
-  "У тебя все получится",
-  "Иди работай",
-  "Just Do It!",
-  "Ламба сама себя не купит",
-  "Не стыдно?",
-  "Да, ты зашел сюда, но ты молодец. Иди работай дальше",
-  "Хватит прокрастинировать",
-  "Почему ты прокрастинируешь?",
-  "Что не так?",
-];
+const UNBLOCK_SECONDS = 10;
 
 const messageEl = document.getElementById("message") as HTMLHeadingElement;
 const siteEl = document.getElementById("site") as HTMLParagraphElement;
 const actionsEl = document.getElementById("actions") as HTMLDivElement;
 const countdownEl = document.getElementById("countdown") as HTMLDivElement;
-const countdownTextEl = document.getElementById(
-  "countdownText",
-) as HTMLParagraphElement;
-const unlistEl = document.getElementById("unlist") as HTMLButtonElement;
+const countdownTextEl = document.getElementById("countdownText") as HTMLParagraphElement;
+const unblockEl = document.getElementById("unblock") as HTMLButtonElement;
 const cancelEl = document.getElementById("cancel") as HTMLButtonElement;
 
 const params = new URLSearchParams(location.search);
 const host = normalizeHost(params.get("site") ?? "");
+let interval: number | undefined;
 
-function renderMessage(): void {
-  messageEl.textContent =
-    motivationPhrases[Math.floor(Math.random() * motivationPhrases.length)] ??
-    "Не теряй время";
-  siteEl.textContent = host
-    ? `${host} is blacklisted.`
-    : "This site is blacklisted.";
+function t(key: string, substitutions?: string | string[]): string {
+  return chrome.i18n.getMessage(key, substitutions) || key;
 }
 
-let interval: number | undefined;
+function motivationPhrases(): string[] {
+  return t("motivationPhrases").split("|").filter(Boolean);
+}
+
+function renderMessage(): void {
+  const phrases = motivationPhrases();
+  messageEl.textContent = phrases[Math.floor(Math.random() * phrases.length)] ?? t("blockedUnknownSiteMessage");
+  siteEl.textContent = host ? t("blockedSiteMessage", host) : t("blockedUnknownSiteMessage");
+}
+
+function secondUnit(remaining: number): string {
+  const language = chrome.i18n.getUILanguage().toLowerCase().split("-")[0];
+  if (language !== "ru") return t(remaining === 1 ? "secondOne" : "secondMany");
+
+  const mod10 = remaining % 10;
+  const mod100 = remaining % 100;
+  if (mod10 === 1 && mod100 !== 11) return t("secondOne");
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return t("secondFew");
+  return t("secondMany");
+}
 
 function startCountdown(): void {
   if (!host) return;
   actionsEl.hidden = true;
   countdownEl.hidden = false;
 
-  let remaining = UNLIST_SECONDS;
+  let remaining = UNBLOCK_SECONDS;
   const tick = (): void => {
-    countdownTextEl.textContent = `Unlisting ${host} in ${remaining} second${
-      remaining === 1 ? "" : "s"
-    }...`;
+    countdownTextEl.textContent = t("unblockingCountdown", [host, String(remaining), secondUnit(remaining)]);
     if (remaining <= 0) {
       window.clearInterval(interval);
-      void finishUnlist();
+      void finishUnblock();
       return;
     }
     remaining -= 1;
@@ -99,21 +66,22 @@ function cancelCountdown(): void {
   actionsEl.hidden = false;
 }
 
-async function finishUnlist(): Promise<void> {
-  countdownTextEl.textContent = `Unlisting ${host}...`;
+async function finishUnblock(): Promise<void> {
+  countdownTextEl.textContent = t("unblockingNow", host);
   const redirectUrl = (await getLastBlockedUrl(host)) ?? `https://${host}/`;
   const ack = await sendMessage({ type: "unblock", host });
   if (!ack.ok) {
-    countdownTextEl.textContent = ack.error ?? "Failed to unlist. Try again.";
+    countdownTextEl.textContent = t("failedToUnblock");
     actionsEl.hidden = false;
     countdownEl.hidden = true;
     return;
   }
-  // Rule is gone; navigating back to the site will no longer be redirected.
   location.replace(redirectUrl);
 }
 
-unlistEl.addEventListener("click", startCountdown);
+document.title = t("blockedPageTitle");
+unblockEl.textContent = t("unblockThisSite");
+cancelEl.textContent = t("cancelUnblocking");
+unblockEl.addEventListener("click", startCountdown);
 cancelEl.addEventListener("click", cancelCountdown);
-
 renderMessage();
