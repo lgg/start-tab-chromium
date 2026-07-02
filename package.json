@@ -1,7 +1,7 @@
 {
   "name": "start-tab",
   "version": "2.0.0",
-  "description": "Start Tab for Chromium Browsers is a personal website blocker with a future custom new tab experience.",
+  "description": "Start Tab for Chromium Browsers is a personal website blocker with a configurable custom new tab experience.",
   "repository": "https://github.com/lgg/start-tab-chromium.git",
   "author": "Rahul Gupta-Iwasaki, Fedor (https://github.com/lgg)",
   "license": "MIT",
@@ -9,9 +9,10 @@
   "private": true,
   "scripts": {
     "build": "node build.mjs",
+    "build:blocker-only": "node build.mjs --without-newtab --outdir=build-blocker-only",
     "watch": "node build.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf build"
+    "clean": "rm -rf build build-blocker-only"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.270",
