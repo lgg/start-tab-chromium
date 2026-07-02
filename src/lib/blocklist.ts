@@ -23,7 +23,15 @@ export const BLOCKED_PAGE = "blocked.html";
  * under it.
  */
 export function normalizeHost(host: string): string {
-  return host.replace(/^www\./i, "").toLowerCase();
+  return host.trim().replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
+}
+
+function normalizeHostCandidate(host: string): string | null {
+  const candidate = normalizeHost(host);
+  if (!candidate) return null;
+  if (candidate.startsWith(".") || candidate.endsWith(".")) return null;
+  if (/[\s/:]/.test(candidate)) return null;
+  return candidate;
 }
 
 /** Extract a normalized, blockable host from a URL, or null if not http(s). */
@@ -31,19 +39,32 @@ export function hostFromUrl(url: string): string | null {
   try {
     const { protocol, hostname } = new URL(url);
     if (protocol !== "http:" && protocol !== "https:") return null;
-    if (!hostname) return null;
-    return normalizeHost(hostname);
+    return normalizeHostCandidate(hostname);
   } catch {
     return null;
   }
 }
 
 function normalizeStoredHost(value: string): string | null {
-  const fromUrl = hostFromUrl(value);
+  const trimmed = value.trim();
+  const fromUrl = hostFromUrl(trimmed);
   if (fromUrl) return fromUrl;
+  if (/^[a-z][a-z\d+.-]*:\/\//i.test(trimmed)) return null;
 
-  const candidate = normalizeHost(value.trim().replace(/\/.*$/, ""));
-  return candidate && !candidate.includes(" ") ? candidate : null;
+  const rawHost = trimmed.replace(/\/.*$/, "");
+  return hostFromUrl(`https://${rawHost}/`);
+}
+
+function normalizeSites(sites: string[]): string[] {
+  return [...new Set(sites.map(normalizeStoredHost))]
+    .filter((site): site is string => Boolean(site))
+    .sort();
+}
+
+function requireHost(host: string): string {
+  const normalized = normalizeStoredHost(host);
+  if (!normalized) throw new Error("Invalid host");
+  return normalized;
 }
 
 /** Read the current list of blocked hosts. */
@@ -55,7 +76,7 @@ export async function getBlockedSites(): Promise<string[]> {
 async function readBlockedSites(): Promise<string[]> {
   const items = await chrome.storage.local.get(STORAGE_KEY);
   const sites = items[STORAGE_KEY];
-  return Array.isArray(sites) ? (sites as string[]) : [];
+  return Array.isArray(sites) ? normalizeSites(sites as string[]) : [];
 }
 
 /** Convert the old MV2 `blocked` URL list into the MV3 host-only list. */
@@ -74,11 +95,7 @@ export async function migrateLegacyStorage(): Promise<void> {
 
     if (legacy.length === 0) return;
 
-    const sites = [...new Set([...current, ...legacy].map(normalizeStoredHost))]
-      .filter((site): site is string => Boolean(site))
-      .sort();
-
-    await chrome.storage.local.set({ [STORAGE_KEY]: sites });
+    await setBlockedSites([...current, ...legacy]);
     await chrome.storage.local.remove(LEGACY_STORAGE_KEY);
   })();
 
@@ -94,7 +111,7 @@ async function getLastBlockedUrls(): Promise<Record<string, string>> {
 }
 
 async function setBlockedSites(sites: string[]): Promise<void> {
-  await chrome.storage.local.set({ [STORAGE_KEY]: sites });
+  await chrome.storage.local.set({ [STORAGE_KEY]: normalizeSites(sites) });
 }
 
 /** Is the given URL currently blocked? */
@@ -116,7 +133,8 @@ export async function rememberBlockedNavigation(url: string): Promise<void> {
 
 /** Read the last blocked URL for a host so unlisting can return to it. */
 export async function getLastBlockedUrl(host: string): Promise<string | null> {
-  const normalized = normalizeHost(host);
+  const normalized = normalizeStoredHost(host);
+  if (!normalized) return null;
   const urls = await getLastBlockedUrls();
   const url = urls[normalized];
   return typeof url === "string" ? url : null;
@@ -124,7 +142,8 @@ export async function getLastBlockedUrl(host: string): Promise<string | null> {
 
 /** Drop a stored blocked URL once it has been used. */
 export async function clearLastBlockedUrl(host: string): Promise<void> {
-  const normalized = normalizeHost(host);
+  const normalized = normalizeStoredHost(host);
+  if (!normalized) return;
   const urls = await getLastBlockedUrls();
   delete urls[normalized];
   await chrome.storage.local.set({ [LAST_BLOCKED_URLS_KEY]: urls });
@@ -132,7 +151,7 @@ export async function clearLastBlockedUrl(host: string): Promise<void> {
 
 /** Build the full DNR ruleset from a list of hosts. */
 function buildRules(sites: string[]): chrome.declarativeNetRequest.Rule[] {
-  return sites.map((host, index) => ({
+  return normalizeSites(sites).map((host, index) => ({
     id: index + 1,
     priority: 1,
     action: {
@@ -165,7 +184,7 @@ export async function syncRules(): Promise<void> {
 
 /** Add a host to the blocklist (idempotent) and refresh the rules. */
 export async function blockHost(host: string): Promise<void> {
-  const normalized = normalizeHost(host);
+  const normalized = requireHost(host);
   const sites = await getBlockedSites();
   if (!sites.includes(normalized)) {
     sites.push(normalized);
@@ -176,7 +195,7 @@ export async function blockHost(host: string): Promise<void> {
 
 /** Remove a host from the blocklist and refresh the rules. */
 export async function unblockHost(host: string): Promise<void> {
-  const normalized = normalizeHost(host);
+  const normalized = requireHost(host);
   const sites = (await getBlockedSites()).filter((s) => s !== normalized);
   await setBlockedSites(sites);
   await clearLastBlockedUrl(normalized);
