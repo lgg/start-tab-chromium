@@ -1,0 +1,23 @@
+{
+  "appName": { "message": "Start Tab" },
+  "appDescription": { "message": "Start Tab for Chromium-based browsers." },
+  "popupTitle": { "message": "Start Tab" },
+  "currentSiteLabel": { "message": "Current site:" },
+  "blockThisSite": { "message": "Block this site" },
+  "removeFromBlocklist": { "message": "Remove from blocklist" },
+  "clearBlocklist": { "message": "Clear entire blocklist" },
+  "unsupportedPage": { "message": "This page can't be blocked." },
+  "somethingWentWrong": { "message": "Something went wrong." },
+  "blockedPageTitle": { "message": "Blocked" },
+  "unblockThisSite": { "message": "Unblock this site" },
+  "cancelUnblocking": { "message": "Cancel unblocking" },
+  "blockedSiteMessage": { "message": "{host} is blocked." },
+  "blockedUnknownSiteMessage": { "message": "This site is blocked." },
+  "unblockingCountdown": { "message": "Unblocking {host} in {remaining} {unit}..." },
+  "unblockingNow": { "message": "Unblocking {host}..." },
+  "failedToUnblock": { "message": "Failed to unblock. Try again." },
+  "secondOne": { "message": "second" },
+  "secondFew": { "message": "seconds" },
+  "secondMany": { "message": "seconds" },
+  "motivationPhrases": { "message": "Stay focused|Take a breath|Start now|You can do this" }
+}
