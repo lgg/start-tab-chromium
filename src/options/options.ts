@@ -13,13 +13,16 @@ import {
   type LocalePreference,
 } from "../lib/i18n.js";
 import {
+  cloneLayoutBlocks,
   getStartPageSettings,
+  LAYOUT_PRESETS,
   resetStartPageSettings,
   setStartPageSettings,
   type BackgroundEffect,
   type DateTimeMode,
   type LayoutBlock,
   type LinkPageDirection,
+  type SearchProvider,
   type SearchProviderId,
   type SettingsButtonVisibility,
   type StartLink,
@@ -113,6 +116,7 @@ function render(): void {
         settings.search.providers.map((provider) => [provider.id, provider.title]),
         settings.search.provider,
       )),
+      field(i18n.t("searchProvidersJson"), makeTextarea("searchProvidersJson", JSON.stringify(settings.search.providers, null, 2)), true),
       field(i18n.t("ipEndpoint"), makeInput("ipEndpoint", settings.ip.endpoint, "url"), true),
     ]),
     section(i18n.t("sectionGoogleCalendar"), [
@@ -158,6 +162,7 @@ function render(): void {
     section(i18n.t("sectionLayout"), [
       field(i18n.t("layoutColumns"), makeInput("layoutColumns", String(settings.layout.columns), "number")),
       field(i18n.t("layoutProfile"), makeInput("layoutProfile", settings.layout.profile)),
+      layoutPresetControls(),
       layoutEditor(),
       field(i18n.t("layoutBlocksJson"), makeTextarea("layoutBlocksJson", JSON.stringify(settings.layout.blocks, null, 2)), true),
     ]),
@@ -258,25 +263,56 @@ function actionButton(labelKey: string, handler: () => Promise<void>): HTMLButto
   return button;
 }
 
+function layoutPresetControls(): HTMLElement {
+  const wrapper = document.createElement("div");
+  wrapper.className = "actions field--wide";
+  const preset = makeSelect(
+    "layoutPreset",
+    LAYOUT_PRESETS.map((item) => [item.id, item.title]),
+    settings.layout.profile,
+  );
+  const apply = actionButton("applyLayoutPreset", async () => {
+    applyLayoutPreset(preset.value);
+  });
+  wrapper.append(preset, apply);
+  return wrapper;
+}
+
+function applyLayoutPreset(presetId: string): void {
+  const preset = LAYOUT_PRESETS.find((item) => item.id === presetId);
+  if (!preset) return;
+  const blocks = cloneLayoutBlocks(preset.blocks);
+  input("layoutColumns").value = String(preset.columns);
+  input("layoutProfile").value = preset.id;
+  textarea("layoutBlocksJson").value = JSON.stringify(blocks, null, 2);
+  rebuildLayoutEditor(blocks);
+  statusEl.textContent = i18n.t("layoutPresetApplied");
+}
+
 function layoutEditor(): HTMLElement {
   const wrapper = document.createElement("div");
   wrapper.className = "layout-editor field--wide";
   wrapper.id = "layoutEditor";
-
-  for (let index = 0; index < settings.layout.blocks.length; index += 1) {
-    const block = settings.layout.blocks[index];
-    if (!block) continue;
-    wrapper.append(layoutEditorRow(block, index));
-  }
-
+  rebuildLayoutEditorRows(wrapper, settings.layout.blocks);
   return wrapper;
 }
 
-function layoutEditorRow(block: LayoutBlock, index: number): HTMLElement {
+function rebuildLayoutEditor(blocks: LayoutBlock[]): void {
+  const editor = document.getElementById("layoutEditor");
+  if (!editor) return;
+  rebuildLayoutEditorRows(editor, blocks);
+}
+
+function rebuildLayoutEditorRows(editor: HTMLElement, blocks: LayoutBlock[]): void {
+  editor.innerHTML = "";
+  for (const block of blocks) editor.append(layoutEditorRow(block));
+}
+
+function layoutEditorRow(block: LayoutBlock): HTMLElement {
   const row = document.createElement("div");
   row.className = "layout-row";
   row.draggable = true;
-  row.dataset.index = String(index);
+  row.dataset.block = JSON.stringify(block);
 
   const drag = document.createElement("span");
   drag.className = "layout-row__drag";
@@ -335,7 +371,7 @@ function syncLayoutJsonFromEditor(): void {
 function readLayoutBlocksFromEditor(editor: HTMLElement): LayoutBlock[] {
   const blocks: LayoutBlock[] = [];
   for (const row of Array.from(editor.querySelectorAll<HTMLElement>(".layout-row"))) {
-    const original = settings.layout.blocks[Number(row.dataset.index)];
+    const original = readRowBlock(row);
     if (!original) continue;
     blocks.push({
       ...original,
@@ -347,6 +383,15 @@ function readLayoutBlocksFromEditor(editor: HTMLElement): LayoutBlock[] {
     });
   }
   return blocks;
+}
+
+function readRowBlock(row: HTMLElement): LayoutBlock | null {
+  try {
+    const value = row.dataset.block;
+    return value ? JSON.parse(value) as LayoutBlock : null;
+  } catch {
+    return null;
+  }
 }
 
 function fieldNumber(row: HTMLElement, fieldName: string, fallback: number): number {
@@ -487,8 +532,8 @@ formEl.addEventListener("submit", async (event) => {
         items: parseJson<StartLink[]>("startPinnedJson"),
       },
       search: {
-        ...settings.search,
         provider: select("searchProvider").value as SearchProviderId,
+        providers: parseJson<SearchProvider[]>("searchProvidersJson"),
       },
       googleCalendar: {
         calendarId: input("calendarId").value.trim() || settings.googleCalendar.calendarId,
