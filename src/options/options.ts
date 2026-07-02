@@ -1,3 +1,4 @@
+import { backupFileName, exportBackup, importBackup } from "../lib/backup.js";
 import {
   getLocalePreference,
   loadI18n,
@@ -68,6 +69,7 @@ function render(): void {
         ["ru", "Русский"],
       ], localePreference)),
     ]),
+    section(i18n.t("sectionBackup"), [backupControls()]),
     section(i18n.t("sectionAppearance"), [
       field(i18n.t("fontFamily"), makeInput("fontFamily", settings.appearance.fontFamily)),
       field(i18n.t("baseFontSize"), makeInput("baseFontSize", String(settings.appearance.baseFontSize), "number")),
@@ -122,6 +124,11 @@ function render(): void {
       field(i18n.t("pomodoroWorkSeconds"), makeInput("pomodoroWorkSeconds", String(settings.timers.pomodoroWorkSeconds), "number")),
       field(i18n.t("pomodoroBreakSeconds"), makeInput("pomodoroBreakSeconds", String(settings.timers.pomodoroBreakSeconds), "number")),
       field(i18n.t("notifyOnComplete"), makeCheckbox("notifyOnComplete", settings.timers.notifyOnComplete)),
+    ]),
+    section(i18n.t("sectionFocusStats"), [
+      field(i18n.t("defaultMinutesPerAvoidedVisit"), makeInput("defaultMinutesPerAvoidedVisit", String(settings.focusStats.defaultMinutesPerAvoidedVisit), "number")),
+      field(i18n.t("avoidedVisitDedupeSeconds"), makeInput("avoidedVisitDedupeSeconds", String(settings.focusStats.avoidedVisitDedupeSeconds), "number")),
+      field(i18n.t("domainMinutesJson"), makeTextarea("domainMinutesJson", JSON.stringify(settings.focusStats.domainMinutes, null, 2)), true),
     ]),
     section(i18n.t("sectionLayout"), [
       field(i18n.t("layoutColumns"), makeInput("layoutColumns", String(settings.layout.columns), "number")),
@@ -196,6 +203,31 @@ function makeCheckbox(id: string, checked: boolean): HTMLElement {
   return wrapper;
 }
 
+function backupControls(): HTMLElement {
+  const wrapper = document.createElement("div");
+  wrapper.className = "actions field--wide";
+
+  const file = document.createElement("input");
+  file.id = "backupFile";
+  file.type = "file";
+  file.accept = "application/json,.json";
+
+  const exportButton = document.createElement("button");
+  exportButton.className = "button button--secondary";
+  exportButton.type = "button";
+  exportButton.textContent = i18n.t("exportBackup");
+  exportButton.addEventListener("click", () => void handleExport());
+
+  const importButton = document.createElement("button");
+  importButton.className = "button button--secondary";
+  importButton.type = "button";
+  importButton.textContent = i18n.t("importBackup");
+  importButton.addEventListener("click", () => void handleImport(file.files?.[0]));
+
+  wrapper.append(exportButton, file, importButton);
+  return wrapper;
+}
+
 function actions(): HTMLElement {
   const wrapper = document.createElement("div");
   wrapper.className = "actions";
@@ -213,6 +245,30 @@ function parseJson<T>(id: string): T {
   } catch (error) {
     throw new Error(i18n.t("invalidJson", { field: id, error: error instanceof Error ? error.message : String(error) }));
   }
+}
+
+async function handleExport(): Promise<void> {
+  const bundle = await exportBackup();
+  const url = URL.createObjectURL(new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = backupFileName();
+  anchor.click();
+  URL.revokeObjectURL(url);
+  statusEl.textContent = i18n.t("backupExported");
+}
+
+async function handleImport(file: File | undefined): Promise<void> {
+  if (!file) {
+    statusEl.textContent = i18n.t("backupFileRequired");
+    return;
+  }
+  const text = await file.text();
+  await importBackup(JSON.parse(text));
+  settings = await getStartPageSettings();
+  localePreference = await getLocalePreference();
+  render();
+  statusEl.textContent = i18n.t("backupImported");
 }
 
 formEl.addEventListener("submit", async (event) => {
@@ -259,6 +315,11 @@ formEl.addEventListener("submit", async (event) => {
         pomodoroWorkSeconds: numberValue("pomodoroWorkSeconds", settings.timers.pomodoroWorkSeconds),
         pomodoroBreakSeconds: numberValue("pomodoroBreakSeconds", settings.timers.pomodoroBreakSeconds),
         notifyOnComplete: input("notifyOnComplete").checked,
+      },
+      focusStats: {
+        defaultMinutesPerAvoidedVisit: numberValue("defaultMinutesPerAvoidedVisit", settings.focusStats.defaultMinutesPerAvoidedVisit),
+        avoidedVisitDedupeSeconds: numberValue("avoidedVisitDedupeSeconds", settings.focusStats.avoidedVisitDedupeSeconds),
+        domainMinutes: parseJson<Record<string, number>>("domainMinutesJson"),
       },
       layout: {
         columns: numberValue("layoutColumns", settings.layout.columns),
