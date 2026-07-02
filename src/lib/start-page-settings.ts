@@ -151,8 +151,12 @@ export const DEFAULT_LAYOUT_BLOCKS: LayoutBlock[] = [
   { id: "weather", type: "weather", title: "Weather", enabled: false, column: 7, row: 9, width: 3, height: 2 },
 ];
 
+export function cloneLayoutBlocks(blocks: LayoutBlock[]): LayoutBlock[] {
+  return blocks.map((block) => ({ ...block }));
+}
+
 export const LAYOUT_PRESETS: LayoutPreset[] = [
-  { id: "work", title: "Work", columns: 12, blocks: DEFAULT_LAYOUT_BLOCKS },
+  { id: "work", title: "Work", columns: 12, blocks: cloneLayoutBlocks(DEFAULT_LAYOUT_BLOCKS) },
   {
     id: "minimal",
     title: "Minimal",
@@ -243,7 +247,7 @@ export const DEFAULT_SETTINGS: StartPageSettings = {
   },
   search: {
     provider: "google",
-    providers: DEFAULT_SEARCH_PROVIDERS,
+    providers: [...DEFAULT_SEARCH_PROVIDERS],
   },
   googleCalendar: {
     calendarId: "primary",
@@ -270,7 +274,7 @@ export const DEFAULT_SETTINGS: StartPageSettings = {
   layout: {
     columns: 12,
     profile: "work",
-    blocks: DEFAULT_LAYOUT_BLOCKS,
+    blocks: cloneLayoutBlocks(DEFAULT_LAYOUT_BLOCKS),
   },
 };
 
@@ -278,8 +282,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function isSearchProvider(value: unknown): value is SearchProvider {
+  return isRecord(value)
+    && typeof value.id === "string"
+    && typeof value.title === "string"
+    && typeof value.urlTemplate === "string"
+    && value.urlTemplate.includes("{query}");
+}
+
+function mergeSearchProviders(base: SearchProvider[], value: unknown): SearchProvider[] {
+  const byId = new Map<string, SearchProvider>();
+  for (const provider of base) byId.set(provider.id, { ...provider });
+  if (Array.isArray(value)) {
+    for (const provider of value) {
+      if (isSearchProvider(provider)) byId.set(provider.id, { ...provider });
+    }
+  }
+  return [...byId.values()];
+}
+
 function mergeSettings(base: StartPageSettings, value: unknown): StartPageSettings {
   if (!isRecord(value)) return base;
+  const search = isRecord(value.search) ? value.search : {};
   return {
     ...base,
     ...value,
@@ -289,17 +313,17 @@ function mergeSettings(base: StartPageSettings, value: unknown): StartPageSettin
     ip: { ...base.ip, ...(isRecord(value.ip) ? value.ip : {}) },
     links: { ...base.links, ...(isRecord(value.links) ? value.links : {}) },
     startPinned: { ...base.startPinned, ...(isRecord(value.startPinned) ? value.startPinned : {}) },
-    search: { ...base.search, ...(isRecord(value.search) ? value.search : {}) },
+    search: {
+      ...base.search,
+      ...search,
+      providers: mergeSearchProviders(base.search.providers, search.providers),
+    },
     googleCalendar: { ...base.googleCalendar, ...(isRecord(value.googleCalendar) ? value.googleCalendar : {}) },
     weather: { ...base.weather, ...(isRecord(value.weather) ? value.weather : {}) },
     timers: { ...base.timers, ...(isRecord(value.timers) ? value.timers : {}) },
     focusStats: { ...base.focusStats, ...(isRecord(value.focusStats) ? value.focusStats : {}) },
     layout: { ...base.layout, ...(isRecord(value.layout) ? value.layout : {}) },
   } as StartPageSettings;
-}
-
-export function cloneLayoutBlocks(blocks: LayoutBlock[]): LayoutBlock[] {
-  return blocks.map((block) => ({ ...block }));
 }
 
 export async function getStartPageSettings(): Promise<StartPageSettings> {
