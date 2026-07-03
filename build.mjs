@@ -32,8 +32,10 @@ const staticAssets = [
   ["src/newtab/newtab.html", "newtab.html"],
   ["src/newtab/newtab.css", "newtab.css"],
   ["src/newtab/newtab-gate.js", "newtab-gate.js"],
+  ["src/newtab/editor.js", "newtab-editor.js"],
   ["src/options/options.html", "options.html"],
   ["src/options/options.css", "options.css"],
+  ["src/options/options-helper.js", "options-helper.js"],
   ["icons", "icons"],
 ];
 

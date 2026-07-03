@@ -8,6 +8,7 @@ const STORAGE_KEYS = [
   "lastBlockedUrls",
   "startPageSettings",
   "startPageRuntimeState",
+  "startPageOnboarding",
   "localeOverride",
   FOCUS_STATS_KEY,
 ] as const;
