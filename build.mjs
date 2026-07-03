@@ -31,6 +31,7 @@ const staticAssets = [
   ["src/blocked/blocked.css", "blocked.css"],
   ["src/newtab/newtab.html", "newtab.html"],
   ["src/newtab/newtab.css", "newtab.css"],
+  ["src/newtab/newtab-gate.js", "newtab-gate.js"],
   ["src/options/options.html", "options.html"],
   ["src/options/options.css", "options.css"],
   ["icons", "icons"],
