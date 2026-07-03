@@ -5,9 +5,10 @@ import {
   setStartPageSettings,
 } from "../lib/start-page-settings.js";
 
-const STATE_KEY = "startPageRuntimeState";
+const ONBOARDING_KEY = "startPageOnboarding";
+const LEGACY_RUNTIME_STATE_KEY = "startPageRuntimeState";
 
-interface RuntimeState {
+interface OnboardingState {
   onboarded?: boolean;
 }
 
@@ -15,15 +16,22 @@ function t(key: string): string {
   return chrome.i18n.getMessage(key) || key;
 }
 
-async function readState(): Promise<RuntimeState> {
-  const items = await chrome.storage.local.get(STATE_KEY);
-  const value = items[STATE_KEY];
-  return typeof value === "object" && value !== null ? value as RuntimeState : {};
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
-async function writeState(patch: RuntimeState): Promise<void> {
+async function readState(): Promise<OnboardingState> {
+  const items = await chrome.storage.local.get([ONBOARDING_KEY, LEGACY_RUNTIME_STATE_KEY]);
+  const current = items[ONBOARDING_KEY];
+  if (isRecord(current)) return { onboarded: current.onboarded === true };
+
+  const legacy = items[LEGACY_RUNTIME_STATE_KEY];
+  return { onboarded: isRecord(legacy) && legacy.onboarded === true };
+}
+
+async function writeState(patch: OnboardingState): Promise<void> {
   const state = await readState();
-  await chrome.storage.local.set({ [STATE_KEY]: { ...state, ...patch } });
+  await chrome.storage.local.set({ [ONBOARDING_KEY]: { ...state, ...patch } });
 }
 
 function button(label: string, className = "button"): HTMLButtonElement {
