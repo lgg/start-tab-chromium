@@ -83,18 +83,18 @@ export async function listCalendarEvents(calendarId = "primary", maxResults = 8)
   }));
 }
 
-async function findDriveBackupFile(): Promise<DriveFile | null> {
+async function findDriveBackupFile(interactive = false): Promise<DriveFile | null> {
   const url = new URL(GOOGLE_DRIVE_FILES_URL);
   url.searchParams.set("spaces", "appDataFolder");
   url.searchParams.set("fields", "files(id,name)");
   url.searchParams.set("q", `name='${DRIVE_BACKUP_FILE_NAME}' and trashed=false`);
-  const payload = await googleFetch<DriveListResponse>(url.toString());
+  const payload = await googleFetch<DriveListResponse>(url.toString(), {}, interactive);
   return payload.files?.[0] ?? null;
 }
 
 export async function uploadDriveBackup(): Promise<void> {
   const bundle = await exportBackup();
-  const existing = await findDriveBackupFile();
+  const existing = await findDriveBackupFile(true);
   const body = JSON.stringify(bundle, null, 2);
 
   if (existing) {
@@ -129,7 +129,7 @@ export async function uploadDriveBackup(): Promise<void> {
 }
 
 export async function restoreDriveBackup(): Promise<void> {
-  const existing = await findDriveBackupFile();
+  const existing = await findDriveBackupFile(true);
   if (!existing) throw new Error("No Start Tab backup found in Google Drive app data");
   const bundle = await googleFetch<BackupBundle>(`${GOOGLE_DRIVE_FILES_URL}/${existing.id}?alt=media`, {}, true);
   await importBackup(bundle);
