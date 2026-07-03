@@ -857,6 +857,7 @@ formEl.addEventListener("submit", async (event) => {
         domainMinutes: parseJson<Record<string, number>>("domainMinutesJson"),
       },
       layout: {
+        ...settings.layout,
         columns: numberValue("layoutColumns", settings.layout.columns),
         profile: input("layoutProfile").value.trim() || settings.layout.profile,
         blocks: parseJson<LayoutBlock[]>("layoutBlocksJson"),
