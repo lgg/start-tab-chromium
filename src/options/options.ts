@@ -100,6 +100,11 @@ function render(): void {
         ["always", i18n.t("visibilityAlways")],
         ["hover", i18n.t("visibilityHover")],
       ], settings.settingsButton.visibility)),
+      field(i18n.t("settingsButtonHoverArea"), makeSelect("settingsHoverArea", [
+        ["top", i18n.t("hoverAreaTop")],
+        ["top-right", i18n.t("hoverAreaTopRight")],
+        ["right", i18n.t("hoverAreaRight")],
+      ], settings.settingsButton.hoverArea)),
     ]),
     section(i18n.t("sectionDateTime"), [
       field(i18n.t("dateTimeMode"), makeSelect("dateTimeMode", [
@@ -568,6 +573,7 @@ formEl.addEventListener("submit", async (event) => {
       settingsButton: {
         ...settings.settingsButton,
         visibility: select("settingsVisibility").value as SettingsButtonVisibility,
+        hoverArea: select("settingsHoverArea").value as StartPageSettings["settingsButton"]["hoverArea"],
       },
       dateTime: {
         mode: select("dateTimeMode").value as DateTimeMode,
