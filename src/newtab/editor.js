@@ -42,6 +42,7 @@
         columns: Number.isFinite(layout.columns) ? Math.max(1, Math.round(layout.columns)) : DEFAULT_COLUMNS,
         profile: typeof layout.profile === "string" ? layout.profile : "custom",
         mode: layout.mode === "free" ? "free" : "grid",
+        zone: layout.zone === "full" ? "full" : "contained",
         showBlockTitles: layout.showBlockTitles !== false,
         blocks: blocks.map((block) => ({ ...block })),
       },
@@ -163,6 +164,8 @@
     document.body.classList.toggle("hide-block-titles", settings.layout.showBlockTitles === false);
     document.body.classList.toggle("layout-mode-free", settings.layout.mode === "free");
     document.body.classList.toggle("layout-mode-grid", settings.layout.mode !== "free");
+    document.body.classList.toggle("layout-zone-full", settings.layout.zone === "full");
+    document.body.classList.toggle("layout-zone-contained", settings.layout.zone !== "full");
     document.body.classList.toggle(EDITING_CLASS, editing);
     container.style.setProperty("--grid-columns", String(settings.layout.columns || DEFAULT_COLUMNS));
 
@@ -173,18 +176,32 @@
       if (settings.layout.mode === "free") applyFreeCard(card, block, metrics);
       else applyGridCard(card, block);
     }
-    if (settings.layout.mode === "free") syncFreeCanvasHeight();
+
+    if (settings.layout.mode === "free") {
+      syncFreeCanvasSize();
+    } else {
+      container.style.minWidth = "";
+      container.style.minHeight = "";
+    }
   }
 
-  function syncFreeCanvasHeight() {
+  function syncFreeCanvasSize() {
     const container = grid();
     if (!container) return;
-    const max = Array.from(container.querySelectorAll(".card")).reduce((bottom, card) => {
+    const cards = Array.from(container.querySelectorAll(".card"));
+    const max = cards.reduce((bounds, card) => {
+      const left = parseFloat(card.style.left || "0") || 0;
       const top = parseFloat(card.style.top || "0") || 0;
+      const width = parseFloat(card.style.width || "0") || card.getBoundingClientRect().width;
       const height = parseFloat(card.style.height || "0") || card.getBoundingClientRect().height;
-      return Math.max(bottom, top + height + 32);
-    }, window.innerHeight - 64);
-    container.style.minHeight = `${max}px`;
+      return {
+        right: Math.max(bounds.right, left + width + 32),
+        bottom: Math.max(bounds.bottom, top + height + 32),
+      };
+    }, { right: window.innerWidth - 64, bottom: window.innerHeight - 64 });
+
+    container.style.minHeight = `${max.bottom}px`;
+    container.style.minWidth = settings.layout.zone === "full" ? `${max.right}px` : "";
   }
 
   function iconButton(id, label, text) {
@@ -220,6 +237,23 @@
     return button;
   }
 
+  function toolbarSelect(labelText, value, options, onChange) {
+    const wrapper = document.createElement("label");
+    wrapper.className = "layout-toolbar__field";
+    wrapper.append(document.createTextNode(labelText));
+    const select = document.createElement("select");
+    for (const [optionValue, optionLabel] of options) {
+      const option = document.createElement("option");
+      option.value = optionValue;
+      option.textContent = optionLabel;
+      select.append(option);
+    }
+    select.value = value;
+    select.addEventListener("change", () => onChange(select.value));
+    wrapper.append(select);
+    return wrapper;
+  }
+
   function renderToolbar() {
     document.getElementById("layoutToolbar")?.remove();
     if (!editing || !settings) return;
@@ -231,14 +265,25 @@
     const title = document.createElement("h2");
     title.textContent = t("layoutEditor", "Layout editor");
 
-    const modeLabel = document.createElement("label");
-    modeLabel.className = "layout-toolbar__field";
-    modeLabel.append(document.createTextNode(t("layoutMode", "Layout mode")));
-    const mode = document.createElement("select");
-    mode.innerHTML = `<option value="grid">${t("layoutModeGrid", "Grid")}</option><option value="free">${t("layoutModeFree", "Free")}</option>`;
-    mode.value = settings.layout.mode;
-    mode.addEventListener("change", () => void patchLayout({ mode: mode.value }));
-    modeLabel.append(mode);
+    const modeLabel = toolbarSelect(
+      t("layoutMode", "Layout mode"),
+      settings.layout.mode,
+      [
+        ["grid", t("layoutModeGrid", "Grid")],
+        ["free", t("layoutModeFree", "Free")],
+      ],
+      (mode) => void patchLayout({ mode }),
+    );
+
+    const zoneLabel = toolbarSelect(
+      t("layoutZone", "Layout zone"),
+      settings.layout.zone,
+      [
+        ["contained", t("layoutZoneContained", "Contained")],
+        ["full", t("layoutZoneFull", "Full viewport")],
+      ],
+      (zone) => void patchLayout({ zone }),
+    );
 
     const titleToggle = document.createElement("label");
     titleToggle.className = "layout-toolbar__check";
@@ -264,6 +309,7 @@
     toolbar.append(
       title,
       modeLabel,
+      zoneLabel,
       titleToggle,
       blocks,
       toolbarButton(t("doneEditing", "Done"), () => {
@@ -341,7 +387,7 @@
         dragState.startX = event.clientX;
         dragState.startY = event.clientY;
       }
-      syncFreeCanvasHeight();
+      syncFreeCanvasSize();
       return;
     }
 

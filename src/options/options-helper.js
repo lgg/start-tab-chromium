@@ -83,6 +83,25 @@
     panel.insertBefore(node, target);
   }
 
+  function layoutSelect(id, labelKey, labelFallback, options, value, onChange) {
+    const wrapper = document.createElement("label");
+    wrapper.className = "field field--wide start-tab-extra-field";
+    const label = document.createElement("span");
+    label.textContent = t(labelKey, labelFallback);
+    const select = document.createElement("select");
+    select.id = id;
+    for (const [optionValue, optionKey, optionFallback] of options) {
+      const option = document.createElement("option");
+      option.value = optionValue;
+      option.textContent = t(optionKey, optionFallback);
+      select.append(option);
+    }
+    select.value = value;
+    select.addEventListener("change", () => onChange(select.value));
+    wrapper.append(label, select);
+    return wrapper;
+  }
+
   async function addLayoutExtraFields(layoutSection) {
     const grid = layoutSection.querySelector(".grid");
     if (!grid || grid.dataset.layoutExtras === "true" || grid.querySelector("#layoutMode")) return;
@@ -90,16 +109,29 @@
     const settings = await rawSettings();
     const layout = isRecord(settings.layout) ? settings.layout : {};
 
-    const modeLabel = document.createElement("label");
-    modeLabel.className = "field field--wide start-tab-extra-field";
-    const modeText = document.createElement("span");
-    modeText.textContent = t("layoutMode", "Layout mode");
-    const mode = document.createElement("select");
-    mode.id = "layoutMode";
-    mode.innerHTML = `<option value="grid">${t("layoutModeGrid", "Grid")}</option><option value="free">${t("layoutModeFree", "Free")}</option>`;
-    mode.value = layout.mode === "free" ? "free" : "grid";
-    mode.addEventListener("change", () => void patchLayout({ mode: mode.value }));
-    modeLabel.append(modeText, mode);
+    const modeLabel = layoutSelect(
+      "layoutMode",
+      "layoutMode",
+      "Layout mode",
+      [
+        ["grid", "layoutModeGrid", "Grid"],
+        ["free", "layoutModeFree", "Free"],
+      ],
+      layout.mode === "free" ? "free" : "grid",
+      (mode) => void patchLayout({ mode }),
+    );
+
+    const zoneLabel = layoutSelect(
+      "layoutZone",
+      "layoutZone",
+      "Layout zone",
+      [
+        ["contained", "layoutZoneContained", "Contained"],
+        ["full", "layoutZoneFull", "Full viewport"],
+      ],
+      layout.zone === "full" ? "full" : "contained",
+      (zone) => void patchLayout({ zone }),
+    );
 
     const titlesLabel = document.createElement("label");
     titlesLabel.className = "field field--wide start-tab-extra-field";
@@ -116,6 +148,7 @@
     titlesLabel.append(titlesText, checkboxWrap);
 
     grid.prepend(titlesLabel);
+    grid.prepend(zoneLabel);
     grid.prepend(modeLabel);
   }
 
@@ -133,8 +166,10 @@
 
   function reapplyPendingLayoutPatch() {
     const mode = document.getElementById("layoutMode");
+    const zone = document.getElementById("layoutZone");
     const titles = document.getElementById("showBlockTitles");
     if (mode instanceof HTMLSelectElement) pendingLayoutPatch.mode = mode.value;
+    if (zone instanceof HTMLSelectElement) pendingLayoutPatch.zone = zone.value;
     if (titles instanceof HTMLInputElement) pendingLayoutPatch.showBlockTitles = titles.checked;
     if (Object.keys(pendingLayoutPatch).length > 0) void patchLayout(pendingLayoutPatch);
   }
