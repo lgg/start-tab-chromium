@@ -276,6 +276,37 @@ body.effect-noise .background::after {
   font-weight: 760;
 }
 
+.settings-hover-zone {
+  display: none;
+  position: fixed;
+  z-index: 1;
+}
+
+body.settings-hover .settings-hover-zone {
+  display: block;
+}
+
+body.settings-hover-top .settings-hover-zone {
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 96px;
+}
+
+body.settings-hover-top-right .settings-hover-zone {
+  top: 0;
+  right: 0;
+  width: 156px;
+  height: 104px;
+}
+
+body.settings-hover-right .settings-hover-zone {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 96px;
+}
+
 .settings-button {
   position: fixed;
   top: 18px;
@@ -296,7 +327,8 @@ body.settings-hover .settings-button {
   opacity: 0;
 }
 
-body.settings-hover:hover .settings-button,
+body.settings-hover:has(.settings-hover-zone:hover) .settings-button,
+body.settings-hover .settings-button:hover,
 .settings-button:focus-visible {
   opacity: 1;
 }
