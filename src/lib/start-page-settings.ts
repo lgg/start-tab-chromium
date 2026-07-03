@@ -55,6 +55,9 @@ export interface SearchProvider {
 }
 
 export interface StartPageSettings {
+  startTab: {
+    enabled: boolean;
+  };
   appearance: {
     fontFamily: string;
     baseFontSize: number;
@@ -253,6 +256,9 @@ export const LAYOUT_PRESETS: LayoutPreset[] = [
 ];
 
 export const DEFAULT_SETTINGS: StartPageSettings = {
+  startTab: {
+    enabled: true,
+  },
   appearance: {
     fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
     baseFontSize: 16,
@@ -422,6 +428,7 @@ function mergeLayoutBlocks(base: LayoutBlock[], value: unknown, columns: number)
 function mergeSettings(base: StartPageSettings, value: unknown): StartPageSettings {
   if (!isRecord(value)) return base;
 
+  const startTab = isRecord(value.startTab) ? value.startTab : {};
   const appearance = isRecord(value.appearance) ? value.appearance : {};
   const settingsButton = isRecord(value.settingsButton) ? value.settingsButton : {};
   const dateTime = isRecord(value.dateTime) ? value.dateTime : {};
@@ -441,6 +448,9 @@ function mergeSettings(base: StartPageSettings, value: unknown): StartPageSettin
   const columns = finiteInteger(layout.columns, base.layout.columns, 1, 24);
 
   return {
+    startTab: {
+      enabled: booleanValue(startTab.enabled, base.startTab.enabled),
+    },
     appearance: {
       fontFamily: stringValue(appearance.fontFamily, base.appearance.fontFamily),
       baseFontSize: finiteNumber(appearance.baseFontSize, base.appearance.baseFontSize, 10, 32),

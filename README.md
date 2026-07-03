@@ -8,6 +8,7 @@ Start Tab is a Manifest V3 extension for Chromium-based browsers. It combines a 
 
 - Block or unblock the current site from the browser action popup.
 - Store the blocklist locally with `chrome.storage.local`.
+- Edit the full blocklist from the options page.
 - Enforce blocking with Manifest V3 `declarativeNetRequest` dynamic rules.
 - Redirect blocked navigations to an extension-owned blocked page.
 - Delay unblocking from the blocked page with a countdown.
@@ -20,6 +21,8 @@ Start Tab is a Manifest V3 extension for Chromium-based browsers. It combines a 
 - Link grid settings: rows, columns, icon size, font size, and horizontal or vertical paged navigation.
 - Timer, stopwatch, and Pomodoro state persistence across closed and reopened new tabs.
 - Optional notifications for timer and Pomodoro completion.
+- Tabbed options page with General, Start Tab, Blocklist, Backup, and About sections.
+- Start Tab page-content toggle inside the Start Tab options section.
 - Options page with localization, backup, appearance, search, IP, Google Calendar, weather, links, timers, focus stats, and drag/drop layout controls.
 - Layout presets for focus, dashboard, minimal, development, and rest workflows.
 - Layout editor ordering, enabling, disabling, numeric geometry editing, and visual width/height resize controls.
@@ -44,6 +47,22 @@ npm run build:blocker-only
 
 The full production extension is built into `build/` and can be loaded as an unpacked Chromium extension. The blocker-only variant is built into `build-blocker-only/` and omits `chrome_url_overrides.newtab` from the generated manifest.
 
+## Local Install And New Tab Checks
+
+1. Build the full extension with `npm run build`.
+2. In the browser extensions page, remove the old unpacked extension if it points to a stale folder.
+3. Load the `build/` folder, not `build-blocker-only/`.
+4. Open `build/manifest.json` and verify it contains:
+
+```json
+"chrome_url_overrides": {
+  "newtab": "newtab.html"
+}
+```
+
+5. Open extension Options -> About -> Open Start Tab. If this opens the Start Tab page, the extension page itself is working.
+6. If the diagnostic page works but Ctrl+T still opens the browser's default New Tab, disable other new-tab extensions and test in Chrome or Edge. Some Chromium-derived browsers may keep their own new tab page even when a loaded extension declares `chrome_url_overrides.newtab`.
+
 ## Google Integrations
 
 Google Calendar and Google Drive sync require a real OAuth client ID in `src/manifest.json`:
@@ -67,7 +86,7 @@ Chromium does not provide a runtime API to toggle `chrome_url_overrides.newtab` 
 - `npm run build` creates the full extension with the custom new tab page enabled.
 - `npm run build:blocker-only` creates the blocker-only extension without replacing the browser new tab page.
 
-Inside the full build, the start page itself is configurable through settings.
+Inside the full build, the Start Tab settings page can enable or disable the Start Tab page content. That setting does not remove the manifest-level new tab override from an already installed full build.
 
 ## Project Layout
 

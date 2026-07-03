@@ -2,6 +2,7 @@
   color-scheme: dark;
   --bg: #0f172a;
   --panel: #111c31;
+  --panel-2: #0b1526;
   --border: rgb(255 255 255 / 0.12);
   --text: #f8fafc;
   --muted: #94a3b8;
@@ -21,7 +22,7 @@ body {
 }
 
 .options {
-  width: min(980px, 100%);
+  width: min(1120px, 100%);
   margin: 0 auto;
   padding: 32px 20px 48px;
 }
@@ -54,9 +55,63 @@ p {
   color: var(--muted);
 }
 
+a {
+  color: var(--accent);
+}
+
 .form {
   display: grid;
   gap: 18px;
+}
+
+.tabs {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.tabs__nav {
+  position: sticky;
+  top: 20px;
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 10px;
+}
+
+.tabs__button {
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  padding: 11px 12px;
+  text-align: left;
+}
+
+.tabs__button:hover,
+.tabs__button--active {
+  background: rgb(147 197 253 / 0.16);
+  color: var(--text);
+}
+
+.tabs__panels {
+  min-width: 0;
+}
+
+.tabs__panel {
+  display: grid;
+  gap: 18px;
+}
+
+.tabs__panel[hidden] {
+  display: none;
 }
 
 .section {
@@ -79,6 +134,20 @@ p {
 
 .field--wide {
   grid-column: 1 / -1;
+}
+
+.note {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.about {
+  display: grid;
+  gap: 8px;
+}
+
+.about__row {
+  margin: 0;
 }
 
 label {
@@ -121,6 +190,10 @@ textarea {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+#blockedSites {
+  min-height: 260px;
+}
+
 .checkbox {
   display: flex;
   align-items: center;
@@ -133,6 +206,15 @@ textarea {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.actions--sticky {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  border-top: 1px solid var(--border);
+  background: linear-gradient(180deg, rgb(15 23 42 / 0), var(--bg) 35%);
+  padding-top: 18px;
 }
 
 .layout-editor {
@@ -250,15 +332,32 @@ textarea {
   color: var(--text);
 }
 
+.button:hover {
+  filter: brightness(1.08);
+}
+
 .status {
   min-height: 24px;
   margin: 14px 0 0;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 860px) {
   .options__header,
-  .grid {
+  .grid,
+  .tabs {
     display: block;
+  }
+
+  .tabs__nav {
+    position: static;
+    display: flex;
+    overflow-x: auto;
+    margin-bottom: 18px;
+  }
+
+  .tabs__button {
+    min-width: max-content;
+    text-align: center;
   }
 
   .field {
