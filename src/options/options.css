@@ -401,6 +401,161 @@ textarea {
   margin: 14px 0 0;
 }
 
+.background-preset-manager {
+  display: grid;
+  gap: 14px;
+  border: 1px solid rgb(147 197 253 / 0.22);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 0.035);
+  padding: 14px;
+}
+
+.background-preset-manager h3,
+.background-preset-group h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.94rem;
+}
+
+.background-preset-manager p {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.background-preset-group {
+  display: grid;
+  gap: 10px;
+}
+
+.background-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 10px;
+}
+
+.background-tile {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgb(7 17 31 / 0.82);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  padding: 8px;
+  text-align: left;
+}
+
+.background-tile--active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgb(147 197 253 / 0.16);
+}
+
+.background-tile__preview {
+  position: relative;
+  display: block;
+  min-height: 74px;
+  overflow: hidden;
+  border-radius: 8px;
+  background-position: center;
+  background-size: cover;
+}
+
+.background-tile__preview::before,
+.background-tile__preview::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.background-tile__preview--gradient::before {
+  background: linear-gradient(135deg, #0f172a, #1e3a8a, #0f766e, #312e81);
+  background-size: 300% 300%;
+}
+
+.background-tile__preview--aurora::before {
+  background:
+    radial-gradient(circle at 18% 20%, rgb(56 189 248 / 0.42), transparent 28%),
+    radial-gradient(circle at 78% 12%, rgb(168 85 247 / 0.38), transparent 30%),
+    radial-gradient(circle at 45% 85%, rgb(34 197 94 / 0.25), transparent 35%);
+  filter: blur(10px);
+}
+
+.background-tile__preview--mesh::before {
+  background:
+    radial-gradient(circle at 20% 30%, #2563eb 0 12%, transparent 34%),
+    radial-gradient(circle at 70% 22%, #7c3aed 0 10%, transparent 30%),
+    radial-gradient(circle at 55% 80%, #0f766e 0 12%, transparent 32%),
+    linear-gradient(135deg, #020617, #172554);
+}
+
+.background-tile__preview--spotlight::before {
+  background: radial-gradient(circle at 50% 25%, rgb(255 255 255 / 0.22), transparent 34%);
+}
+
+.background-tile__preview--noise::after {
+  background-image: repeating-radial-gradient(circle at 0 0, rgb(255 255 255 / 0.16) 0 1px, transparent 1px 4px);
+  opacity: 0.38;
+}
+
+.background-tile__title {
+  overflow: hidden;
+  font-size: 0.88rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.background-tile__meta {
+  color: var(--muted);
+  font-size: 0.76rem;
+  text-transform: capitalize;
+}
+
+.background-tile__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.background-tile__action {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 4px 7px;
+}
+
+.background-tile__action--liked {
+  border-color: rgb(248 113 113 / 0.4);
+  color: #fecaca;
+}
+
+.background-preset-add {
+  border-top: 1px solid rgb(255 255 255 / 0.1);
+  padding-top: 12px;
+}
+
+.background-preset-add summary {
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.background-preset-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.background-preset-form .button {
+  align-self: end;
+}
+
 @media (max-width: 860px) {
   .options__header,
   .grid,
@@ -425,7 +580,8 @@ textarea {
   }
 
   .actions,
-  .backup-groups {
+  .backup-groups,
+  .background-preset-form {
     display: grid;
     grid-template-columns: 1fr;
     justify-content: stretch;

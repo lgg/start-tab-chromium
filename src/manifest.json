@@ -42,6 +42,7 @@
     "history",
     "identity",
     "storage",
+    "unlimitedStorage",
     "notifications",
     "declarativeNetRequest",
     "webNavigation"
