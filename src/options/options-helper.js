@@ -85,7 +85,8 @@
 
   async function addLayoutExtraFields(layoutSection) {
     const grid = layoutSection.querySelector(".grid");
-    if (!grid || grid.querySelector("#layoutMode")) return;
+    if (!grid || grid.dataset.layoutExtras === "true" || grid.querySelector("#layoutMode")) return;
+    grid.dataset.layoutExtras = "true";
     const settings = await rawSettings();
     const layout = isRecord(settings.layout) ? settings.layout : {};
 
