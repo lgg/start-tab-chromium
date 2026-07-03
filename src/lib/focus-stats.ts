@@ -1,4 +1,4 @@
-import { getStartPageSettings } from "./start-page-settings.js";
+import { getStartPageSettings, type StartPageSettings } from "./start-page-settings.js";
 
 export const FOCUS_STATS_KEY = "focusStats";
 
@@ -161,8 +161,7 @@ function addToCounts(counts: CountSet, patch: Partial<CountSet>): void {
   counts.focusTimeMs += patch.focusTimeMs ?? 0;
 }
 
-async function domainMinutes(host: string): Promise<number> {
-  const settings = await getStartPageSettings();
+function domainMinutes(host: string, settings: StartPageSettings): number {
   return settings.focusStats.domainMinutes[host] ?? settings.focusStats.defaultMinutesPerAvoidedVisit;
 }
 
@@ -188,7 +187,7 @@ export async function recordBlockedNavigation(host: string): Promise<void> {
   domain.blockHits += 1;
 
   if (isAvoidedVisit) {
-    const minutes = await domainMinutes(host);
+    const minutes = domainMinutes(host, settings);
     addToCounts(stats.totals, { avoidedVisits: 1, estimatedMinutesSaved: minutes });
     addToCounts(day, { avoidedVisits: 1, estimatedMinutesSaved: minutes });
     domain.avoidedVisits += 1;
