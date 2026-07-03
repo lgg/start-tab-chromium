@@ -6,6 +6,8 @@ export type LinkPageDirection = "horizontal" | "vertical";
 export type WeatherDisplayMode = "current" | "day" | "week";
 export type WeatherProviderId = "open-meteo";
 export type LayoutPresetId = "work" | "minimal" | "focus" | "dashboard" | "development" | "rest";
+export type LayoutMode = "grid" | "free";
+export type LayoutZone = "contained" | "full";
 export type BlockType =
   | "dateTime"
   | "ip"
@@ -24,6 +26,13 @@ export type BlockType =
   | "startPinned"
   | "stats";
 
+export interface FreeBlockRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface LayoutBlock {
   id: string;
   type: BlockType;
@@ -33,6 +42,8 @@ export interface LayoutBlock {
   row: number;
   width: number;
   height: number;
+  free?: FreeBlockRect;
+  config?: Record<string, unknown>;
 }
 
 export interface LayoutPreset {
@@ -121,6 +132,9 @@ export interface StartPageSettings {
   layout: {
     columns: number;
     profile: string;
+    mode: LayoutMode;
+    zone: LayoutZone;
+    showBlockTitles: boolean;
     blocks: LayoutBlock[];
   };
 }
@@ -133,6 +147,8 @@ const DATE_TIME_MODES: readonly DateTimeMode[] = ["both", "date", "time"];
 const LINK_PAGE_DIRECTIONS: readonly LinkPageDirection[] = ["horizontal", "vertical"];
 const WEATHER_DISPLAY_MODES: readonly WeatherDisplayMode[] = ["current", "day", "week"];
 const WEATHER_PROVIDERS: readonly WeatherProviderId[] = ["open-meteo"];
+const LAYOUT_MODES: readonly LayoutMode[] = ["grid", "free"];
+const LAYOUT_ZONES: readonly LayoutZone[] = ["contained", "full"];
 const BLOCK_TYPES: readonly BlockType[] = [
   "dateTime",
   "ip",
@@ -182,7 +198,11 @@ export const DEFAULT_LAYOUT_BLOCKS: LayoutBlock[] = [
 ];
 
 export function cloneLayoutBlocks(blocks: LayoutBlock[]): LayoutBlock[] {
-  return blocks.map((block) => ({ ...block }));
+  return blocks.map((block) => ({
+    ...block,
+    free: block.free ? { ...block.free } : undefined,
+    config: block.config ? { ...block.config } : undefined,
+  }));
 }
 
 export const LAYOUT_PRESETS: LayoutPreset[] = [
@@ -335,6 +355,9 @@ export const DEFAULT_SETTINGS: StartPageSettings = {
   layout: {
     columns: 12,
     profile: "work",
+    mode: "grid",
+    zone: "contained",
+    showBlockTitles: true,
     blocks: cloneLayoutBlocks(DEFAULT_LAYOUT_BLOCKS),
   },
 };
@@ -362,6 +385,22 @@ function finiteInteger(value: unknown, fallback: number, min: number, max: numbe
 
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return typeof value === "string" && (allowed as readonly string[]).includes(value) ? value as T : fallback;
+}
+
+function recordValue(value: unknown, fallback?: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (isRecord(value)) return { ...value };
+  return fallback ? { ...fallback } : undefined;
+}
+
+function freeRectValue(value: unknown, fallback?: FreeBlockRect): FreeBlockRect | undefined {
+  const source = isRecord(value) ? value : fallback;
+  if (!source) return undefined;
+  return {
+    x: finiteNumber(source.x, fallback?.x ?? 0, 0, 100_000),
+    y: finiteNumber(source.y, fallback?.y ?? 0, 0, 100_000),
+    width: finiteNumber(source.width, fallback?.width ?? 260, 120, 100_000),
+    height: finiteNumber(source.height, fallback?.height ?? 180, 80, 100_000),
+  };
 }
 
 function isStartLink(value: unknown): value is StartLink {
@@ -412,15 +451,19 @@ function mergeLayoutBlocks(base: LayoutBlock[], value: unknown, columns: number)
   return value.filter(isRecord).map((block, index) => {
     const fallback = fallbackById.get(stringValue(block.id, "")) ?? base[index] ?? DEFAULT_LAYOUT_BLOCKS[0]!;
     const width = finiteInteger(block.width, fallback.width, 1, columns);
+    const free = freeRectValue(block.free, fallback.free);
+    const config = recordValue(block.config, fallback.config);
     return {
       id: stringValue(block.id, fallback.id),
       type: oneOf(block.type, BLOCK_TYPES, fallback.type),
       title: stringValue(block.title, fallback.title),
       enabled: booleanValue(block.enabled, fallback.enabled),
       column: finiteInteger(block.column, fallback.column, 1, Math.max(1, columns - width + 1)),
-      row: finiteInteger(block.row, fallback.row, 1, 48),
+      row: finiteInteger(block.row, fallback.row, 1, 200),
       width,
-      height: finiteInteger(block.height, fallback.height, 1, 24),
+      height: finiteInteger(block.height, fallback.height, 1, 80),
+      ...(free ? { free } : {}),
+      ...(config ? { config } : {}),
     };
   });
 }
@@ -445,7 +488,7 @@ function mergeSettings(base: StartPageSettings, value: unknown): StartPageSettin
   const timers = isRecord(value.timers) ? value.timers : {};
   const focusStats = isRecord(value.focusStats) ? value.focusStats : {};
   const layout = isRecord(value.layout) ? value.layout : {};
-  const columns = finiteInteger(layout.columns, base.layout.columns, 1, 24);
+  const columns = finiteInteger(layout.columns, base.layout.columns, 1, 80);
 
   return {
     startTab: {
@@ -524,6 +567,9 @@ function mergeSettings(base: StartPageSettings, value: unknown): StartPageSettin
     layout: {
       columns,
       profile: stringValue(layout.profile, base.layout.profile),
+      mode: oneOf(layout.mode, LAYOUT_MODES, base.layout.mode),
+      zone: oneOf(layout.zone, LAYOUT_ZONES, base.layout.zone),
+      showBlockTitles: booleanValue(layout.showBlockTitles, base.layout.showBlockTitles),
       blocks: mergeLayoutBlocks(base.layout.blocks, layout.blocks, columns),
     },
   };
