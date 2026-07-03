@@ -13,6 +13,12 @@
     textProvider("https://www.cloudflare.com/cdn-cgi/trace", "Cloudflare Trace", parseCloudflareTrace),
   ];
 
+  let lookupPromise = null;
+  let lookupStarted = false;
+  let lastResult = null;
+  let lastUnavailable = false;
+  let renderQueued = false;
+
   function provider(endpoint, title, parse) {
     return { endpoint, title, parse, responseType: "json" };
   }
@@ -87,28 +93,59 @@
     for (const target of targets()) target.textContent = message("ipUnavailable", "IP lookup is unavailable.");
   }
 
-  async function loadIp() {
+  function renderCached() {
+    if (lastResult) {
+      render(lastResult);
+      return true;
+    }
+    if (lastUnavailable) {
+      renderUnavailable();
+      return true;
+    }
+    return false;
+  }
+
+  async function performLookup() {
     const endpoint = await readEndpoint();
     for (const providerValue of orderedProviders(endpoint)) {
       try {
-        render(await lookupWith(providerValue));
+        lastResult = await lookupWith(providerValue);
+        lastUnavailable = false;
+        render(lastResult);
         return;
       } catch {
         // Try the next public provider. Public IP APIs can rate-limit or block CORS per browser.
       }
     }
+    lastResult = null;
+    lastUnavailable = true;
     renderUnavailable();
   }
 
-  function schedule() {
-    window.setTimeout(() => void loadIp(), 0);
-    window.setTimeout(() => void loadIp(), 600);
+  function loadIpOnce() {
+    if (renderCached()) return lookupPromise;
+    if (lookupStarted) return lookupPromise;
+    lookupStarted = true;
+    lookupPromise = performLookup();
+    return lookupPromise;
+  }
+
+  function queueRenderOrLookup() {
+    if (renderQueued) return;
+    renderQueued = true;
+    window.setTimeout(() => {
+      renderQueued = false;
+      if (targets().length === 0) return;
+      void loadIpOnce();
+    }, 0);
   }
 
   const observer = new MutationObserver(() => {
-    if (targets().length > 0) schedule();
+    if (targets().length === 0) return;
+    if (renderCached()) return;
+    queueRenderOrLookup();
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });
-  window.addEventListener("DOMContentLoaded", schedule);
-  schedule();
+  window.addEventListener("DOMContentLoaded", queueRenderOrLookup);
+  queueRenderOrLookup();
 })();
