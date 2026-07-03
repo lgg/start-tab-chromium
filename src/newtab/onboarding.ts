@@ -49,6 +49,7 @@ async function applyPreset(presetId: string): Promise<void> {
   await setStartPageSettings({
     ...settings,
     layout: {
+      ...settings.layout,
       columns: preset.columns,
       profile: preset.id,
       blocks: cloneLayoutBlocks(preset.blocks),
