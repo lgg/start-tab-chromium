@@ -927,11 +927,11 @@ settingsEl.title = "";
 settingsEl.addEventListener("click", () => void chrome.runtime.openOptionsPage());
 
 void (async () => {
-  [i18n, settings, state] = await Promise.all([
+  [i18n, settings] = await Promise.all([
     loadI18n(),
     getStartPageSettings(),
-    loadRuntimeState(),
   ]);
+  state = await loadRuntimeState();
   document.title = i18n.t("appName");
   settingsEl.title = i18n.t("openSettings");
   applyAppearance();
