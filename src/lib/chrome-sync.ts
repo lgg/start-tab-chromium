@@ -5,6 +5,7 @@ const LOCAL_META_KEY = "startTabLocalSyncMeta";
 const CHUNK_PREFIX = "startTabSyncChunk";
 const DEVICE_ID_KEY = "startTabDeviceId";
 const CHUNK_SIZE = 7000;
+const MAX_SYNC_CHUNKS = 12;
 
 export interface SyncMeta {
   version: 2;
@@ -72,6 +73,10 @@ export async function uploadChromeSyncBackup(): Promise<void> {
   const chunks: string[] = [];
   for (let index = 0; index < json.length; index += CHUNK_SIZE) {
     chunks.push(json.slice(index, index + CHUNK_SIZE));
+  }
+
+  if (chunks.length > MAX_SYNC_CHUNKS) {
+    throw new Error("Start Tab backup is too large for browser sync. Use JSON export or Google Drive backup instead.");
   }
 
   const existing = await chrome.storage.sync.get(META_KEY);
