@@ -55,14 +55,23 @@ async function getToken(interactive: boolean): Promise<string> {
 }
 
 async function googleFetch<T>(url: string, init: RequestInit = {}, interactive = false): Promise<T> {
-  const token = await getToken(interactive);
-  const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${token}`);
+  const requestWithToken = async (token: string): Promise<Response> => {
+    const headers = new Headers(init.headers);
+    headers.set("Authorization", `Bearer ${token}`);
+    return fetch(url, {
+      ...init,
+      headers,
+    });
+  };
 
-  const response = await fetch(url, {
-    ...init,
-    headers,
-  });
+  const token = await getToken(interactive);
+  let response = await requestWithToken(token);
+
+  if (response.status === 401 || response.status === 403) {
+    await chrome.identity.removeCachedAuthToken({ token });
+    response = await requestWithToken(await getToken(interactive));
+  }
+
   if (!response.ok) throw new Error(`Google API request failed: ${response.status}`);
   return (await response.json()) as T;
 }
