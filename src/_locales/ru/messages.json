@@ -97,6 +97,7 @@
   "statsTimeSaved": { "message": "Сэкономлено времени: {value} мин" },
   "statsPomodoros": { "message": "Завершено помидоро: {value}" },
   "statsInterrupted": { "message": "Сорвано сессий: {value}" },
+  "statsFocusTime": { "message": "Фокус-времени всего: {value}" },
   "statsUnblocks": { "message": "Разблокировок после таймера: {value}" },
   "openSettings": { "message": "Открыть настройки" },
   "onboardingTitle": { "message": "Настрой Start Tab" },
