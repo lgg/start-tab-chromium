@@ -398,6 +398,13 @@
     document.addEventListener("pointercancel", endPointer);
   }
 
+  function installRenderObserver() {
+    const container = grid();
+    if (!container) return;
+    const observer = new MutationObserver(() => applyLayout());
+    observer.observe(container, { childList: true });
+  }
+
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "local" || !changes[SETTINGS_KEY]) return;
     settings = normalizeSettings(changes[SETTINGS_KEY].newValue);
@@ -409,7 +416,9 @@
     await readSettings();
     installEditButton();
     installPointerHandlers();
+    installRenderObserver();
     window.setTimeout(applyLayout, 0);
+    window.setTimeout(applyLayout, 250);
     window.addEventListener("resize", applyLayout);
   })();
 })();
