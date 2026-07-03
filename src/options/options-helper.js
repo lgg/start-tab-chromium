@@ -1,5 +1,6 @@
 (() => {
   const SETTINGS_KEY = "startPageSettings";
+  const ENHANCE_DELAY_MS = 80;
   const IP_PROVIDERS = [
     ["https://ipapi.co/json/", "ipapi.co"],
     ["https://ipwho.is/", "ipwho.is"],
@@ -15,6 +16,8 @@
 
   let pendingLayoutPatch = {};
   let pendingIpEndpoint = "";
+  let enhanceTimer = 0;
+  let enhanceRunning = false;
 
   function t(key, fallback) {
     return chrome.i18n.getMessage(key) || fallback || key;
@@ -144,44 +147,49 @@
     const endpointInput = document.getElementById("ipEndpoint");
     if (!(endpointInput instanceof HTMLInputElement)) return;
     const grid = endpointInput.closest(".grid");
-    if (!grid || grid.querySelector("#ipProvider")) return;
+    if (!grid || grid.querySelector("#ipProvider") || grid.dataset.ipProviderEnhancing === "true") return;
+    grid.dataset.ipProviderEnhancing = "true";
 
-    const settings = await rawSettings();
-    const ip = isRecord(settings.ip) ? settings.ip : {};
-    const currentEndpoint = typeof ip.endpoint === "string" && ip.endpoint ? ip.endpoint : endpointInput.value;
-    pendingIpEndpoint = pendingIpEndpoint || currentEndpoint;
+    try {
+      const settings = await rawSettings();
+      const ip = isRecord(settings.ip) ? settings.ip : {};
+      const currentEndpoint = typeof ip.endpoint === "string" && ip.endpoint ? ip.endpoint : endpointInput.value;
+      pendingIpEndpoint = pendingIpEndpoint || currentEndpoint;
 
-    const wrapper = document.createElement("label");
-    wrapper.className = "field field--wide start-tab-extra-field";
-    const label = document.createElement("span");
-    label.textContent = t("ipProvider", "IP provider");
-    const select = document.createElement("select");
-    select.id = "ipProvider";
+      const wrapper = document.createElement("label");
+      wrapper.className = "field field--wide start-tab-extra-field";
+      const label = document.createElement("span");
+      label.textContent = t("ipProvider", "IP provider");
+      const select = document.createElement("select");
+      select.id = "ipProvider";
 
-    for (const [endpoint, title] of IP_PROVIDERS) {
-      const option = document.createElement("option");
-      option.value = endpoint;
-      option.textContent = title;
-      select.append(option);
-    }
+      for (const [endpoint, title] of IP_PROVIDERS) {
+        const option = document.createElement("option");
+        option.value = endpoint;
+        option.textContent = title;
+        select.append(option);
+      }
 
-    const custom = document.createElement("option");
-    custom.value = "custom";
-    custom.textContent = t("customEndpoint", "Custom endpoint");
-    select.append(custom);
-    select.value = IP_PROVIDERS.some(([endpoint]) => endpoint === currentEndpoint) ? currentEndpoint : "custom";
-    select.addEventListener("change", () => {
-      if (select.value !== "custom") void patchIpEndpoint(select.value);
+      const custom = document.createElement("option");
+      custom.value = "custom";
+      custom.textContent = t("customEndpoint", "Custom endpoint");
+      select.append(custom);
+      select.value = IP_PROVIDERS.some(([endpoint]) => endpoint === currentEndpoint) ? currentEndpoint : "custom";
+      select.addEventListener("change", () => {
+        if (select.value !== "custom") void patchIpEndpoint(select.value);
+        endpointInput.disabled = select.value !== "custom";
+      });
+
       endpointInput.disabled = select.value !== "custom";
-    });
+      endpointInput.addEventListener("input", () => {
+        if (select.value === "custom") pendingIpEndpoint = endpointInput.value;
+      });
 
-    endpointInput.disabled = select.value !== "custom";
-    endpointInput.addEventListener("input", () => {
-      if (select.value === "custom") pendingIpEndpoint = endpointInput.value;
-    });
-
-    wrapper.append(label, select);
-    endpointInput.closest(".field")?.insertAdjacentElement("beforebegin", wrapper);
+      wrapper.append(label, select);
+      endpointInput.closest(".field")?.insertAdjacentElement("beforebegin", wrapper);
+    } finally {
+      delete grid.dataset.ipProviderEnhancing;
+    }
   }
 
   async function addLayoutExtraFields(layoutSection) {
@@ -274,6 +282,19 @@
     void addIpProviderField();
   }
 
+  function scheduleEnhance() {
+    window.clearTimeout(enhanceTimer);
+    enhanceTimer = window.setTimeout(() => {
+      if (enhanceRunning) return;
+      enhanceRunning = true;
+      try {
+        enhance();
+      } finally {
+        enhanceRunning = false;
+      }
+    }, ENHANCE_DELAY_MS);
+  }
+
   document.addEventListener("submit", () => {
     window.setTimeout(reapplyPendingLayoutPatch, 250);
     window.setTimeout(reapplyPendingLayoutPatch, 900);
@@ -281,7 +302,7 @@
     window.setTimeout(reapplyPendingIpEndpoint, 900);
   });
 
-  const observer = new MutationObserver(enhance);
+  const observer = new MutationObserver(scheduleEnhance);
   observer.observe(document.documentElement, { childList: true, subtree: true });
-  enhance();
+  scheduleEnhance();
 })();
