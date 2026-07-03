@@ -75,14 +75,75 @@ function ensureDomain(stats: FocusStats, host: string): DomainStats {
   return created;
 }
 
-function isStats(value: unknown): value is FocusStats {
-  return typeof value === "object" && value !== null && (value as FocusStats).version === 1;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function nonNegativeNumber(value: unknown, fallback = 0): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function normalizeCounts(value: unknown): CountSet {
+  if (!isRecord(value)) return { ...EMPTY_COUNTS };
+  return {
+    blockHits: nonNegativeNumber(value.blockHits),
+    avoidedVisits: nonNegativeNumber(value.avoidedVisits),
+    estimatedMinutesSaved: nonNegativeNumber(value.estimatedMinutesSaved),
+    unblocksAfterCountdown: nonNegativeNumber(value.unblocksAfterCountdown),
+    focusSessionsStarted: nonNegativeNumber(value.focusSessionsStarted),
+    focusSessionsCompleted: nonNegativeNumber(value.focusSessionsCompleted),
+    focusSessionsInterrupted: nonNegativeNumber(value.focusSessionsInterrupted),
+    focusTimeMs: nonNegativeNumber(value.focusTimeMs),
+  };
+}
+
+function normalizeDomainStats(value: unknown): DomainStats {
+  if (!isRecord(value)) {
+    return {
+      blockHits: 0,
+      avoidedVisits: 0,
+      estimatedMinutesSaved: 0,
+      unblocksAfterCountdown: 0,
+      lastAvoidedAt: 0,
+    };
+  }
+  return {
+    blockHits: nonNegativeNumber(value.blockHits),
+    avoidedVisits: nonNegativeNumber(value.avoidedVisits),
+    estimatedMinutesSaved: nonNegativeNumber(value.estimatedMinutesSaved),
+    unblocksAfterCountdown: nonNegativeNumber(value.unblocksAfterCountdown),
+    lastAvoidedAt: nonNegativeNumber(value.lastAvoidedAt),
+  };
+}
+
+function normalizeStats(value: unknown): FocusStats {
+  if (!isRecord(value) || value.version !== 1) return emptyStats();
+
+  const stats: FocusStats = {
+    version: 1,
+    totals: normalizeCounts(value.totals),
+    byDay: {},
+    byDomain: {},
+  };
+
+  if (isRecord(value.byDay)) {
+    for (const [key, counts] of Object.entries(value.byDay)) {
+      if (key) stats.byDay[key] = normalizeCounts(counts);
+    }
+  }
+
+  if (isRecord(value.byDomain)) {
+    for (const [host, domainStats] of Object.entries(value.byDomain)) {
+      if (host) stats.byDomain[host] = normalizeDomainStats(domainStats);
+    }
+  }
+
+  return stats;
 }
 
 async function readStats(): Promise<FocusStats> {
   const items = await chrome.storage.local.get(FOCUS_STATS_KEY);
-  const value = items[FOCUS_STATS_KEY];
-  return isStats(value) ? value : emptyStats();
+  return normalizeStats(items[FOCUS_STATS_KEY]);
 }
 
 async function writeStats(stats: FocusStats): Promise<void> {
