@@ -323,7 +323,11 @@ function rebuildLayoutEditor(blocks: LayoutBlock[]): void {
 
 function rebuildLayoutEditorRows(editor: HTMLElement, blocks: LayoutBlock[]): void {
   editor.innerHTML = "";
-  for (const block of blocks) editor.append(layoutEditorRow(block));
+  const rows = document.createElement("div");
+  rows.className = "layout-editor__rows";
+  rows.id = "layoutRows";
+  for (const block of blocks) rows.append(layoutEditorRow(block));
+  editor.append(rows, layoutPreview(blocks));
 }
 
 function layoutEditorRow(block: LayoutBlock): HTMLElement {
@@ -331,6 +335,7 @@ function layoutEditorRow(block: LayoutBlock): HTMLElement {
   row.className = "layout-row";
   row.draggable = true;
   row.dataset.block = JSON.stringify(block);
+  row.dataset.blockId = block.id;
 
   const drag = document.createElement("span");
   drag.className = "layout-row__drag";
@@ -359,25 +364,97 @@ function layoutEditorRow(block: LayoutBlock): HTMLElement {
   }
   row.append(resizeControls());
 
-  row.addEventListener("dragstart", () => row.classList.add("layout-row--dragging"));
+  row.addEventListener("dragstart", (event) => {
+    row.classList.add("layout-row--dragging");
+    event.dataTransfer?.setData("text/plain", block.id);
+  });
   row.addEventListener("dragend", () => {
     row.classList.remove("layout-row--dragging");
-    syncLayoutJsonFromEditor();
+    syncLayoutEditor();
   });
   row.addEventListener("dragover", (event) => event.preventDefault());
   row.addEventListener("drop", (event) => {
     event.preventDefault();
-    const editor = requireElement<HTMLDivElement>("layoutEditor");
-    const dragged = editor.querySelector<HTMLElement>(".layout-row--dragging");
+    const rows = requireElement<HTMLDivElement>("layoutRows");
+    const dragged = rows.querySelector<HTMLElement>(".layout-row--dragging");
     if (!dragged || dragged === row) return;
-    editor.insertBefore(dragged, row);
-    syncLayoutJsonFromEditor();
+    rows.insertBefore(dragged, row);
+    syncLayoutEditor();
   });
-  row.addEventListener("input", syncLayoutJsonFromEditor);
-  row.addEventListener("change", syncLayoutJsonFromEditor);
+  row.addEventListener("input", syncLayoutEditor);
+  row.addEventListener("change", syncLayoutEditor);
   row.addEventListener("click", handleResizeClick);
 
   return row;
+}
+
+function layoutPreview(blocks: LayoutBlock[]): HTMLElement {
+  const preview = document.createElement("div");
+  preview.className = "layout-preview";
+  preview.id = "layoutPreview";
+  preview.style.setProperty("--layout-preview-columns", String(layoutColumnCount()));
+  preview.setAttribute("aria-label", i18n.t("sectionLayout"));
+  preview.addEventListener("dragover", (event) => event.preventDefault());
+  preview.addEventListener("drop", handlePreviewDrop);
+
+  for (const block of blocks) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = block.enabled ? "layout-preview__block" : "layout-preview__block layout-preview__block--disabled";
+    item.draggable = true;
+    item.dataset.blockId = block.id;
+    item.textContent = block.title;
+    item.style.gridColumn = `${block.column} / span ${block.width}`;
+    item.style.gridRow = `${block.row} / span ${block.height}`;
+    item.addEventListener("dragstart", (event) => {
+      event.dataTransfer?.setData("text/plain", block.id);
+    });
+    preview.append(item);
+  }
+
+  return preview;
+}
+
+function layoutColumnCount(): number {
+  const columns = Number(document.getElementById("layoutColumns") instanceof HTMLInputElement ? input("layoutColumns").value : settings.layout.columns);
+  return Number.isFinite(columns) ? Math.max(1, Math.round(columns)) : settings.layout.columns;
+}
+
+function handlePreviewDrop(event: DragEvent): void {
+  event.preventDefault();
+  const preview = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+  const blockId = event.dataTransfer?.getData("text/plain");
+  if (!preview || !blockId) return;
+
+  const row = document.querySelector<HTMLElement>(`.layout-row[data-block-id="${CSS.escape(blockId)}"]`);
+  if (!row) return;
+
+  const rect = preview.getBoundingClientRect();
+  const columns = layoutColumnCount();
+  const cellWidth = rect.width / columns;
+  const cellHeight = 30;
+  const column = Math.min(columns, Math.max(1, Math.floor((event.clientX - rect.left) / cellWidth) + 1));
+  const targetRow = Math.max(1, Math.floor((event.clientY - rect.top) / cellHeight) + 1);
+  const widthInput = row.querySelector<HTMLInputElement>('[data-field="width"]');
+  const columnInput = row.querySelector<HTMLInputElement>('[data-field="column"]');
+  const rowInput = row.querySelector<HTMLInputElement>('[data-field="row"]');
+  const width = Number(widthInput?.value);
+  const maxColumn = Math.max(1, columns - (Number.isFinite(width) ? width : 1) + 1);
+  if (columnInput) columnInput.value = String(Math.min(column, maxColumn));
+  if (rowInput) rowInput.value = String(targetRow);
+  syncLayoutEditor();
+}
+
+function rebuildLayoutPreviewFromEditor(): void {
+  const editor = document.getElementById("layoutEditor");
+  const preview = document.getElementById("layoutPreview");
+  if (!editor || !preview) return;
+  preview.replaceWith(layoutPreview(readLayoutBlocksFromEditor(editor)));
+}
+
+function syncLayoutEditor(): void {
+  syncLayoutJsonFromEditor();
+  rebuildLayoutPreviewFromEditor();
 }
 
 function resizeControls(): HTMLElement {
@@ -410,7 +487,7 @@ function handleResizeClick(event: MouseEvent): void {
   const delta = Number(button.dataset.resizeDelta);
   const current = Number(target.value);
   target.value = String(Math.max(1, (Number.isFinite(current) ? current : 1) + delta));
-  syncLayoutJsonFromEditor();
+  syncLayoutEditor();
 }
 
 function syncLayoutJsonFromEditor(): void {
