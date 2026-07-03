@@ -321,10 +321,10 @@ body.settings-hover-right .settings-hover-zone {
   width: 96px;
 }
 
-.settings-button {
+.settings-button,
+.native-new-tab-button {
   position: fixed;
   top: 18px;
-  right: 18px;
   z-index: 2;
   width: 42px;
   height: 42px;
@@ -334,16 +334,35 @@ body.settings-hover-right .settings-hover-zone {
   color: var(--text-color);
   cursor: pointer;
   font-size: 20px;
-  transition: opacity 140ms ease;
+  transition: opacity 140ms ease, background 140ms ease;
 }
 
-body.settings-hover .settings-button {
+.settings-button {
+  right: 18px;
+}
+
+.native-new-tab-button {
+  right: 118px;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.native-new-tab-button:hover {
+  background: rgb(248 113 113 / 0.25);
+}
+
+body.settings-hover .settings-button,
+body.settings-hover .native-new-tab-button {
   opacity: 0;
 }
 
 body.settings-hover:has(.settings-hover-zone:hover) .settings-button,
 body.settings-hover .settings-button:hover,
-.settings-button:focus-visible {
+.settings-button:focus-visible,
+body.settings-hover:has(.settings-hover-zone:hover) .native-new-tab-button,
+body.settings-hover .native-new-tab-button:hover,
+.native-new-tab-button:focus-visible {
   opacity: 1;
 }
 
