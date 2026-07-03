@@ -472,6 +472,14 @@ function updateDynamicBlocks(): void {
   updateClocks();
 }
 
+function isClockBlockType(type: LayoutBlock["type"]): type is ClockId {
+  return CLOCK_IDS.some((id) => id === type);
+}
+
+function hasDynamicBlocks(): boolean {
+  return settings.layout.blocks.some((block) => block.enabled && (block.type === "dateTime" || isClockBlockType(block.type)));
+}
+
 function updateDateTime(): void {
   const now = new Date();
   const timeEl = document.getElementById("dateTimeTime");
@@ -817,5 +825,5 @@ void (async () => {
   applyAppearance();
   render();
   window.addEventListener("pagehide", saveStateNow);
-  window.setInterval(updateDynamicBlocks, 1000);
+  if (hasDynamicBlocks()) window.setInterval(updateDynamicBlocks, 1000);
 })();
