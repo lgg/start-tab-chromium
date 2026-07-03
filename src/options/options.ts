@@ -1,4 +1,5 @@
 import { backupFileName, exportBackup, importBackup } from "../lib/backup.js";
+import { clearAll, getBlockedSites, replaceBlockedSites } from "../lib/blocklist.js";
 import { restoreChromeSyncBackup, syncChromeSyncBackup, uploadChromeSyncBackup } from "../lib/chrome-sync.js";
 import {
   isGoogleIntegrationConfigured,
@@ -30,6 +31,16 @@ import {
   type WeatherDisplayMode,
 } from "../lib/start-page-settings.js";
 
+type OptionsTab = "general" | "startTab" | "blocklist" | "backup" | "about";
+
+const TABS: Array<{ id: OptionsTab; labelKey: string }> = [
+  { id: "general", labelKey: "tabGeneral" },
+  { id: "startTab", labelKey: "tabStartTab" },
+  { id: "blocklist", labelKey: "tabBlocklist" },
+  { id: "backup", labelKey: "tabBackup" },
+  { id: "about", labelKey: "tabAbout" },
+];
+
 const titleEl = requireElement<HTMLHeadingElement>("title");
 const subtitleEl = requireElement<HTMLParagraphElement>("subtitle");
 const formEl = requireElement<HTMLFormElement>("form");
@@ -39,6 +50,8 @@ const statusEl = requireElement<HTMLParagraphElement>("status");
 let i18n: I18n;
 let settings: StartPageSettings;
 let localePreference: LocalePreference;
+let blockedSites: string[] = [];
+let activeTab: OptionsTab = "general";
 
 function requireElement<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
@@ -70,16 +83,89 @@ function render(): void {
   resetEl.textContent = i18n.t("resetSettings");
   statusEl.textContent = "";
   formEl.innerHTML = "";
+  formEl.append(tabbedOptions(), actions());
+}
 
-  formEl.append(
-    section(i18n.t("sectionLocalization"), [
-      field(i18n.t("localePreference"), makeSelect("locale", [
-        ["auto", i18n.t("localeAuto")],
-        ["en", "English"],
-        ["ru", "Русский"],
-      ], localePreference)),
+function tabbedOptions(): HTMLElement {
+  const wrapper = document.createElement("div");
+  wrapper.className = "tabs";
+
+  const nav = document.createElement("nav");
+  nav.className = "tabs__nav";
+  nav.setAttribute("aria-label", i18n.t("optionsMenu"));
+
+  const panels = document.createElement("div");
+  panels.className = "tabs__panels";
+
+  for (const tab of TABS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = tab.id === activeTab ? "tabs__button tabs__button--active" : "tabs__button";
+    button.textContent = i18n.t(tab.labelKey);
+    button.setAttribute("aria-controls", `panel-${tab.id}`);
+    button.setAttribute("aria-selected", String(tab.id === activeTab));
+    button.addEventListener("click", () => setActiveTab(tab.id));
+    nav.append(button);
+  }
+
+  for (const tab of TABS) panels.append(tabPanel(tab.id, sectionsFor(tab.id)));
+  wrapper.append(nav, panels);
+  return wrapper;
+}
+
+function setActiveTab(tab: OptionsTab): void {
+  activeTab = tab;
+  document.querySelectorAll<HTMLElement>(".tabs__button").forEach((button, index) => {
+    const selected = TABS[index]?.id === tab;
+    button.classList.toggle("tabs__button--active", selected);
+    button.setAttribute("aria-selected", String(selected));
+  });
+  document.querySelectorAll<HTMLElement>(".tabs__panel").forEach((panel) => {
+    panel.hidden = panel.id !== `panel-${tab}`;
+  });
+}
+
+function tabPanel(tab: OptionsTab, sections: HTMLElement[]): HTMLElement {
+  const panel = document.createElement("div");
+  panel.className = "tabs__panel";
+  panel.id = `panel-${tab}`;
+  panel.hidden = tab !== activeTab;
+  panel.append(...sections);
+  return panel;
+}
+
+function sectionsFor(tab: OptionsTab): HTMLElement[] {
+  switch (tab) {
+    case "general":
+      return [generalSection()];
+    case "startTab":
+      return startTabSections();
+    case "blocklist":
+      return [blocklistSection()];
+    case "backup":
+      return [section(i18n.t("sectionBackup"), [backupControls()])];
+    case "about":
+      return [aboutSection(), newTabDiagnosticsSection()];
+  }
+}
+
+function generalSection(): HTMLElement {
+  return section(i18n.t("sectionGeneral"), [
+    field(i18n.t("localePreference"), makeSelect("locale", [
+      ["auto", i18n.t("localeAuto")],
+      ["en", "English"],
+      ["ru", "Русский"],
+    ], localePreference)),
+    wideNote(i18n.t("generalSettingsNote")),
+  ]);
+}
+
+function startTabSections(): HTMLElement[] {
+  return [
+    section(i18n.t("sectionStartTab"), [
+      field(i18n.t("startTabEnabled"), makeCheckbox("startTabEnabled", settings.startTab.enabled)),
+      wideNote(i18n.t("startTabEnabledNote")),
     ]),
-    section(i18n.t("sectionBackup"), [backupControls()]),
     section(i18n.t("sectionAppearance"), [
       field(i18n.t("fontFamily"), makeInput("fontFamily", settings.appearance.fontFamily)),
       field(i18n.t("baseFontSize"), makeInput("baseFontSize", String(settings.appearance.baseFontSize), "number")),
@@ -174,8 +260,41 @@ function render(): void {
       layoutEditor(),
       field(i18n.t("layoutBlocksJson"), makeTextarea("layoutBlocksJson", JSON.stringify(settings.layout.blocks, null, 2)), true),
     ]),
-    actions(),
+  ];
+}
+
+function blocklistSection(): HTMLElement {
+  return section(i18n.t("sectionBlocklist"), [
+    wideNote(i18n.t("blocklistSettingsNote")),
+    field(i18n.t("blockedSites"), makeTextarea("blockedSites", blockedSites.join("\n")), true),
+    blocklistControls(),
+  ]);
+}
+
+function aboutSection(): HTMLElement {
+  const manifest = chrome.runtime.getManifest();
+  const wrapper = document.createElement("div");
+  wrapper.className = "about field--wide";
+  wrapper.append(
+    aboutRow(i18n.t("extensionName"), manifest.name),
+    aboutRow(i18n.t("extensionVersion"), manifest.version),
+    aboutLink(i18n.t("githubRepository"), manifest.homepage_url ?? "https://github.com/lgg/start-tab-chromium"),
   );
+  return section(i18n.t("sectionAbout"), [wrapper]);
+}
+
+function newTabDiagnosticsSection(): HTMLElement {
+  const wrapper = document.createElement("div");
+  wrapper.className = "actions field--wide";
+  wrapper.append(
+    actionButton("openStartTab", async () => {
+      await chrome.tabs.create({ url: chrome.runtime.getURL("newtab.html") });
+    }),
+  );
+  return section(i18n.t("sectionNewTabDiagnostics"), [
+    wideNote(i18n.t("newTabDiagnosticsNote")),
+    wrapper,
+  ]);
 }
 
 function section(title: string, fields: HTMLElement[]): HTMLElement {
@@ -197,6 +316,32 @@ function field(labelText: string, control: HTMLElement, wide = false): HTMLEleme
   span.textContent = labelText;
   wrapper.append(span, control);
   return wrapper;
+}
+
+function wideNote(text: string): HTMLElement {
+  const note = document.createElement("p");
+  note.className = "note field--wide";
+  note.textContent = text;
+  return note;
+}
+
+function aboutRow(label: string, value: string): HTMLElement {
+  const row = document.createElement("p");
+  row.className = "about__row";
+  row.append(`${label}: `, document.createTextNode(value));
+  return row;
+}
+
+function aboutLink(label: string, url: string): HTMLElement {
+  const row = document.createElement("p");
+  row.className = "about__row";
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.target = "_blank";
+  anchor.rel = "noreferrer";
+  anchor.textContent = url;
+  row.append(`${label}: `, anchor);
+  return row;
 }
 
 function makeInput(id: string, value: string, type = "text", min = type === "number" ? "1" : ""): HTMLInputElement {
@@ -251,28 +396,32 @@ function backupControls(): HTMLElement {
   file.type = "file";
   file.accept = "application/json,.json";
 
-  const exportButton = actionButton("exportBackup", handleExport);
-  const importButton = actionButton("importBackup", () => handleImport(file.files?.[0]));
-  const chromeSyncUploadButton = actionButton("chromeSyncUpload", handleChromeSyncUpload);
-  const chromeSyncRestoreButton = actionButton("chromeSyncRestore", handleChromeSyncRestore);
-  const chromeSyncSmartButton = actionButton("chromeSyncSmartSync", handleChromeSyncSmartSync);
-  const driveUploadButton = actionButton("driveBackupUpload", handleDriveUpload);
-  const driveRestoreButton = actionButton("driveBackupRestore", handleDriveRestore);
-
   wrapper.append(
-    exportButton,
+    actionButton("exportBackup", handleExport),
     file,
-    importButton,
-    chromeSyncSmartButton,
-    chromeSyncUploadButton,
-    chromeSyncRestoreButton,
-    driveUploadButton,
-    driveRestoreButton,
+    actionButton("importBackup", () => handleImport(file.files?.[0])),
+    actionButton("chromeSyncSmartSync", handleChromeSyncSmartSync),
+    actionButton("chromeSyncUpload", handleChromeSyncUpload),
+    actionButton("chromeSyncRestore", handleChromeSyncRestore),
+    actionButton("driveBackupUpload", handleDriveUpload),
+    actionButton("driveBackupRestore", handleDriveRestore),
   );
   return wrapper;
 }
 
-function actionButton(labelKey: string, handler: () => Promise<void>): HTMLButtonElement {
+function blocklistControls(): HTMLElement {
+  const wrapper = document.createElement("div");
+  wrapper.className = "actions field--wide";
+  wrapper.append(actionButton("clearBlocklist", async () => {
+    await clearAll();
+    blockedSites = [];
+    textarea("blockedSites").value = "";
+    statusEl.textContent = i18n.t("blocklistCleared");
+  }));
+  return wrapper;
+}
+
+function actionButton(labelKey: string, handler: () => Promise<void> | void): HTMLButtonElement {
   const button = document.createElement("button");
   button.className = "button button--secondary";
   button.type = "button";
@@ -289,9 +438,7 @@ function layoutPresetControls(): HTMLElement {
     LAYOUT_PRESETS.map((item) => [item.id, item.title]),
     settings.layout.profile,
   );
-  const apply = actionButton("applyLayoutPreset", async () => {
-    applyLayoutPreset(preset.value);
-  });
+  const apply = actionButton("applyLayoutPreset", () => applyLayoutPreset(preset.value));
   wrapper.append(preset, apply);
   return wrapper;
 }
@@ -348,11 +495,10 @@ function layoutEditorRow(block: LayoutBlock): HTMLElement {
 
   const title = document.createElement("strong");
   title.textContent = block.title;
-
   const type = document.createElement("small");
   type.textContent = block.type;
-
   row.append(drag, enabled, title, type);
+
   for (const key of ["column", "row", "width", "height"] as const) {
     const number = document.createElement("input");
     number.type = "number";
@@ -384,7 +530,6 @@ function layoutEditorRow(block: LayoutBlock): HTMLElement {
   row.addEventListener("input", syncLayoutEditor);
   row.addEventListener("change", syncLayoutEditor);
   row.addEventListener("click", handleResizeClick);
-
   return row;
 }
 
@@ -406,17 +551,15 @@ function layoutPreview(blocks: LayoutBlock[]): HTMLElement {
     item.textContent = block.title;
     item.style.gridColumn = `${block.column} / span ${block.width}`;
     item.style.gridRow = `${block.row} / span ${block.height}`;
-    item.addEventListener("dragstart", (event) => {
-      event.dataTransfer?.setData("text/plain", block.id);
-    });
+    item.addEventListener("dragstart", (event) => event.dataTransfer?.setData("text/plain", block.id));
     preview.append(item);
   }
-
   return preview;
 }
 
 function layoutColumnCount(): number {
-  const columns = Number(document.getElementById("layoutColumns") instanceof HTMLInputElement ? input("layoutColumns").value : settings.layout.columns);
+  const element = document.getElementById("layoutColumns");
+  const columns = element instanceof HTMLInputElement ? Number(element.value) : settings.layout.columns;
   return Number.isFinite(columns) ? Math.max(1, Math.round(columns)) : settings.layout.columns;
 }
 
@@ -426,7 +569,8 @@ function handlePreviewDrop(event: DragEvent): void {
   const blockId = event.dataTransfer?.getData("text/plain");
   if (!preview || !blockId) return;
 
-  const row = document.querySelector<HTMLElement>(`.layout-row[data-block-id="${CSS.escape(blockId)}"]`);
+  const row = Array.from(document.querySelectorAll<HTMLElement>(".layout-row"))
+    .find((candidate) => candidate.dataset.blockId === blockId);
   if (!row) return;
 
   const rect = preview.getBoundingClientRect();
@@ -443,18 +587,6 @@ function handlePreviewDrop(event: DragEvent): void {
   if (columnInput) columnInput.value = String(Math.min(column, maxColumn));
   if (rowInput) rowInput.value = String(targetRow);
   syncLayoutEditor();
-}
-
-function rebuildLayoutPreviewFromEditor(): void {
-  const editor = document.getElementById("layoutEditor");
-  const preview = document.getElementById("layoutPreview");
-  if (!editor || !preview) return;
-  preview.replaceWith(layoutPreview(readLayoutBlocksFromEditor(editor)));
-}
-
-function syncLayoutEditor(): void {
-  syncLayoutJsonFromEditor();
-  rebuildLayoutPreviewFromEditor();
 }
 
 function resizeControls(): HTMLElement {
@@ -490,12 +622,23 @@ function handleResizeClick(event: MouseEvent): void {
   syncLayoutEditor();
 }
 
+function syncLayoutEditor(): void {
+  syncLayoutJsonFromEditor();
+  rebuildLayoutPreviewFromEditor();
+}
+
 function syncLayoutJsonFromEditor(): void {
   const target = document.getElementById("layoutBlocksJson") as HTMLTextAreaElement | null;
   const editor = document.getElementById("layoutEditor");
   if (!target || !editor) return;
-  const blocks = readLayoutBlocksFromEditor(editor);
-  target.value = JSON.stringify(blocks, null, 2);
+  target.value = JSON.stringify(readLayoutBlocksFromEditor(editor), null, 2);
+}
+
+function rebuildLayoutPreviewFromEditor(): void {
+  const editor = document.getElementById("layoutEditor");
+  const preview = document.getElementById("layoutPreview");
+  if (!editor || !preview) return;
+  preview.replaceWith(layoutPreview(readLayoutBlocksFromEditor(editor)));
 }
 
 function readLayoutBlocksFromEditor(editor: HTMLElement): LayoutBlock[] {
@@ -531,7 +674,7 @@ function fieldNumber(row: HTMLElement, fieldName: string, fallback: number): num
 
 function actions(): HTMLElement {
   const wrapper = document.createElement("div");
-  wrapper.className = "actions";
+  wrapper.className = "actions actions--sticky";
   const save = document.createElement("button");
   save.className = "button";
   save.type = "submit";
@@ -546,6 +689,10 @@ function parseJson<T>(id: string): T {
   } catch (error) {
     throw new Error(i18n.t("invalidJson", { field: id, error: error instanceof Error ? error.message : String(error) }));
   }
+}
+
+function parseBlockedSites(): string[] {
+  return textarea("blockedSites").value.split(/[\n,;\s]+/).map((site) => site.trim()).filter(Boolean);
 }
 
 async function handleExport(): Promise<void> {
@@ -626,9 +773,13 @@ async function handleDriveRestore(): Promise<void> {
   }
 }
 
-async function reloadSettings(): Promise<void> {
-  settings = await getStartPageSettings();
-  localePreference = await getLocalePreference();
+async function reloadSettings(reloadCatalog = false): Promise<void> {
+  [settings, localePreference, blockedSites] = await Promise.all([
+    getStartPageSettings(),
+    getLocalePreference(),
+    getBlockedSites(),
+  ]);
+  if (reloadCatalog) i18n = await loadI18n();
   render();
 }
 
@@ -636,8 +787,12 @@ formEl.addEventListener("submit", async (event) => {
   event.preventDefault();
   syncLayoutJsonFromEditor();
   try {
+    const nextLocale = select("locale").value as LocalePreference;
     const next: StartPageSettings = {
       ...settings,
+      startTab: {
+        enabled: input("startTabEnabled").checked,
+      },
       appearance: {
         ...settings.appearance,
         fontFamily: input("fontFamily").value.trim() || settings.appearance.fontFamily,
@@ -708,10 +863,10 @@ formEl.addEventListener("submit", async (event) => {
       },
     };
 
-    await setLocalePreference(select("locale").value as LocalePreference);
+    await setLocalePreference(nextLocale);
     await setStartPageSettings(next);
-    settings = next;
-    localePreference = await getLocalePreference();
+    blockedSites = await replaceBlockedSites(parseBlockedSites());
+    await reloadSettings(nextLocale !== localePreference);
     statusEl.textContent = i18n.t("settingsSaved");
   } catch (error) {
     statusEl.textContent = error instanceof Error ? error.message : String(error);
@@ -722,15 +877,17 @@ resetEl.addEventListener("click", async () => {
   settings = await resetStartPageSettings();
   await setLocalePreference("auto");
   localePreference = "auto";
+  i18n = await loadI18n();
   render();
   statusEl.textContent = i18n.t("settingsReset");
 });
 
 void (async () => {
-  [i18n, settings, localePreference] = await Promise.all([
+  [i18n, settings, localePreference, blockedSites] = await Promise.all([
     loadI18n(),
     getStartPageSettings(),
     getLocalePreference(),
+    getBlockedSites(),
   ]);
   render();
 })();
