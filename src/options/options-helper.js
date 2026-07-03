@@ -1,6 +1,20 @@
 (() => {
   const SETTINGS_KEY = "startPageSettings";
+  const IP_PROVIDERS = [
+    ["https://ipapi.co/json/", "ipapi.co"],
+    ["https://ipwho.is/", "ipwho.is"],
+    ["https://get.geojs.io/v1/ip/geo.json", "GeoJS"],
+    ["https://api.ip.sb/geoip", "IP.SB"],
+    ["https://ipinfo.io/json", "IPinfo"],
+    ["https://api.db-ip.com/v2/free/self", "DB-IP Free"],
+    ["https://freeipapi.com/api/json", "FreeIPAPI"],
+    ["https://ipwhois.app/json/", "IPWhois.app"],
+    ["https://api.country.is/", "country.is"],
+    ["https://www.cloudflare.com/cdn-cgi/trace", "Cloudflare Trace"],
+  ];
+
   let pendingLayoutPatch = {};
+  let pendingIpEndpoint = "";
 
   function t(key, fallback) {
     return chrome.i18n.getMessage(key) || fallback || key;
@@ -15,19 +29,25 @@
     return isRecord(items[SETTINGS_KEY]) ? items[SETTINGS_KEY] : {};
   }
 
+  async function patchSettings(patch) {
+    const settings = await rawSettings();
+    await chrome.storage.local.set({ [SETTINGS_KEY]: { ...settings, ...patch } });
+  }
+
   async function patchLayout(patch) {
     pendingLayoutPatch = { ...pendingLayoutPatch, ...patch };
     const settings = await rawSettings();
     const layout = isRecord(settings.layout) ? settings.layout : {};
-    await chrome.storage.local.set({
-      [SETTINGS_KEY]: {
-        ...settings,
-        layout: {
-          ...layout,
-          ...pendingLayoutPatch,
-        },
-      },
-    });
+    await patchSettings({ layout: { ...layout, ...pendingLayoutPatch } });
+  }
+
+  async function patchIpEndpoint(endpoint) {
+    pendingIpEndpoint = endpoint;
+    const settings = await rawSettings();
+    const ip = isRecord(settings.ip) ? settings.ip : {};
+    await patchSettings({ ip: { ...ip, endpoint } });
+    const endpointInput = document.getElementById("ipEndpoint");
+    if (endpointInput instanceof HTMLInputElement) endpointInput.value = endpoint;
   }
 
   function removeSubtitle() {
@@ -102,6 +122,68 @@
     return wrapper;
   }
 
+  function fixWeatherCoordinateInputs() {
+    const latitude = document.getElementById("weatherLatitude");
+    if (latitude instanceof HTMLInputElement) {
+      latitude.step = "any";
+      latitude.min = "-90";
+      latitude.max = "90";
+      latitude.inputMode = "decimal";
+    }
+
+    const longitude = document.getElementById("weatherLongitude");
+    if (longitude instanceof HTMLInputElement) {
+      longitude.step = "any";
+      longitude.min = "-180";
+      longitude.max = "180";
+      longitude.inputMode = "decimal";
+    }
+  }
+
+  async function addIpProviderField() {
+    const endpointInput = document.getElementById("ipEndpoint");
+    if (!(endpointInput instanceof HTMLInputElement)) return;
+    const grid = endpointInput.closest(".grid");
+    if (!grid || grid.querySelector("#ipProvider")) return;
+
+    const settings = await rawSettings();
+    const ip = isRecord(settings.ip) ? settings.ip : {};
+    const currentEndpoint = typeof ip.endpoint === "string" && ip.endpoint ? ip.endpoint : endpointInput.value;
+    pendingIpEndpoint = pendingIpEndpoint || currentEndpoint;
+
+    const wrapper = document.createElement("label");
+    wrapper.className = "field field--wide start-tab-extra-field";
+    const label = document.createElement("span");
+    label.textContent = t("ipProvider", "IP provider");
+    const select = document.createElement("select");
+    select.id = "ipProvider";
+
+    for (const [endpoint, title] of IP_PROVIDERS) {
+      const option = document.createElement("option");
+      option.value = endpoint;
+      option.textContent = title;
+      select.append(option);
+    }
+
+    const custom = document.createElement("option");
+    custom.value = "custom";
+    custom.textContent = t("customEndpoint", "Custom endpoint");
+    select.append(custom);
+    select.value = IP_PROVIDERS.some(([endpoint]) => endpoint === currentEndpoint) ? currentEndpoint : "custom";
+    select.addEventListener("change", () => {
+      if (select.value !== "custom") void patchIpEndpoint(select.value);
+      endpointInput.disabled = select.value !== "custom";
+    });
+
+    endpointInput.disabled = select.value !== "custom";
+    endpointInput.addEventListener("input", () => {
+      if (select.value === "custom") pendingIpEndpoint = endpointInput.value;
+    });
+
+    wrapper.append(label, select);
+    endpointInput.closest(".field")?.insertAdjacentElement("beforebegin", wrapper);
+  }
+
   async function addLayoutExtraFields(layoutSection) {
     const grid = layoutSection.querySelector(".grid");
     if (!grid || grid.dataset.layoutExtras === "true" || grid.querySelector("#layoutMode")) return;
@@ -174,15 +256,29 @@
     if (Object.keys(pendingLayoutPatch).length > 0) void patchLayout(pendingLayoutPatch);
   }
 
+  function reapplyPendingIpEndpoint() {
+    const provider = document.getElementById("ipProvider");
+    const endpointInput = document.getElementById("ipEndpoint");
+    if (provider instanceof HTMLSelectElement && provider.value !== "custom") pendingIpEndpoint = provider.value;
+    if (provider instanceof HTMLSelectElement && provider.value === "custom" && endpointInput instanceof HTMLInputElement) {
+      pendingIpEndpoint = endpointInput.value;
+    }
+    if (pendingIpEndpoint) void patchIpEndpoint(pendingIpEndpoint);
+  }
+
   function enhance() {
     removeSubtitle();
     enhanceBackupControls();
     enhanceStartTabSections();
+    fixWeatherCoordinateInputs();
+    void addIpProviderField();
   }
 
   document.addEventListener("submit", () => {
     window.setTimeout(reapplyPendingLayoutPatch, 250);
     window.setTimeout(reapplyPendingLayoutPatch, 900);
+    window.setTimeout(reapplyPendingIpEndpoint, 250);
+    window.setTimeout(reapplyPendingIpEndpoint, 900);
   });
 
   const observer = new MutationObserver(enhance);

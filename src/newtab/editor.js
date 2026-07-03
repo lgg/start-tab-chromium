@@ -3,6 +3,7 @@
   const EDITING_CLASS = "layout-editing";
   const DEFAULT_COLUMNS = 12;
   const MIN_FULL_ZONE_COLUMN_WIDTH = 112;
+  const PAGE_PADDING = 64;
   const DEFAULT_BLOCKS = [
     { id: "dateTime", type: "dateTime", title: "Date & Time", enabled: true, column: 1, row: 1, width: 4, height: 2 },
     { id: "search", type: "search", title: "Search", enabled: true, column: 5, row: 1, width: 5, height: 2 },
@@ -78,6 +79,14 @@
     return document.getElementById("grid");
   }
 
+  function viewportWidth() {
+    return Math.max(320, document.documentElement.clientWidth - PAGE_PADDING);
+  }
+
+  function viewportHeight() {
+    return Math.max(320, document.documentElement.clientHeight - PAGE_PADDING);
+  }
+
   function enabledBlocks() {
     return settings.layout.blocks.filter((block) => block.enabled);
   }
@@ -91,7 +100,7 @@
   }
 
   function clearEditorArtifacts(card) {
-    card.querySelectorAll(".layout-resize-handle").forEach((handle) => handle.remove());
+    card.querySelectorAll(".layout-resize-handle, .layout-block-settings").forEach((element) => element.remove());
   }
 
   function assignCards() {
@@ -102,11 +111,32 @@
       if (!block) return;
       card.dataset.blockId = block.id;
       clearEditorArtifacts(card);
+      const settingsButton = document.createElement("button");
+      settingsButton.className = "layout-block-settings";
+      settingsButton.type = "button";
+      settingsButton.textContent = "⚙";
+      settingsButton.title = t("blockSettings", "Block settings");
+      settingsButton.setAttribute("aria-label", settingsButton.title);
+      settingsButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        void openBlockSettings(block);
+      });
       const handle = document.createElement("span");
       handle.className = "layout-resize-handle";
       handle.title = t("resizeBlock", "Resize block");
-      card.append(handle);
+      card.append(settingsButton, handle);
     });
+  }
+
+  async function openBlockSettings(block) {
+    await chrome.storage.local.set({
+      startTabSettingsFocus: {
+        blockId: block.id,
+        blockType: block.type,
+        createdAt: new Date().toISOString(),
+      },
+    });
+    chrome.runtime.openOptionsPage();
   }
 
   function resetCardInlineStyles(card) {
@@ -199,16 +229,14 @@
     if (!metrics) return;
     const bounds = gridBounds();
     const minHeight = Math.max(
-      window.innerHeight - 64,
+      viewportHeight(),
       bounds.rows * metrics.rowHeight + Math.max(0, bounds.rows - 1) * metrics.rowGap + 32,
     );
     container.style.minHeight = `${minHeight}px`;
 
     if (settings.layout.zone === "full") {
-      const minWidth = Math.max(
-        window.innerWidth - 64,
-        bounds.columns * MIN_FULL_ZONE_COLUMN_WIDTH + Math.max(0, bounds.columns - 1) * metrics.columnGap,
-      );
+      const overflowColumns = Math.max(0, bounds.columns - DEFAULT_COLUMNS);
+      const minWidth = viewportWidth() + overflowColumns * (MIN_FULL_ZONE_COLUMN_WIDTH + metrics.columnGap);
       container.style.minWidth = `${minWidth}px`;
     } else {
       container.style.minWidth = "";
@@ -228,7 +256,7 @@
         right: Math.max(bounds.right, left + width + 32),
         bottom: Math.max(bounds.bottom, top + height + 32),
       };
-    }, { right: window.innerWidth - 64, bottom: window.innerHeight - 64 });
+    }, { right: viewportWidth(), bottom: viewportHeight() });
 
     container.style.minHeight = `${max.bottom}px`;
     container.style.minWidth = settings.layout.zone === "full" ? `${max.right}px` : "";

@@ -16,7 +16,8 @@ Start Tab is a Manifest V3 extension for Chromium-based browsers. It combines a 
 - Localized UI with English and Russian catalogs.
 - Configurable custom new tab page with date/time, IP, links, search, timer, stopwatch, Pomodoro, notes, local tasks, recent history, browser pinned tabs, Start Tab pinned links, Google Calendar, weather, command, and focus stats blocks.
 - First-run layout onboarding for the custom new tab page.
-- Start page appearance settings: font, text color, background color, background image, and built-in background effects.
+- Start page appearance settings through background preset tiles with favorites, color tiles, gradient tiles, image tiles, and animated effect tiles.
+- Preset themes/backgrounds for ChatGPT dark, Start Tab dark, ChatGPT light, pastel slate, pastel rose, Matrix-style, cyberpunk-style, black, aurora, mesh, spotlight, noise, and animated gradient backgrounds.
 - Settings button visibility and hover-area controls for the custom new tab page.
 - Link grid settings: rows, columns, icon size, font size, and horizontal or vertical paged navigation.
 - Timer, stopwatch, and Pomodoro state persistence across closed and reopened new tabs.
@@ -24,8 +25,10 @@ Start Tab is a Manifest V3 extension for Chromium-based browsers. It combines a 
 - Tabbed options page with General, Start Tab, Blocklist, Backup, and About sections.
 - Start Tab page-content toggle inside the Start Tab options section.
 - Options page with localization, backup, appearance, search, IP, Google Calendar, weather, links, timers, focus stats, and drag/drop layout controls.
+- Weather settings support decimal latitude and longitude values.
+- IP lookup supports provider selection plus multiple public fallback providers when the selected service is unavailable.
 - Layout presets for focus, dashboard, minimal, development, and rest workflows.
-- Layout editor ordering, enabling, disabling, numeric geometry editing, and visual width/height resize controls.
+- Layout editor ordering, enabling, disabling, numeric geometry editing, visual width/height resize controls, full-viewport layout zone, and block settings entry points.
 - Command block actions for opening settings, exporting a backup, resetting clocks, and resetting focus statistics.
 - Manual JSON export/import for all local extension data with a versioned backup schema and v1 migration path.
 - Browser sync backup through chunked `chrome.storage.sync`, checksum validation, device metadata, and latest-wins smart sync.
@@ -109,9 +112,35 @@ Inside the full build, the Start Tab settings page can enable or disable the Sta
 - `docs/release.md` - release checklist and permission notes.
 - `icons/` - extension icons.
 
-## Roadmap Status
+## Roadmap
 
-The requested roadmap foundation is implemented in the extension. Future work should be tracked as separate scoped issues or PRs rather than as unfinished roadmap items in this README.
+### Instance-Based Blocks
+
+- Move Start Tab blocks from singleton type settings to instance-based block records.
+- Allow multiple independent instances for repeatable block types: date/time in different time zones, weather for different cities, search blocks with different engines, local task lists, Google Calendar blocks with different calendar/account filters, timers, stopwatches, Pomodoro blocks, notes, and link grids.
+- Keep browser-owned singleton blocks unique: recent history, browser pinned tabs, and other browser-global sources that should not be duplicated.
+- Add block creation, duplication, removal, and per-instance settings from both the options page and the inline layout editor.
+- Store block settings inside each block instance so export/import, browser sync, and Google Drive backup preserve every configured block independently.
+
+### Layout Editor
+
+- Add a full block palette with repeatable and singleton block availability rules.
+- Add per-block settings panels opened from the gear icon on each block while editing the new tab page.
+- Keep both layout modes: free positioning with drag/resize anywhere and grid positioning with snap-to-grid width and height.
+- Keep both layout zones: contained page and full viewport, including horizontal expansion only after blocks are moved or resized beyond the default viewport.
+
+### Themes And Backgrounds
+
+- Promote background presets into a complete theme system covering background, text color, card surface, accent, font family, and sizing.
+- Add export/import for custom themes independently from full settings backup.
+- Keep all background configuration tile-based; do not expose duplicate raw background color, image URL, or effect fields outside the tile editor.
+- Add richer configurable animated backgrounds where each effect exposes only relevant controls.
+
+### Settings Coverage
+
+- Audit every stored Start Tab setting and expose it in the options page or per-block settings where appropriate.
+- Keep backup/export/import coverage aligned with every new setting and block instance schema migration.
+- Add validation for numeric settings, URL settings, and provider endpoints so browser-native validation errors do not reject valid values.
 
 ## License
 

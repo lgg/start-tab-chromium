@@ -90,7 +90,6 @@ body.effect-noise .background::after {
 body.layout-zone-full .start-page {
   width: 100%;
   max-width: none;
-  min-width: 100vw;
   margin: 0;
 }
 
@@ -505,6 +504,24 @@ body.settings-hover .layout-edit-button:hover,
   cursor: nwse-resize;
 }
 
+.layout-block-settings {
+  display: none;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  background: rgb(2 6 23 / 0.68);
+  color: var(--text-color);
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+}
+
 .layout-editing .card {
   position: relative;
   outline: 1px dashed rgb(142 197 255 / 0.65);
@@ -517,7 +534,8 @@ body.settings-hover .layout-edit-button:hover,
   opacity: 0.86;
 }
 
-.layout-editing .layout-resize-handle {
+.layout-editing .layout-resize-handle,
+.layout-editing .layout-block-settings {
   display: block;
 }
 
