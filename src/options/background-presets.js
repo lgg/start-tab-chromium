@@ -4,11 +4,25 @@
   const MAX_IMAGE_SIZE = 1920;
   const EFFECTS = ["none", "gradient", "aurora", "mesh", "spotlight", "noise"];
   const TYPES = ["color", "gradient", "effect", "image"];
-  const BUILT_IN_IDS = new Set(["aurora-default", "black", "animated-gradient", "mesh", "spotlight", "noise"]);
+  const BUILT_IN_IDS = new Set([
+    "chatgpt-dark",
+    "current-dark",
+    "chatgpt-light",
+    "pastel-slate",
+    "pastel-rose",
+    "matrix",
+    "cyberpunk",
+    "aurora-default",
+    "black",
+    "animated-gradient",
+    "mesh",
+    "spotlight",
+    "noise",
+  ]);
 
   const strings = {
     backgroundPresetManager: "Background presets",
-    backgroundPresetDescription: "Choose a saved background tile, add colors, effects, gradients, or images, and mark favorites to keep them at the top.",
+    backgroundPresetDescription: "Background is configured only through tiles. Add a tile, tune the relevant fields for its type, and like favorites to keep them at the top.",
     backgroundPresetFavorites: "Favorites",
     backgroundPresetAll: "All backgrounds",
     backgroundPresetAdd: "Add background",
@@ -16,7 +30,7 @@
     backgroundPresetType: "Type",
     backgroundPresetTypeColor: "Static color",
     backgroundPresetTypeGradient: "Custom gradient",
-    backgroundPresetTypeEffect: "Built-in effect",
+    backgroundPresetTypeEffect: "Animated effect",
     backgroundPresetTypeImage: "Image",
     backgroundPresetPrimaryColor: "Primary color",
     backgroundPresetSecondColor: "Second color",
@@ -34,6 +48,13 @@
   };
 
   const defaultPresets = [
+    preset("chatgpt-dark", "ChatGPT dark", "color", "#212121", "", "none", true),
+    preset("current-dark", "Start Tab dark", "effect", "#08111f", "", "aurora", true),
+    preset("chatgpt-light", "ChatGPT light", "color", "#f7f7f8", "", "none"),
+    preset("pastel-slate", "Pastel slate", "gradient", "#dbeafe", gradientDataUri(["#dbeafe", "#e0e7ff", "#f1f5f9"]), "none"),
+    preset("pastel-rose", "Pastel rose", "gradient", "#ffe4e6", gradientDataUri(["#ffe4e6", "#fbcfe8", "#fef3c7"]), "none"),
+    preset("matrix", "Matrix", "effect", "#00140d", "", "noise"),
+    preset("cyberpunk", "Cyberpunk", "effect", "#120024", "", "gradient"),
     preset("aurora-default", "Aurora", "effect", "#08111f", "", "aurora", true),
     preset("black", "Black", "color", "#000000", "", "none"),
     preset("animated-gradient", "Animated gradient", "effect", "#0f172a", "", "gradient"),
@@ -181,6 +202,17 @@
     if (backgroundEffect instanceof HTMLSelectElement) backgroundEffect.value = presetValue.backgroundEffect;
   }
 
+  function hideCoreBackgroundFields() {
+    for (const id of ["backgroundColor", "backgroundImage", "backgroundEffect"]) {
+      const control = document.getElementById(id);
+      const field = control?.closest(".field");
+      if (field instanceof HTMLElement) {
+        field.hidden = true;
+        field.dataset.managedByBackgroundPresets = "true";
+      }
+    }
+  }
+
   async function persistAppearance(presetValue, presets) {
     const settings = await readSettings();
     const appearance = isRecord(settings.appearance) ? settings.appearance : {};
@@ -241,7 +273,7 @@
 
     const meta = document.createElement("span");
     meta.className = "background-tile__meta";
-    meta.textContent = presetValue.id === activeId ? t("backgroundPresetActive") : presetValue.type;
+    meta.textContent = presetValue.id === activeId ? t("backgroundPresetActive") : typeTitle(presetValue.type);
 
     const actions = document.createElement("span");
     actions.className = "background-tile__actions";
@@ -295,25 +327,25 @@
     const form = document.createElement("div");
     form.className = "background-preset-form";
     form.append(
-      labeledInput("presetTitle", t("backgroundPresetTitle"), "text", ""),
+      labeledInput("presetTitle", t("backgroundPresetTitle"), "text", "", "all"),
       labeledSelect("presetType", t("backgroundPresetType"), [
         ["color", t("backgroundPresetTypeColor")],
         ["gradient", t("backgroundPresetTypeGradient")],
         ["effect", t("backgroundPresetTypeEffect")],
         ["image", t("backgroundPresetTypeImage")],
-      ]),
-      labeledInput("presetColorA", t("backgroundPresetPrimaryColor"), "color", "#08111f"),
-      labeledInput("presetColorB", t("backgroundPresetSecondColor"), "color", "#1e3a8a"),
-      labeledInput("presetColorC", t("backgroundPresetThirdColor"), "color", "#0f766e"),
+      ], "all"),
+      labeledInput("presetColorA", t("backgroundPresetPrimaryColor"), "color", "#08111f", "color gradient effect"),
+      labeledInput("presetColorB", t("backgroundPresetSecondColor"), "color", "#1e3a8a", "gradient"),
+      labeledInput("presetColorC", t("backgroundPresetThirdColor"), "color", "#0f766e", "gradient"),
       labeledSelect("presetEffect", t("backgroundPresetEffect"), [
         ["aurora", chrome.i18n?.getMessage("effectAurora") || "Aurora"],
         ["gradient", chrome.i18n?.getMessage("effectGradient") || "Animated gradient"],
         ["mesh", chrome.i18n?.getMessage("effectMesh") || "Mesh"],
         ["spotlight", chrome.i18n?.getMessage("effectSpotlight") || "Spotlight"],
         ["noise", chrome.i18n?.getMessage("effectNoise") || "Noise"],
-      ]),
-      labeledInput("presetImageUrl", t("backgroundPresetImageUrl"), "text", ""),
-      labeledInput("presetImageFile", t("backgroundPresetImageFile"), "file", ""),
+      ], "effect"),
+      labeledInput("presetImageUrl", t("backgroundPresetImageUrl"), "text", "", "image"),
+      labeledInput("presetImageFile", t("backgroundPresetImageFile"), "file", "", "image"),
     );
     const save = document.createElement("button");
     save.className = "button";
@@ -321,13 +353,21 @@
     save.textContent = t("backgroundPresetSave");
     save.addEventListener("click", () => void addPreset(form));
     form.append(save);
+
+    const type = form.querySelector("#presetType");
+    if (type instanceof HTMLSelectElement) {
+      type.addEventListener("change", () => updateFormVisibility(form));
+      updateFormVisibility(form);
+    }
+
     wrapper.append(summary, form);
     return wrapper;
   }
 
-  function labeledInput(id, labelText, type, value) {
+  function labeledInput(id, labelText, type, value, visibleFor) {
     const label = document.createElement("label");
     label.className = "field";
+    label.dataset.visibleFor = visibleFor;
     const span = document.createElement("span");
     span.textContent = labelText;
     const input = document.createElement("input");
@@ -339,9 +379,10 @@
     return label;
   }
 
-  function labeledSelect(id, labelText, options) {
+  function labeledSelect(id, labelText, options, visibleFor) {
     const label = document.createElement("label");
     label.className = "field";
+    label.dataset.visibleFor = visibleFor;
     const span = document.createElement("span");
     span.textContent = labelText;
     const select = document.createElement("select");
@@ -354,6 +395,14 @@
     }
     label.append(span, select);
     return label;
+  }
+
+  function updateFormVisibility(form) {
+    const type = oneOf(form.querySelector("#presetType")?.value, TYPES, "color");
+    form.querySelectorAll("[data-visible-for]").forEach((field) => {
+      const visibleFor = String(field.dataset.visibleFor || "").split(/\s+/);
+      field.hidden = !(visibleFor.includes("all") || visibleFor.includes(type));
+    });
   }
 
   async function addPreset(form) {
@@ -448,6 +497,7 @@
     const backgroundImage = document.getElementById("backgroundImage");
     if (backgroundImage instanceof HTMLInputElement) backgroundImage.type = "text";
     if (!(backgroundEffect instanceof HTMLElement)) return;
+    hideCoreBackgroundFields();
 
     observer?.disconnect();
     try {
