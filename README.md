@@ -16,6 +16,7 @@ Start Tab is a Manifest V3 extension for Chromium-based browsers. It combines a 
 - Configurable custom new tab page with date/time, IP, links, search, timer, stopwatch, Pomodoro, notes, local tasks, recent history, browser pinned tabs, Start Tab pinned links, Google Calendar, weather, command, and focus stats blocks.
 - First-run layout onboarding for the custom new tab page.
 - Start page appearance settings: font, text color, background color, background image, and built-in background effects.
+- Settings button visibility and hover-area controls for the custom new tab page.
 - Link grid settings: rows, columns, icon size, font size, and horizontal or vertical paged navigation.
 - Timer, stopwatch, and Pomodoro state persistence across closed and reopened new tabs.
 - Optional notifications for timer and Pomodoro completion.
