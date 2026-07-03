@@ -2,13 +2,18 @@
   const SETTINGS_KEY = "startPageSettings";
   const OVERLAY_ID = "startTabDisabledOverlay";
   const STYLE_ID = "startTabDisabledStyle";
+  const FALLBACK_MESSAGES = {
+    startTabDisabledTitle: "Start Tab is disabled",
+    startTabDisabledText: "The extension is still active for blocking, backups, and other settings. Re-enable Start Tab content in extension settings.",
+    openSettings: "Open settings",
+  };
 
   function isEnabled(settings) {
     return settings?.startTab?.enabled !== false;
   }
 
   function t(key) {
-    return chrome.i18n.getMessage(key) || key;
+    return chrome.i18n.getMessage(key) || FALLBACK_MESSAGES[key] || key;
   }
 
   function removeOverlay() {
