@@ -806,6 +806,7 @@ async function refreshStats(): Promise<void> {
     i18n.t("statsTimeSaved", { value: totals.estimatedMinutesSaved }),
     i18n.t("statsPomodoros", { value: totals.focusSessionsCompleted }),
     i18n.t("statsInterrupted", { value: totals.focusSessionsInterrupted }),
+    i18n.t("statsFocusTime", { value: formatDuration(totals.focusTimeMs) }),
     i18n.t("statsUnblocks", { value: totals.unblocksAfterCountdown }),
   ].join("\n");
 }
