@@ -118,6 +118,14 @@ async function setBlockedSites(sites: string[]): Promise<void> {
   await chrome.storage.local.set({ [STORAGE_KEY]: normalizeSites(sites) });
 }
 
+export async function replaceBlockedSites(sites: string[]): Promise<string[]> {
+  const normalized = normalizeSites(sites);
+  await chrome.storage.local.set({ [STORAGE_KEY]: normalized });
+  await chrome.storage.local.remove(LAST_BLOCKED_URLS_KEY);
+  await syncRules();
+  return normalized;
+}
+
 export async function blockedSiteForUrl(url: string): Promise<string | null> {
   const host = hostFromUrl(url);
   if (!host) return null;
