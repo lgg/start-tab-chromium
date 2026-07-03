@@ -404,7 +404,7 @@ function mergeLayoutBlocks(base: LayoutBlock[], value: unknown, columns: number)
   if (!Array.isArray(value)) return cloneLayoutBlocks(base);
   const fallbackById = new Map(base.map((block) => [block.id, block]));
   return value.filter(isRecord).map((block, index) => {
-    const fallback = fallbackById.get(stringValue(block.id, "")) ?? base[index] ?? DEFAULT_LAYOUT_BLOCKS[0];
+    const fallback = fallbackById.get(stringValue(block.id, "")) ?? base[index] ?? DEFAULT_LAYOUT_BLOCKS[0]!;
     const width = finiteInteger(block.width, fallback.width, 1, columns);
     return {
       id: stringValue(block.id, fallback.id),
