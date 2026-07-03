@@ -110,6 +110,10 @@ a {
   gap: 18px;
 }
 
+.tabs__panel[hidden] {
+  display: none;
+}
+
 .section {
   border: 1px solid var(--border);
   border-radius: 10px;
