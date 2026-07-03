@@ -17,6 +17,20 @@ import {
 } from "./lib/blocklist.js";
 import { recordBlockedNavigation } from "./lib/focus-stats.js";
 import { isMessage, type Ack, type Message } from "./lib/messages.js";
+import { getStartPageSettings } from "./lib/start-page-settings.js";
+
+const START_TAB_PAGE = "newtab.html";
+const NEW_TAB_INTERNAL_SCHEMES = new Set([
+  "chrome:",
+  "chrome-search:",
+  "chrome-untrusted:",
+  "edge:",
+  "brave:",
+  "opera:",
+  "vivaldi:",
+  "comet:",
+  "perplexity:",
+]);
 
 chrome.runtime.onInstalled.addListener(() => {
   void migrateAndSyncRules();
@@ -24,6 +38,14 @@ chrome.runtime.onInstalled.addListener(() => {
 
 chrome.runtime.onStartup.addListener(() => {
   void migrateAndSyncRules();
+});
+
+chrome.tabs.onCreated.addListener((tab) => {
+  void redirectBrowserNewTab(tab.id, tab.url ?? tab.pendingUrl);
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  void redirectBrowserNewTab(tabId, changeInfo.url ?? tab.url ?? tab.pendingUrl);
 });
 
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
@@ -59,6 +81,48 @@ async function handle(message: Message): Promise<void> {
     case "clear":
       await clearAll();
       break;
+  }
+}
+
+async function redirectBrowserNewTab(tabId: number | undefined, url: string | undefined): Promise<void> {
+  if (tabId === undefined || !url) return;
+  if (isStartTabUrl(url) || !isBrowserNewTabUrl(url)) return;
+  if (!await shouldRedirectBrowserNewTabs()) return;
+
+  try {
+    await chrome.tabs.update(tabId, { url: chrome.runtime.getURL(START_TAB_PAGE) });
+  } catch {
+    // Some Chromium-derived browsers may not expose their internal new tab page
+    // to extension tab updates. The manifest override remains the primary path.
+  }
+}
+
+async function shouldRedirectBrowserNewTabs(): Promise<boolean> {
+  const manifest = chrome.runtime.getManifest();
+  if (manifest.chrome_url_overrides?.newtab !== START_TAB_PAGE) return false;
+  return (await getStartPageSettings()).startTab.enabled;
+}
+
+function isStartTabUrl(url: string): boolean {
+  return url === chrome.runtime.getURL(START_TAB_PAGE);
+}
+
+function isBrowserNewTabUrl(url: string): boolean {
+  if (url === "about:newtab") return true;
+
+  try {
+    const parsed = new URL(url);
+    const protocol = parsed.protocol.toLowerCase();
+    const marker = `${parsed.hostname}${parsed.pathname}`.toLowerCase();
+
+    if (!NEW_TAB_INTERNAL_SCHEMES.has(protocol)) return false;
+    return marker === "newtab/"
+      || marker.includes("newtab")
+      || marker.includes("new-tab")
+      || marker.includes("new_tab")
+      || marker.includes("local-ntp");
+  } catch {
+    return false;
   }
 }
 
