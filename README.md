@@ -33,6 +33,7 @@ Start Tab is a Manifest V3 extension for Chromium-based browsers. It combines a 
 - Google Calendar event block when OAuth is configured.
 - Weather block powered by Open-Meteo with current, daily, and weekly display modes plus configurable forecast and geocoding endpoints.
 - Two build variants: full Start Tab with custom new tab override, and blocker-only without replacing the browser new tab page.
+- Fallback new-tab redirect for Chromium-derived browsers that expose a browser new-tab URL but do not apply `chrome_url_overrides.newtab` normally.
 - Release packaging and store permission notes in `docs/release.md`.
 - Migration from the legacy `blocked` storage key to the current host-only blocklist.
 
@@ -61,7 +62,9 @@ The full production extension is built into `build/` and can be loaded as an unp
 ```
 
 5. Open extension Options -> About -> Open Start Tab. If this opens the Start Tab page, the extension page itself is working.
-6. If the diagnostic page works but Ctrl+T still opens the browser's default New Tab, disable other new-tab extensions and test in Chrome or Edge. Some Chromium-derived browsers may keep their own new tab page even when a loaded extension declares `chrome_url_overrides.newtab`.
+6. Open Options -> Start Tab and keep Enable Start Tab page content checked.
+7. Open a new tab. In Chrome, the manifest override should own it directly. In browsers such as Comet, the service worker also tries a fallback redirect when the browser exposes an internal new-tab URL such as `chrome://newtab`, `chrome://new-tab-page`, `chrome-search://local-ntp`, or a Comet-specific new-tab URL.
+8. If the diagnostic page works but Ctrl+T still opens the browser default page, the browser is not exposing a redirectable tab URL to extensions. In that case, verify the same build in Chrome or Edge to separate a Start Tab bug from a browser-level limitation.
 
 ## Google Integrations
 
@@ -91,7 +94,7 @@ Inside the full build, the Start Tab settings page can enable or disable the Sta
 ## Project Layout
 
 - `src/manifest.json` - Chromium extension manifest.
-- `src/service-worker.ts` - blocklist mutations, storage migration, DNR rule sync, and block-hit tracking.
+- `src/service-worker.ts` - blocklist mutations, storage migration, DNR rule sync, fallback new-tab redirect, and block-hit tracking.
 - `src/lib/blocklist.ts` - shared blocklist and redirect logic.
 - `src/lib/focus-stats.ts` - focus and blocking statistics.
 - `src/lib/backup.ts` - versioned manual backup export/import.
