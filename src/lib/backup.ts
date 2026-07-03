@@ -1,13 +1,14 @@
 import { syncRules } from "./blocklist.js";
 import { FOCUS_STATS_KEY } from "./focus-stats.js";
 
-const BACKUP_VERSION = 2;
+const BACKUP_VERSION = 3;
 
 const STORAGE_KEYS = [
   "blockedSites",
   "lastBlockedUrls",
   "startPageSettings",
   "startPageRuntimeState",
+  "startTabInstanceState",
   "startPageOnboarding",
   "localeOverride",
   FOCUS_STATS_KEY,
@@ -58,9 +59,8 @@ function migrateBackup(value: LegacyBackupBundle): BackupBundle {
 
   switch (value.version) {
     case 1:
-      migrated = withCurrentSchema(value);
-      break;
     case 2:
+    case 3:
       migrated = withCurrentSchema(value);
       break;
     default:
