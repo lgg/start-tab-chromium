@@ -39,9 +39,54 @@
     stats: [3, 2],
     commands: [3, 2],
   };
+  const DEFAULT_BLOCKS = [
+    { id: "dateTime", type: "dateTime", title: "Date & Time", enabled: true, column: 1, row: 1, width: 4, height: 2 },
+    { id: "search", type: "search", title: "Search", enabled: true, column: 5, row: 1, width: 5, height: 2 },
+    { id: "ip", type: "ip", title: "IP", enabled: true, column: 10, row: 1, width: 3, height: 2 },
+    { id: "links", type: "links", title: "Links", enabled: true, column: 1, row: 3, width: 6, height: 4 },
+    { id: "timer", type: "timer", title: "Timer", enabled: true, column: 7, row: 3, width: 2, height: 2 },
+    { id: "stopwatch", type: "stopwatch", title: "Stopwatch", enabled: true, column: 9, row: 3, width: 2, height: 2 },
+    { id: "pomodoro", type: "pomodoro", title: "Pomodoro", enabled: true, column: 11, row: 3, width: 2, height: 2 },
+    { id: "note", type: "note", title: "Scratchpad", enabled: true, column: 7, row: 5, width: 3, height: 3 },
+    { id: "localTasks", type: "localTasks", title: "Local Tasks", enabled: true, column: 10, row: 5, width: 3, height: 3 },
+    { id: "startPinned", type: "startPinned", title: "Start Tab Pinned", enabled: true, column: 1, row: 7, width: 3, height: 2 },
+    { id: "commands", type: "commands", title: "Commands", enabled: true, column: 4, row: 7, width: 3, height: 2 },
+    { id: "recent", type: "recent", title: "Recent History", enabled: true, column: 7, row: 7, width: 3, height: 2 },
+    { id: "stats", type: "stats", title: "Focus Stats", enabled: true, column: 10, row: 7, width: 3, height: 2 },
+    { id: "browserPinned", type: "browserPinned", title: "Browser Pinned", enabled: false, column: 1, row: 9, width: 3, height: 2 },
+    { id: "googleCalendar", type: "googleCalendar", title: "Google Calendar", enabled: false, column: 4, row: 9, width: 3, height: 2 },
+    { id: "weather", type: "weather", title: "Weather", enabled: false, column: 7, row: 9, width: 3, height: 2 },
+  ];
+  const DEFAULT_SETTINGS = {
+    layout: {
+      columns: 12,
+      profile: "work",
+      mode: "grid",
+      zone: "contained",
+      showBlockTitles: true,
+      blocks: DEFAULT_BLOCKS,
+    },
+    search: {
+      provider: "google",
+      providers: [{ id: "google", title: "Google", urlTemplate: "https://www.google.com/search?q={query}" }],
+    },
+    weather: {
+      city: "Amsterdam",
+      latitude: 52.3676,
+      longitude: 4.9041,
+      displayMode: "current",
+      forecastEndpoint: "https://api.open-meteo.com/v1/forecast",
+    },
+    timers: {
+      timerSeconds: 300,
+      pomodoroWorkSeconds: 1500,
+      pomodoroBreakSeconds: 300,
+    },
+  };
 
   let renderTimer = 0;
   let ticking = false;
+  let applying = false;
 
   function isRecord(value) {
     return typeof value === "object" && value !== null;
@@ -51,13 +96,37 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  function normalizeSettings(value) {
+    const source = isRecord(value) ? value : {};
+    const layout = isRecord(source.layout) ? source.layout : {};
+    const search = isRecord(source.search) ? source.search : {};
+    const weather = isRecord(source.weather) ? source.weather : {};
+    const timers = isRecord(source.timers) ? source.timers : {};
+    return {
+      ...DEFAULT_SETTINGS,
+      ...source,
+      layout: {
+        ...DEFAULT_SETTINGS.layout,
+        ...layout,
+        blocks: Array.isArray(layout.blocks) && layout.blocks.length > 0 ? layout.blocks : clone(DEFAULT_BLOCKS),
+      },
+      search: {
+        ...DEFAULT_SETTINGS.search,
+        ...search,
+        providers: Array.isArray(search.providers) && search.providers.length > 0 ? search.providers : clone(DEFAULT_SETTINGS.search.providers),
+      },
+      weather: { ...DEFAULT_SETTINGS.weather, ...weather },
+      timers: { ...DEFAULT_SETTINGS.timers, ...timers },
+    };
+  }
+
   async function readSettings() {
     const items = await chrome.storage.local.get(SETTINGS_KEY);
-    return isRecord(items[SETTINGS_KEY]) ? items[SETTINGS_KEY] : {};
+    return normalizeSettings(items[SETTINGS_KEY]);
   }
 
   async function writeSettings(settings) {
-    await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
+    await chrome.storage.local.set({ [SETTINGS_KEY]: normalizeSettings(settings) });
   }
 
   async function readInstanceState() {
@@ -75,7 +144,7 @@
   }
 
   function enabledBlocks(settings) {
-    return Array.isArray(settings.layout?.blocks) ? settings.layout.blocks.filter((block) => block.enabled) : [];
+    return settings.layout.blocks.filter((block) => block.enabled);
   }
 
   function cards() {
@@ -119,8 +188,8 @@
 
   async function addBlock(type) {
     const settings = await readSettings();
-    const layout = isRecord(settings.layout) ? settings.layout : {};
-    const blocks = Array.isArray(layout.blocks) ? layout.blocks : [];
+    const layout = settings.layout;
+    const blocks = layout.blocks;
     if (SINGLETON_TYPES.has(type) && blocks.some((block) => block.type === type)) return;
     const next = makeBlock(type, maxRow(blocks) + 1);
     await writeSettings({ ...settings, layout: { ...layout, blocks: [...blocks, next], profile: "custom" } });
@@ -129,32 +198,29 @@
 
   async function updateBlock(id, updater) {
     const settings = await readSettings();
-    const layout = isRecord(settings.layout) ? settings.layout : {};
-    const blocks = Array.isArray(layout.blocks) ? layout.blocks : [];
-    const next = blocks.map((block) => block.id === id ? updater(block) : block);
+    const layout = settings.layout;
+    const next = layout.blocks.map((block) => block.id === id ? updater(block) : block);
     await writeSettings({ ...settings, layout: { ...layout, blocks: next, profile: "custom" } });
   }
 
   async function removeBlock(id) {
     const settings = await readSettings();
-    const layout = isRecord(settings.layout) ? settings.layout : {};
-    const blocks = Array.isArray(layout.blocks) ? layout.blocks : [];
-    await writeSettings({ ...settings, layout: { ...layout, blocks: blocks.filter((block) => block.id !== id), profile: "custom" } });
+    const layout = settings.layout;
+    await writeSettings({ ...settings, layout: { ...layout, blocks: layout.blocks.filter((block) => block.id !== id), profile: "custom" } });
     location.reload();
   }
 
   async function duplicateBlock(block) {
     if (SINGLETON_TYPES.has(block.type)) return;
     const settings = await readSettings();
-    const layout = isRecord(settings.layout) ? settings.layout : {};
-    const blocks = Array.isArray(layout.blocks) ? layout.blocks : [];
+    const layout = settings.layout;
     const copy = {
       ...clone(block),
       id: `${block.type}-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`,
       title: `${block.title || block.type} copy`,
       row: Number(block.row || 1) + Number(block.height || 1),
     };
-    await writeSettings({ ...settings, layout: { ...layout, blocks: [...blocks, copy], profile: "custom" } });
+    await writeSettings({ ...settings, layout: { ...layout, blocks: [...layout.blocks, copy], profile: "custom" } });
     location.reload();
   }
 
@@ -213,6 +279,14 @@
     location.reload();
   }
 
+  function optionSignature(settings) {
+    const existing = enabledBlocks(settings).map((block) => block.type);
+    return BLOCK_TYPES
+      .filter(([type]) => !(SINGLETON_TYPES.has(type) && existing.includes(type)))
+      .map(([type]) => type)
+      .join("|");
+  }
+
   function ensurePalette(settings) {
     const editing = document.body.classList.contains("layout-editing");
     let palette = document.getElementById("blockInstancePalette");
@@ -239,8 +313,11 @@
 
     const select = palette.querySelector("select");
     if (!(select instanceof HTMLSelectElement)) return;
-    const existing = enabledBlocks(settings).map((block) => block.type);
+    const signature = optionSignature(settings);
+    if (select.dataset.optionSignature === signature) return;
+    select.dataset.optionSignature = signature;
     select.textContent = "";
+    const existing = enabledBlocks(settings).map((block) => block.type);
     for (const [type, title] of BLOCK_TYPES) {
       if (SINGLETON_TYPES.has(type) && existing.includes(type)) continue;
       const option = document.createElement("option");
@@ -255,12 +332,17 @@
     const blocks = assignCards(settings);
     ensurePalette(settings);
     cards().forEach((card, index) => {
-      card.querySelectorAll(".block-instance-actions").forEach((node) => node.remove());
-      if (!editing) return;
       const block = blocks[index];
-      if (!block) return;
+      const existing = card.querySelector(".block-instance-actions");
+      if (!editing || !block) {
+        existing?.remove();
+        return;
+      }
+      if (existing instanceof HTMLElement && existing.dataset.blockId === block.id) return;
+      existing?.remove();
       const actions = document.createElement("div");
       actions.className = "block-instance-actions";
+      actions.dataset.blockId = block.id;
       const config = iconButton("⚙", "Configure block", () => void configureBlock(block));
       const duplicate = iconButton("⧉", "Duplicate block", () => void duplicateBlock(block));
       const remove = iconButton("×", "Remove block", () => void removeBlock(block.id));
@@ -300,8 +382,8 @@
 
   function searchProvider(settings, block) {
     const config = blockConfig(block);
-    const id = typeof config.provider === "string" && config.provider ? config.provider : settings.search?.provider;
-    const providers = Array.isArray(settings.search?.providers) ? settings.search.providers : [];
+    const id = typeof config.provider === "string" && config.provider ? config.provider : settings.search.provider;
+    const providers = Array.isArray(settings.search.providers) ? settings.search.providers : [];
     return providers.find((provider) => provider.id === id) || providers[0] || { urlTemplate: "https://www.google.com/search?q={query}" };
   }
 
@@ -354,8 +436,8 @@
   function defaultClockDuration(settings, block) {
     const config = blockConfig(block);
     if (typeof config.durationSeconds === "number") return Math.max(1, config.durationSeconds) * 1000;
-    if (block.type === "timer") return Math.max(1, settings.timers?.timerSeconds || 300) * 1000;
-    return Math.max(1, settings.timers?.pomodoroWorkSeconds || 1500) * 1000;
+    if (block.type === "timer") return Math.max(1, settings.timers.timerSeconds || 300) * 1000;
+    return Math.max(1, settings.timers.pomodoroWorkSeconds || 1500) * 1000;
   }
 
   async function patchClock(settings, block, card) {
@@ -450,7 +532,7 @@
         clock.elapsedMs = type === "pomodoro" ? 0 : Number(clock.durationMs || 0);
         if (type === "pomodoro") {
           clock.phase = clock.phase === "break" ? "work" : "break";
-          clock.durationMs = Math.max(1, clock.phase === "break" ? settings.timers?.pomodoroBreakSeconds || 300 : settings.timers?.pomodoroWorkSeconds || 1500) * 1000;
+          clock.durationMs = Math.max(1, clock.phase === "break" ? settings.timers.pomodoroBreakSeconds || 300 : settings.timers.pomodoroWorkSeconds || 1500) * 1000;
         }
         state.clocks[id] = clock;
         changed = true;
@@ -509,17 +591,20 @@
 
   async function patchWeather(settings, block, card) {
     const config = blockConfig(block);
-    if (!config.city && typeof config.latitude !== "number") return;
     if (card.dataset.instanceWeather === block.id) return;
     card.dataset.instanceWeather = block.id;
     const body = replaceBody(card, "compact-list");
     body.textContent = "Weather loading";
-    const city = typeof config.city === "string" && config.city ? config.city : settings.weather?.city || "";
-    const latitude = typeof config.latitude === "number" ? config.latitude : settings.weather?.latitude;
-    const longitude = typeof config.longitude === "number" ? config.longitude : settings.weather?.longitude;
-    const mode = typeof config.displayMode === "string" ? config.displayMode : settings.weather?.displayMode || "current";
+    const city = typeof config.city === "string" && config.city ? config.city : settings.weather.city || "";
+    const latitude = typeof config.latitude === "number" ? config.latitude : settings.weather.latitude;
+    const longitude = typeof config.longitude === "number" ? config.longitude : settings.weather.longitude;
+    const mode = typeof config.displayMode === "string" ? config.displayMode : settings.weather.displayMode || "current";
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      body.textContent = "Weather location is not configured";
+      return;
+    }
     try {
-      const url = new URL(settings.weather?.forecastEndpoint || "https://api.open-meteo.com/v1/forecast");
+      const url = new URL(settings.weather.forecastEndpoint || "https://api.open-meteo.com/v1/forecast");
       url.searchParams.set("latitude", String(latitude));
       url.searchParams.set("longitude", String(longitude));
       url.searchParams.set("current", "temperature_2m,weather_code");
@@ -578,11 +663,18 @@
   }
 
   function schedule() {
+    if (applying) return;
     window.clearTimeout(renderTimer);
     renderTimer = window.setTimeout(async () => {
-      const settings = await readSettings();
-      decorateCards(settings);
-      await applyRuntimeOverrides(settings);
+      if (applying) return;
+      applying = true;
+      try {
+        const settings = await readSettings();
+        decorateCards(settings);
+        await applyRuntimeOverrides(settings);
+      } finally {
+        applying = false;
+      }
     }, 80);
   }
 
