@@ -31,6 +31,24 @@ const NEW_TAB_INTERNAL_SCHEMES = new Set([
   "comet:",
   "perplexity:",
 ]);
+const SPLIT_VIEW_MARKERS = [
+  "split-view",
+  "split_view",
+  "splitview",
+  "split",
+  "side-by-side",
+  "sidebyside",
+  "side_panel",
+  "side-panel",
+  "tab-picker",
+  "tab_picker",
+  "tabpicker",
+  "select-tab",
+  "select_tab",
+  "selecttab",
+  "picker",
+  "pane",
+];
 
 chrome.runtime.onInstalled.addListener(() => {
   void migrateAndSyncRules();
@@ -87,6 +105,7 @@ async function handle(message: Message): Promise<void> {
 async function redirectBrowserNewTab(tabId: number | undefined, url: string | undefined): Promise<void> {
   if (tabId === undefined || !url) return;
   if (isStartTabUrl(url) || !isBrowserNewTabUrl(url)) return;
+  if (isNativeSplitViewPickerUrl(url)) return;
   if (!await shouldRedirectBrowserNewTabs()) return;
 
   try {
@@ -121,6 +140,17 @@ function isBrowserNewTabUrl(url: string): boolean {
       || marker.includes("new-tab")
       || marker.includes("new_tab")
       || marker.includes("local-ntp");
+  } catch {
+    return false;
+  }
+}
+
+function isNativeSplitViewPickerUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (!NEW_TAB_INTERNAL_SCHEMES.has(parsed.protocol.toLowerCase())) return false;
+    const haystack = `${parsed.protocol}//${parsed.hostname}${parsed.pathname}${parsed.search}${parsed.hash}`.toLowerCase();
+    return SPLIT_VIEW_MARKERS.some((marker) => haystack.includes(marker));
   } catch {
     return false;
   }
