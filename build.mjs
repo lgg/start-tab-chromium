@@ -36,6 +36,7 @@ const staticAssets = [
   ["src/options/options.html", "options.html"],
   ["src/options/options.css", "options.css"],
   ["src/options/options-helper.js", "options-helper.js"],
+  ["src/options/background-presets.js", "background-presets.js"],
   ["icons", "icons"],
 ];
 
