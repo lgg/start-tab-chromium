@@ -143,7 +143,9 @@ function applyAppearance(): void {
     ? `url("${settings.appearance.backgroundImage}")`
     : "";
   document.body.className = `effect-${settings.appearance.backgroundEffect}`;
-  if (settings.settingsButton.visibility === "hover") document.body.classList.add("settings-hover");
+  if (settings.settingsButton.visibility === "hover") {
+    document.body.classList.add("settings-hover", `settings-hover-${settings.settingsButton.hoverArea}`);
+  }
 }
 
 function titleFor(block: LayoutBlock): string {
