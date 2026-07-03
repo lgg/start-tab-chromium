@@ -87,6 +87,7 @@
   let renderTimer = 0;
   let ticking = false;
   let applying = false;
+  let currentSettings = null;
 
   function isRecord(value) {
     return typeof value === "object" && value !== null;
@@ -122,11 +123,13 @@
 
   async function readSettings() {
     const items = await chrome.storage.local.get(SETTINGS_KEY);
-    return normalizeSettings(items[SETTINGS_KEY]);
+    currentSettings = normalizeSettings(items[SETTINGS_KEY]);
+    return currentSettings;
   }
 
   async function writeSettings(settings) {
-    await chrome.storage.local.set({ [SETTINGS_KEY]: normalizeSettings(settings) });
+    currentSettings = normalizeSettings(settings);
+    await chrome.storage.local.set({ [SETTINGS_KEY]: currentSettings });
   }
 
   async function readInstanceState() {
@@ -187,7 +190,7 @@
   }
 
   async function addBlock(type) {
-    const settings = await readSettings();
+    const settings = currentSettings || await readSettings();
     const layout = settings.layout;
     const blocks = layout.blocks;
     if (SINGLETON_TYPES.has(type) && blocks.some((block) => block.type === type)) return;
@@ -197,14 +200,14 @@
   }
 
   async function updateBlock(id, updater) {
-    const settings = await readSettings();
+    const settings = currentSettings || await readSettings();
     const layout = settings.layout;
     const next = layout.blocks.map((block) => block.id === id ? updater(block) : block);
     await writeSettings({ ...settings, layout: { ...layout, blocks: next, profile: "custom" } });
   }
 
   async function removeBlock(id) {
-    const settings = await readSettings();
+    const settings = currentSettings || await readSettings();
     const layout = settings.layout;
     await writeSettings({ ...settings, layout: { ...layout, blocks: layout.blocks.filter((block) => block.id !== id), profile: "custom" } });
     location.reload();
@@ -212,7 +215,7 @@
 
   async function duplicateBlock(block) {
     if (SINGLETON_TYPES.has(block.type)) return;
-    const settings = await readSettings();
+    const settings = currentSettings || await readSettings();
     const layout = settings.layout;
     const copy = {
       ...clone(block),
@@ -637,29 +640,36 @@
 
   async function applyRuntimeOverrides(settings) {
     const blocks = assignCards(settings);
+    let hasDynamicBlocks = false;
     for (const block of blocks) {
       const card = blockCard(block);
       if (!card) continue;
-      if (block.type === "dateTime") patchDateTime(settings, block, card);
+      if (block.type === "dateTime") {
+        hasDynamicBlocks = true;
+        patchDateTime(settings, block, card);
+      }
       if (block.type === "search") patchSearch(settings, block, card);
-      if (CLOCK_TYPES.has(block.type)) await patchClock(settings, block, card);
+      if (CLOCK_TYPES.has(block.type)) {
+        hasDynamicBlocks = true;
+        await patchClock(settings, block, card);
+      }
       if (block.type === "localTasks") await patchLocalTasks(block, card);
       if (block.type === "weather") await patchWeather(settings, block, card);
     }
-    if (!ticking) {
+    if (hasDynamicBlocks && !ticking) {
       ticking = true;
       window.setInterval(() => void tick(), 1000);
     }
   }
 
   async function tick() {
-    const settings = await readSettings();
+    const settings = currentSettings || await readSettings();
     const blocks = assignCards(settings);
     for (const block of blocks) {
       const card = blockCard(block);
       if (card && block.type === "dateTime") patchDateTime(settings, block, card);
     }
-    await updateInstanceClocks(settings);
+    if (blocks.some((block) => CLOCK_TYPES.has(block.type))) await updateInstanceClocks(settings);
   }
 
   function schedule() {
@@ -669,7 +679,7 @@
       if (applying) return;
       applying = true;
       try {
-        const settings = await readSettings();
+        const settings = currentSettings || await readSettings();
         decorateCards(settings);
         await applyRuntimeOverrides(settings);
       } finally {
@@ -682,7 +692,9 @@
   observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
   window.addEventListener("DOMContentLoaded", schedule);
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName === "local" && changes[SETTINGS_KEY]) schedule();
+    if (areaName !== "local" || !changes[SETTINGS_KEY]) return;
+    currentSettings = normalizeSettings(changes[SETTINGS_KEY].newValue);
+    schedule();
   });
   schedule();
 })();
