@@ -22,8 +22,9 @@ import {
 
 const STATE_KEY = "startPageRuntimeState";
 const SWIPE_THRESHOLD = 44;
+const CLOCK_IDS = ["timer", "stopwatch", "pomodoro"] as const;
 
-type ClockId = "timer" | "stopwatch" | "pomodoro";
+type ClockId = typeof CLOCK_IDS[number];
 type PomodoroPhase = "work" | "break";
 
 interface ClockState {
@@ -113,14 +114,82 @@ function defaultClock(id: ClockId): ClockState {
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function finiteNumber(value: unknown, fallback: number, min = 0, max = 86_400_000): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
+function finiteInteger(value: unknown, fallback: number, min = 0, max = 1000): number {
+  return Math.round(finiteNumber(value, fallback, min, max));
+}
+
+function normalizeClock(id: ClockId, value: unknown): ClockState {
+  const fallback = defaultClock(id);
+  if (!isRecord(value)) return fallback;
+
+  const startedAt = finiteNumber(value.startedAt, 0, 0, Date.now() + 86_400_000) || null;
+  const durationMs = finiteNumber(value.durationMs, fallback.durationMs, 1, 86_400_000);
+  const elapsedMs = finiteNumber(value.elapsedMs, fallback.elapsedMs, 0, durationMs);
+  const running = value.running === true && startedAt !== null;
+  const pomodoroPhase = id === "pomodoro"
+    ? value.pomodoroPhase === "break" ? "break" : "work"
+    : undefined;
+
+  return {
+    running,
+    startedAt,
+    elapsedMs,
+    durationMs,
+    pomodoroPhase,
+    focusSessionStarted: value.focusSessionStarted === true,
+  };
+}
+
+function normalizeNotes(value: unknown): Record<string, string> {
+  const notes: Record<string, string> = {};
+  if (!isRecord(value)) return notes;
+  for (const [key, note] of Object.entries(value)) {
+    if (typeof note === "string") notes[key] = note;
+  }
+  return notes;
+}
+
+function normalizeLinkPages(value: unknown): Record<string, number> {
+  const pages: Record<string, number> = {};
+  if (!isRecord(value)) return pages;
+  for (const [key, page] of Object.entries(value)) {
+    pages[key] = finiteInteger(page, 0, 0, 10_000);
+  }
+  return pages;
+}
+
+function normalizeLocalTasks(value: unknown): LocalTask[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isRecord).flatMap((task) => {
+    if (typeof task.id !== "string" || typeof task.title !== "string") return [];
+    return [{ id: task.id, title: task.title, done: task.done === true }];
+  });
+}
+
 async function loadRuntimeState(): Promise<RuntimeState> {
   const items = await chrome.storage.local.get(STATE_KEY);
-  const stored = items[STATE_KEY] as Partial<RuntimeState> | undefined;
+  const stored = items[STATE_KEY];
+  const storedClocks = isRecord(stored) ? stored.clocks : undefined;
+  const clocks: Record<string, ClockState> = {};
+
+  for (const id of CLOCK_IDS) {
+    clocks[id] = normalizeClock(id, isRecord(storedClocks) ? storedClocks[id] : undefined);
+  }
+
   return {
-    clocks: stored?.clocks ?? {},
-    notes: stored?.notes ?? {},
-    linkPages: stored?.linkPages ?? {},
-    localTasks: Array.isArray(stored?.localTasks) ? stored.localTasks : [],
+    clocks,
+    notes: normalizeNotes(isRecord(stored) ? stored.notes : undefined),
+    linkPages: normalizeLinkPages(isRecord(stored) ? stored.linkPages : undefined),
+    localTasks: normalizeLocalTasks(isRecord(stored) ? stored.localTasks : undefined),
   };
 }
 
@@ -417,7 +486,7 @@ function resetClock(id: ClockId): void {
 }
 
 function resetAllClocks(): void {
-  for (const id of ["timer", "stopwatch", "pomodoro"] as const) {
+  for (const id of CLOCK_IDS) {
     state.clocks[id] = defaultClock(id);
   }
   saveStateNow();
@@ -442,7 +511,7 @@ function updateDateTime(): void {
 }
 
 function updateClocks(): void {
-  for (const id of ["timer", "stopwatch", "pomodoro"] as const) {
+  for (const id of CLOCK_IDS) {
     const target = document.getElementById(`${id}Value`);
     if (!target) continue;
     const clock = ensureClock(id);
