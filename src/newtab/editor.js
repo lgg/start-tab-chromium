@@ -2,6 +2,7 @@
   const SETTINGS_KEY = "startPageSettings";
   const EDITING_CLASS = "layout-editing";
   const DEFAULT_COLUMNS = 12;
+  const MIN_FULL_ZONE_COLUMN_WIDTH = 112;
   const DEFAULT_BLOCKS = [
     { id: "dateTime", type: "dateTime", title: "Date & Time", enabled: true, column: 1, row: 1, width: 4, height: 2 },
     { id: "search", type: "search", title: "Search", enabled: true, column: 5, row: 1, width: 5, height: 2 },
@@ -180,8 +181,37 @@
     if (settings.layout.mode === "free") {
       syncFreeCanvasSize();
     } else {
+      syncGridCanvasSize();
+    }
+  }
+
+  function gridBounds() {
+    return enabledBlocks().reduce((bounds, block) => ({
+      columns: Math.max(bounds.columns, block.column + block.width - 1),
+      rows: Math.max(bounds.rows, block.row + block.height - 1),
+    }), { columns: settings.layout.columns || DEFAULT_COLUMNS, rows: 1 });
+  }
+
+  function syncGridCanvasSize() {
+    const container = grid();
+    if (!container) return;
+    const metrics = gridMetrics();
+    if (!metrics) return;
+    const bounds = gridBounds();
+    const minHeight = Math.max(
+      window.innerHeight - 64,
+      bounds.rows * metrics.rowHeight + Math.max(0, bounds.rows - 1) * metrics.rowGap + 32,
+    );
+    container.style.minHeight = `${minHeight}px`;
+
+    if (settings.layout.zone === "full") {
+      const minWidth = Math.max(
+        window.innerWidth - 64,
+        bounds.columns * MIN_FULL_ZONE_COLUMN_WIDTH + Math.max(0, bounds.columns - 1) * metrics.columnGap,
+      );
+      container.style.minWidth = `${minWidth}px`;
+    } else {
       container.style.minWidth = "";
-      container.style.minHeight = "";
     }
   }
 
@@ -328,13 +358,15 @@
     location.reload();
   }
 
-  function blockPatch(id, patch) {
+  function blockPatch(id, patch, layoutPatch = {}) {
     const blocks = settings.layout.blocks.map((block) => block.id === id ? { ...block, ...patch } : block);
-    return { ...settings, layout: { ...settings.layout, profile: "custom", blocks } };
+    return { ...settings, layout: { ...settings.layout, ...layoutPatch, profile: "custom", blocks } };
   }
 
   async function saveBlock(id, patch) {
-    await saveSettings(blockPatch(id, patch));
+    const { columns, ...blockPatchValue } = patch;
+    const layoutPatch = Number.isFinite(columns) ? { columns: Math.max(1, Math.round(columns)) } : {};
+    await saveSettings(blockPatch(id, blockPatchValue, layoutPatch));
     applyLayout();
   }
 
@@ -394,24 +426,43 @@
     card.style.transform = dragState.resizing ? "" : `translate(${dx}px, ${dy}px)`;
   }
 
+  function expandableColumns(requiredColumns, metrics) {
+    if (settings.layout.zone !== "full") return metrics.columns;
+    return Math.max(metrics.columns, requiredColumns);
+  }
+
   function gridPatchFromPointer(event) {
     const metrics = gridMetrics();
     if (!metrics || !dragState) return null;
     const block = dragState.block;
     const left = dragState.cardRect.left - metrics.rect.left + (dragState.resizing ? 0 : event.clientX - dragState.startX);
     const top = dragState.cardRect.top - metrics.rect.top + (dragState.resizing ? 0 : event.clientY - dragState.startY);
-    const column = Math.max(1, Math.min(metrics.columns, Math.round(left / (metrics.columnWidth + metrics.columnGap)) + 1));
+    const rawColumn = Math.round(left / (metrics.columnWidth + metrics.columnGap)) + 1;
+    const column = Math.max(1, settings.layout.zone === "full" ? rawColumn : Math.min(metrics.columns, rawColumn));
     const row = Math.max(1, Math.round(top / (metrics.rowHeight + metrics.rowGap)) + 1);
 
     if (!dragState.resizing) {
-      return { column: Math.min(column, Math.max(1, metrics.columns - block.width + 1)), row };
+      const nextColumns = expandableColumns(column + block.width - 1, metrics);
+      return {
+        column: Math.min(column, Math.max(1, nextColumns - block.width + 1)),
+        row,
+        ...(nextColumns !== metrics.columns ? { columns: nextColumns } : {}),
+      };
     }
 
     const widthPx = Math.max(metrics.columnWidth, dragState.cardRect.width + event.clientX - dragState.startX);
     const heightPx = Math.max(metrics.rowHeight, dragState.cardRect.height + event.clientY - dragState.startY);
-    const width = Math.max(1, Math.min(metrics.columns - block.column + 1, Math.round(widthPx / (metrics.columnWidth + metrics.columnGap))));
+    const rawWidth = Math.max(1, Math.round(widthPx / (metrics.columnWidth + metrics.columnGap)));
+    const nextColumns = expandableColumns(block.column + rawWidth - 1, metrics);
+    const width = settings.layout.zone === "full"
+      ? rawWidth
+      : Math.max(1, Math.min(metrics.columns - block.column + 1, rawWidth));
     const height = Math.max(1, Math.round(heightPx / (metrics.rowHeight + metrics.rowGap)));
-    return { width, height };
+    return {
+      width,
+      height,
+      ...(nextColumns !== metrics.columns ? { columns: nextColumns } : {}),
+    };
   }
 
   function freePatchFromCard(card) {
