@@ -29,6 +29,8 @@
     backgroundPresetUnlike: "Unlike",
     backgroundPresetRemove: "Remove",
     backgroundPresetActive: "Active",
+    backgroundPresetCurrent: "Current background",
+    backgroundPresetImageMissing: "Choose an image file or paste an image URL first.",
   };
 
   const defaultPresets = [
@@ -58,6 +60,11 @@
 
   function t(key) {
     return chrome.i18n?.getMessage(key) || strings[key] || key;
+  }
+
+  function typeTitle(type) {
+    const suffix = `${type[0]?.toUpperCase() || ""}${type.slice(1)}`;
+    return t(`backgroundPresetType${suffix}`);
   }
 
   function isRecord(value) {
@@ -106,12 +113,13 @@
     await chrome.storage.local.set({ [STORAGE_KEY]: settings });
   }
 
-  function normalize(settings) {
+  function normalize(settings, fallbackPresets = []) {
     const appearance = isRecord(settings.appearance) ? settings.appearance : {};
     const byId = new Map(defaultPresets.map((item) => [item.id, { ...item }]));
 
-    if (Array.isArray(appearance.backgroundPresets)) {
-      for (const item of appearance.backgroundPresets) {
+    for (const source of [fallbackPresets, appearance.backgroundPresets]) {
+      if (!Array.isArray(source)) continue;
+      for (const item of source) {
         const normalized = normalizePreset(item);
         if (normalized.id) byId.set(normalized.id, normalized);
       }
@@ -123,28 +131,28 @@
       backgroundImage: stringValue(appearance.backgroundImage, ""),
       backgroundEffect: oneOf(appearance.backgroundEffect, EFFECTS, "aurora"),
     };
-    const activeId = stringValue(appearance.activeBackgroundPresetId, "");
-    const activeExists = presets.some((item) => item.id === activeId);
+    const storedActiveId = stringValue(appearance.activeBackgroundPresetId, "");
+    const storedActive = presets.find((item) => item.id === storedActiveId);
     const matchingCurrent = presets.find((item) => sameBackground(item, current));
 
-    if (!activeExists && !matchingCurrent) {
-      const currentPreset = {
-        id: "current-background",
-        title: "Current background",
-        type: current.backgroundImage ? "image" : current.backgroundEffect === "none" ? "color" : "effect",
-        liked: false,
-        createdAt: new Date().toISOString(),
-        ...current,
-      };
-      presets = [currentPreset, ...presets].slice(0, MAX_PRESETS);
-      return { appearance, presets, activeId: currentPreset.id };
+    if (storedActive && sameBackground(storedActive, current)) {
+      return { appearance, presets, activeId: storedActive.id };
     }
 
-    return {
-      appearance,
-      presets,
-      activeId: activeExists ? activeId : matchingCurrent?.id || "aurora-default",
+    if (matchingCurrent) {
+      return { appearance, presets, activeId: matchingCurrent.id };
+    }
+
+    const currentPreset = {
+      id: "current-background",
+      title: t("backgroundPresetCurrent"),
+      type: current.backgroundImage ? "image" : current.backgroundEffect === "none" ? "color" : "effect",
+      liked: false,
+      createdAt: new Date().toISOString(),
+      ...current,
     };
+    presets = [currentPreset, ...presets.filter((item) => item.id !== currentPreset.id)].slice(0, MAX_PRESETS);
+    return { appearance, presets, activeId: currentPreset.id };
   }
 
   function sameBackground(left, right) {
@@ -155,6 +163,10 @@
 
   function activePreset(model) {
     return model.presets.find((item) => item.id === model.activeId) || model.presets[0];
+  }
+
+  function cssUrl(value) {
+    return `url("${String(value).replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}")`;
   }
 
   function updateFormControls(presetValue) {
@@ -221,7 +233,7 @@
     const preview = document.createElement("span");
     preview.className = `background-tile__preview background-tile__preview--${presetValue.backgroundEffect}`;
     preview.style.backgroundColor = presetValue.backgroundColor;
-    if (presetValue.backgroundImage) preview.style.backgroundImage = `url("${presetValue.backgroundImage}")`;
+    if (presetValue.backgroundImage) preview.style.backgroundImage = cssUrl(presetValue.backgroundImage);
 
     const title = document.createElement("span");
     title.className = "background-tile__title";
@@ -345,8 +357,8 @@
   }
 
   async function addPreset(form) {
-    const type = form.querySelector("#presetType")?.value || "color";
-    const title = form.querySelector("#presetTitle")?.value.trim() || strings[`backgroundPresetType${type[0].toUpperCase()}${type.slice(1)}`] || type;
+    const type = oneOf(form.querySelector("#presetType")?.value, TYPES, "color");
+    const title = form.querySelector("#presetTitle")?.value.trim() || typeTitle(type);
     const colorA = colorValue(form.querySelector("#presetColorA")?.value, "#08111f");
     const colorB = colorValue(form.querySelector("#presetColorB")?.value, "#1e3a8a");
     const colorC = colorValue(form.querySelector("#presetColorC")?.value, "#0f766e");
@@ -371,6 +383,10 @@
     } else if (type === "effect") {
       next.backgroundEffect = effect;
     } else if (type === "image") {
+      if (!imageFile && !imageUrl) {
+        setStatus(t("backgroundPresetImageMissing"));
+        return;
+      }
       next.backgroundImage = imageFile ? await imageFileToDataUrl(imageFile) : imageUrl;
     }
 
@@ -378,6 +394,11 @@
     const presets = [next, ...model.presets.filter((item) => item.id !== next.id)].slice(0, MAX_PRESETS);
     await persistAppearance(next, presets);
     scheduleRender();
+  }
+
+  function setStatus(message) {
+    const status = document.getElementById("status");
+    if (status) status.textContent = message;
   }
 
   function gradientDataUri(colors) {
@@ -466,22 +487,21 @@
   function preservePresetsAfterCoreSave() {
     void (async () => {
       const before = normalize(await readSettings());
-      window.setTimeout(() => void restorePresets(before), 700);
-      window.setTimeout(() => void restorePresets(before), 1800);
+      window.setTimeout(() => void restorePresetsAfterCoreSave(before), 700);
+      window.setTimeout(() => void restorePresetsAfterCoreSave(before), 1800);
     })();
   }
 
-  async function restorePresets(before) {
+  async function restorePresetsAfterCoreSave(before) {
     const settings = await readSettings();
     const appearance = isRecord(settings.appearance) ? settings.appearance : {};
-    await writeSettings({
-      ...settings,
-      appearance: {
-        ...appearance,
-        activeBackgroundPresetId: before.activeId,
-        backgroundPresets: before.presets,
-      },
-    });
+    const model = normalize(
+      { ...settings, appearance: { ...appearance, backgroundPresets: appearance.backgroundPresets || before.presets } },
+      before.presets,
+    );
+    const active = activePreset(model);
+    if (!active) return;
+    await persistAppearance(active, model.presets);
     scheduleRender();
   }
 
