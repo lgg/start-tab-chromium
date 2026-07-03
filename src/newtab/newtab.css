@@ -188,6 +188,7 @@ body.effect-noise .background::after {
   display: grid;
   grid-template-columns: repeat(var(--link-columns, 4), minmax(0, 1fr));
   gap: 10px;
+  font-family: var(--link-font-family, var(--font-family));
 }
 
 .links--horizontal {

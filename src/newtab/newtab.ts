@@ -285,6 +285,7 @@ async function loadIp(): Promise<void> {
 
 function renderLinks(container: HTMLElement): void {
   container.style.setProperty("--link-columns", String(settings.links.columns));
+  container.style.setProperty("--link-font-family", settings.links.fontFamily);
   container.style.setProperty("--link-font-size", `${settings.links.fontSize}px`);
   container.style.setProperty("--link-icon-size", `${settings.links.iconSize}px`);
   const list = document.createElement("div");
