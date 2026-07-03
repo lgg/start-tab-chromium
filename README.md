@@ -11,7 +11,7 @@ Start Tab is a Manifest V3 extension for Chromium-based browsers. It combines a 
 - Enforce blocking with Manifest V3 `declarativeNetRequest` dynamic rules.
 - Redirect blocked navigations to an extension-owned blocked page.
 - Delay unblocking from the blocked page with a countdown.
-- Track focus statistics: raw block hits, deduplicated avoided visits, estimated time saved, Pomodoro sessions, interrupted focus sessions, and countdown unblocks.
+- Track focus statistics: raw block hits, deduplicated avoided visits, estimated time saved, Pomodoro sessions, interrupted focus sessions, total focus time, and countdown unblocks.
 - Localized UI with English and Russian catalogs.
 - Configurable custom new tab page with date/time, IP, links, search, timer, stopwatch, Pomodoro, notes, local tasks, recent history, browser pinned tabs, Start Tab pinned links, Google Calendar, weather, command, and focus stats blocks.
 - First-run layout onboarding for the custom new tab page.
