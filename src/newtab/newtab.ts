@@ -81,6 +81,11 @@ interface WeatherResponse {
   };
 }
 
+interface UrlItem {
+  title: string;
+  url: string;
+}
+
 const gridEl = requireElement<HTMLDivElement>("grid");
 const backgroundEl = requireElement<HTMLDivElement>("background");
 const settingsEl = requireElement<HTMLButtonElement>("settings");
@@ -89,6 +94,11 @@ let i18n: I18n;
 let settings: StartPageSettings;
 let state: RuntimeState;
 let saveTimer: number | undefined;
+let calendarEventsCache: Promise<GoogleCalendarEvent[]> | null = null;
+let weatherLocationCache: Promise<WeatherLocation> | null = null;
+let weatherForecastCache: Promise<WeatherResponse> | null = null;
+let recentItemsCache: Promise<UrlItem[]> | null = null;
+let browserPinnedItemsCache: Promise<UrlItem[]> | null = null;
 
 function requireElement<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
@@ -203,6 +213,20 @@ function queueSaveState(): void {
   saveTimer = window.setTimeout(saveStateNow, 120);
 }
 
+function cached<T>(
+  current: Promise<T> | null,
+  assign: (next: Promise<T> | null) => void,
+  factory: () => Promise<T>,
+): Promise<T> {
+  if (current) return current;
+  const next = factory().catch((error: unknown) => {
+    assign(null);
+    throw error;
+  });
+  assign(next);
+  return next;
+}
+
 function applyAppearance(): void {
   document.body.style.setProperty("--text-color", settings.appearance.textColor);
   document.body.style.setProperty("--base-font-size", `${settings.appearance.baseFontSize}px`);
@@ -247,7 +271,6 @@ function render(): void {
   }
 
   updateDynamicBlocks();
-  void loadIp();
 }
 
 function renderBlock(block: LayoutBlock, element: HTMLElement): void {
@@ -337,21 +360,6 @@ function activeSearchProvider(): SearchProvider {
   return settings.search.providers.find((provider) => provider.id === settings.search.provider)
     ?? settings.search.providers[0]
     ?? { id: "google", title: "Google", urlTemplate: "https://www.google.com/search?q={query}" };
-}
-
-async function loadIp(): Promise<void> {
-  const target = document.getElementById("ipDetail");
-  if (!target) return;
-  try {
-    const response = await fetch(settings.ip.endpoint, { cache: "no-store" });
-    if (!response.ok) throw new Error(`IP endpoint failed: ${response.status}`);
-    const payload = await response.json() as { ip?: string; country_name?: string; country?: string };
-    const ip = payload.ip ?? i18n.t("ipUnknown");
-    const country = payload.country_name ?? payload.country ?? i18n.t("ipUnknownCountry");
-    target.textContent = i18n.t("ipResult", { ip, country });
-  } catch {
-    target.textContent = i18n.t("ipUnavailable");
-  }
 }
 
 function renderLinks(container: HTMLElement): void {
@@ -628,7 +636,11 @@ async function renderGoogleCalendar(container: HTMLElement): Promise<void> {
   }
 
   try {
-    const events = await listCalendarEvents(settings.googleCalendar.calendarId, settings.googleCalendar.maxResults);
+    const events = await cached(
+      calendarEventsCache,
+      (next) => { calendarEventsCache = next; },
+      () => listCalendarEvents(settings.googleCalendar.calendarId, settings.googleCalendar.maxResults),
+    );
     renderCalendarEvents(list, events);
   } catch {
     list.textContent = i18n.t("googleCalendarUnavailable");
@@ -659,8 +671,16 @@ async function renderWeather(container: HTMLElement): Promise<void> {
   const target = el("div", "compact-list", i18n.t("weatherLoading"));
   container.append(target);
   try {
-    const location = await resolveWeatherLocation();
-    const forecast = await fetchWeather(location);
+    const location = await cached(
+      weatherLocationCache,
+      (next) => { weatherLocationCache = next; },
+      resolveWeatherLocation,
+    );
+    const forecast = await cached(
+      weatherForecastCache,
+      (next) => { weatherForecastCache = next; },
+      () => fetchWeather(location),
+    );
     renderWeatherForecast(target, location, forecast);
   } catch {
     target.textContent = i18n.t("weatherUnavailable");
@@ -786,8 +806,15 @@ async function renderRecent(container: HTMLElement): Promise<void> {
   const list = el("div", "compact-list", i18n.t("recentLoading"));
   container.append(list);
   try {
-    const results = await chrome.history.search({ text: "", maxResults: 6, startTime: Date.now() - 1000 * 60 * 60 * 24 * 14 });
-    renderUrlItems(list, results.map((item) => ({ title: item.title || item.url || "", url: item.url || "" })));
+    const results = await cached(
+      recentItemsCache,
+      (next) => { recentItemsCache = next; },
+      async () => {
+        const items = await chrome.history.search({ text: "", maxResults: 6, startTime: Date.now() - 1000 * 60 * 60 * 24 * 14 });
+        return items.map((item) => ({ title: item.title || item.url || "", url: item.url || "" }));
+      },
+    );
+    renderUrlItems(list, results);
   } catch {
     list.textContent = i18n.t("recentUnavailable");
   }
@@ -797,8 +824,15 @@ async function renderBrowserPinned(container: HTMLElement): Promise<void> {
   const list = el("div", "compact-list", i18n.t("browserPinnedLoading"));
   container.append(list);
   try {
-    const tabs = await chrome.tabs.query({ pinned: true });
-    renderUrlItems(list, tabs.map((tab) => ({ title: tab.title || tab.url || "", url: tab.url || "" })));
+    const tabs = await cached(
+      browserPinnedItemsCache,
+      (next) => { browserPinnedItemsCache = next; },
+      async () => {
+        const pinnedTabs = await chrome.tabs.query({ pinned: true });
+        return pinnedTabs.map((tab) => ({ title: tab.title || tab.url || "", url: tab.url || "" }));
+      },
+    );
+    renderUrlItems(list, tabs);
   } catch {
     list.textContent = i18n.t("browserPinnedUnavailable");
   }
@@ -810,7 +844,7 @@ function renderStartPinned(container: HTMLElement): void {
   container.append(list);
 }
 
-function renderUrlItems(container: HTMLElement, items: Array<{ title: string; url: string }>): void {
+function renderUrlItems(container: HTMLElement, items: UrlItem[]): void {
   container.textContent = "";
   const valid = items.filter((item) => item.url.startsWith("http://") || item.url.startsWith("https://"));
   if (valid.length === 0) {
