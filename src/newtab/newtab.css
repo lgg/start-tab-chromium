@@ -28,6 +28,10 @@ body {
   font-size: var(--base-font-size);
 }
 
+body.layout-zone-full {
+  overflow-x: auto;
+}
+
 .background {
   position: fixed;
   inset: 0;
@@ -83,11 +87,22 @@ body.effect-noise .background::after {
   padding: 32px;
 }
 
+body.layout-zone-full .start-page {
+  width: 100%;
+  max-width: none;
+  min-width: 100vw;
+  margin: 0;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(var(--grid-columns, 12), minmax(0, 1fr));
   grid-auto-rows: 86px;
   gap: 16px;
+}
+
+body.layout-zone-full .grid {
+  min-height: calc(100vh - 64px);
 }
 
 .card {
@@ -547,6 +562,11 @@ body.layout-mode-grid.layout-editing .grid {
   .grid {
     display: flex;
     flex-direction: column;
+  }
+
+  body.layout-zone-full .grid {
+    display: grid;
+    grid-template-columns: repeat(var(--grid-columns, 12), minmax(0, 1fr));
   }
 
   .card {
