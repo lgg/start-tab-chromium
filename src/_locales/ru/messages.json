@@ -174,6 +174,7 @@
   "linkDirection": { "message": "Направление страниц" },
   "directionHorizontal": { "message": "Горизонтально" },
   "directionVertical": { "message": "Вертикально" },
+  "linkFontFamily": { "message": "Шрифт блока ссылок" },
   "linkFontSize": { "message": "Размер текста ссылок" },
   "linkIconSize": { "message": "Размер иконок" },
   "linksJson": { "message": "JSON ссылок" },
