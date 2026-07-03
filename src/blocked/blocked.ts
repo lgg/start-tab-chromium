@@ -14,6 +14,7 @@ const cancelEl = document.getElementById("cancel") as HTMLButtonElement;
 
 const host = normalizeHost(new URLSearchParams(location.search).get("site") ?? "");
 let interval: number | undefined;
+let countdownActive = false;
 let i18n: I18n;
 
 function unit(value: number): string {
@@ -34,8 +35,15 @@ function renderMessage(): void {
     : i18n.t("blockedUnknownSiteMessage");
 }
 
+function clearCountdownTimer(): void {
+  window.clearInterval(interval);
+  interval = undefined;
+}
+
 function startCountdown(): void {
-  if (!host) return;
+  if (!host || countdownActive) return;
+  countdownActive = true;
+  unblockEl.disabled = true;
   actionsEl.hidden = true;
   countdownEl.hidden = false;
   let remaining = WAIT_SECONDS;
@@ -47,7 +55,7 @@ function startCountdown(): void {
       unit: unit(remaining),
     });
     if (remaining <= 0) {
-      window.clearInterval(interval);
+      clearCountdownTimer();
       void finishUnblock();
       return;
     }
@@ -59,7 +67,9 @@ function startCountdown(): void {
 }
 
 function cancelCountdown(): void {
-  window.clearInterval(interval);
+  clearCountdownTimer();
+  countdownActive = false;
+  unblockEl.disabled = false;
   countdownEl.hidden = true;
   actionsEl.hidden = false;
 }
@@ -70,6 +80,8 @@ async function finishUnblock(): Promise<void> {
   const ack = await sendMessage({ type: "unblock", host });
   if (!ack.ok) {
     countdownTextEl.textContent = i18n.t("failedToUnblock");
+    countdownActive = false;
+    unblockEl.disabled = false;
     actionsEl.hidden = false;
     countdownEl.hidden = true;
     return;
@@ -85,6 +97,7 @@ async function init(): Promise<void> {
   cancelEl.textContent = i18n.t("cancelUnblocking");
   unblockEl.addEventListener("click", startCountdown);
   cancelEl.addEventListener("click", cancelCountdown);
+  window.addEventListener("pagehide", clearCountdownTimer);
   renderMessage();
 }
 
