@@ -2,6 +2,8 @@
   const STORAGE_KEY = "startPageSettings";
   const MAX_PRESETS = 80;
   const MAX_IMAGE_SIZE = 1920;
+  const EFFECTS = ["none", "gradient", "aurora", "mesh", "spotlight", "noise"];
+  const TYPES = ["color", "gradient", "effect", "image"];
   const BUILT_IN_IDS = new Set(["aurora-default", "black", "animated-gradient", "mesh", "spotlight", "noise"]);
 
   const strings = {
@@ -30,67 +32,29 @@
   };
 
   const defaultPresets = [
-    {
-      id: "aurora-default",
-      title: "Aurora",
-      type: "effect",
-      liked: true,
-      createdAt: "2026-01-01T00:00:00.000Z",
-      backgroundColor: "#08111f",
-      backgroundImage: "",
-      backgroundEffect: "aurora",
-    },
-    {
-      id: "black",
-      title: "Black",
-      type: "color",
-      liked: false,
-      createdAt: "2026-01-01T00:00:00.000Z",
-      backgroundColor: "#000000",
-      backgroundImage: "",
-      backgroundEffect: "none",
-    },
-    {
-      id: "animated-gradient",
-      title: "Animated gradient",
-      type: "effect",
-      liked: false,
-      createdAt: "2026-01-01T00:00:00.000Z",
-      backgroundColor: "#0f172a",
-      backgroundImage: "",
-      backgroundEffect: "gradient",
-    },
-    {
-      id: "mesh",
-      title: "Mesh",
-      type: "effect",
-      liked: false,
-      createdAt: "2026-01-01T00:00:00.000Z",
-      backgroundColor: "#08111f",
-      backgroundImage: "",
-      backgroundEffect: "mesh",
-    },
-    {
-      id: "spotlight",
-      title: "Spotlight",
-      type: "effect",
-      liked: false,
-      createdAt: "2026-01-01T00:00:00.000Z",
-      backgroundColor: "#08111f",
-      backgroundImage: "",
-      backgroundEffect: "spotlight",
-    },
-    {
-      id: "noise",
-      title: "Noise",
-      type: "effect",
-      liked: false,
-      createdAt: "2026-01-01T00:00:00.000Z",
-      backgroundColor: "#101827",
-      backgroundImage: "",
-      backgroundEffect: "noise",
-    },
+    preset("aurora-default", "Aurora", "effect", "#08111f", "", "aurora", true),
+    preset("black", "Black", "color", "#000000", "", "none"),
+    preset("animated-gradient", "Animated gradient", "effect", "#0f172a", "", "gradient"),
+    preset("mesh", "Mesh", "effect", "#08111f", "", "mesh"),
+    preset("spotlight", "Spotlight", "effect", "#08111f", "", "spotlight"),
+    preset("noise", "Noise", "effect", "#101827", "", "noise"),
   ];
+
+  let observer;
+  let renderTimer = 0;
+
+  function preset(id, title, type, backgroundColor, backgroundImage, backgroundEffect, liked = false) {
+    return {
+      id,
+      title,
+      type,
+      liked,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      backgroundColor,
+      backgroundImage,
+      backgroundEffect,
+    };
+  }
 
   function t(key) {
     return chrome.i18n?.getMessage(key) || strings[key] || key;
@@ -112,23 +76,23 @@
     return typeof value === "string" && allowed.includes(value) ? value : fallback;
   }
 
-  function sanitizeColor(value, fallback) {
+  function colorValue(value, fallback) {
     return /^#[0-9a-f]{6}$/i.test(String(value)) ? String(value) : fallback;
   }
 
-  function presetFrom(value, fallback = defaultPresets[0]) {
+  function normalizePreset(value, fallback = defaultPresets[0]) {
     const record = isRecord(value) ? value : {};
     return {
       id: stringValue(record.id, fallback.id),
       title: stringValue(record.title, fallback.title),
-      type: oneOf(record.type, ["color", "gradient", "effect", "image"], fallback.type),
+      type: oneOf(record.type, TYPES, fallback.type),
       liked: boolValue(record.liked, fallback.liked),
       createdAt: stringValue(record.createdAt, fallback.createdAt),
-      backgroundColor: sanitizeColor(record.backgroundColor, fallback.backgroundColor),
+      backgroundColor: colorValue(record.backgroundColor, fallback.backgroundColor),
       backgroundImage: stringValue(record.backgroundImage, fallback.backgroundImage),
-      backgroundEffect: oneOf(record.backgroundEffect, ["none", "gradient", "aurora", "mesh", "spotlight", "noise"], fallback.backgroundEffect),
+      backgroundEffect: oneOf(record.backgroundEffect, EFFECTS, fallback.backgroundEffect),
       gradientColors: Array.isArray(record.gradientColors)
-        ? record.gradientColors.map((item) => sanitizeColor(item, "#000000")).slice(0, 5)
+        ? record.gradientColors.map((item) => colorValue(item, "#000000")).slice(0, 5)
         : undefined,
     };
   }
@@ -144,11 +108,12 @@
 
   function normalize(settings) {
     const appearance = isRecord(settings.appearance) ? settings.appearance : {};
-    const byId = new Map(defaultPresets.map((preset) => [preset.id, { ...preset }]));
+    const byId = new Map(defaultPresets.map((item) => [item.id, { ...item }]));
+
     if (Array.isArray(appearance.backgroundPresets)) {
       for (const item of appearance.backgroundPresets) {
-        const preset = presetFrom(item);
-        if (preset.id) byId.set(preset.id, preset);
+        const normalized = normalizePreset(item);
+        if (normalized.id) byId.set(normalized.id, normalized);
       }
     }
 
@@ -156,11 +121,11 @@
     const current = {
       backgroundColor: stringValue(appearance.backgroundColor, "#08111f"),
       backgroundImage: stringValue(appearance.backgroundImage, ""),
-      backgroundEffect: oneOf(appearance.backgroundEffect, ["none", "gradient", "aurora", "mesh", "spotlight", "noise"], "aurora"),
+      backgroundEffect: oneOf(appearance.backgroundEffect, EFFECTS, "aurora"),
     };
-    const activeBackgroundPresetId = stringValue(appearance.activeBackgroundPresetId, "");
-    const activeExists = presets.some((preset) => preset.id === activeBackgroundPresetId);
-    const matchingCurrent = presets.find((preset) => sameBackground(preset, current));
+    const activeId = stringValue(appearance.activeBackgroundPresetId, "");
+    const activeExists = presets.some((item) => item.id === activeId);
+    const matchingCurrent = presets.find((item) => sameBackground(item, current));
 
     if (!activeExists && !matchingCurrent) {
       const currentPreset = {
@@ -178,7 +143,7 @@
     return {
       appearance,
       presets,
-      activeId: activeExists ? activeBackgroundPresetId : matchingCurrent?.id || "aurora-default",
+      activeId: activeExists ? activeId : matchingCurrent?.id || "aurora-default",
     };
   }
 
@@ -188,118 +153,114 @@
       && left.backgroundEffect === right.backgroundEffect;
   }
 
-  function updateFormControls(preset) {
+  function activePreset(model) {
+    return model.presets.find((item) => item.id === model.activeId) || model.presets[0];
+  }
+
+  function updateFormControls(presetValue) {
     const backgroundColor = document.getElementById("backgroundColor");
     const backgroundImage = document.getElementById("backgroundImage");
     const backgroundEffect = document.getElementById("backgroundEffect");
-    if (backgroundColor instanceof HTMLInputElement) backgroundColor.value = preset.backgroundColor;
+    if (backgroundColor instanceof HTMLInputElement) backgroundColor.value = presetValue.backgroundColor;
     if (backgroundImage instanceof HTMLInputElement) {
       backgroundImage.type = "text";
-      backgroundImage.value = preset.backgroundImage;
+      backgroundImage.value = presetValue.backgroundImage;
     }
-    if (backgroundEffect instanceof HTMLSelectElement) backgroundEffect.value = preset.backgroundEffect;
+    if (backgroundEffect instanceof HTMLSelectElement) backgroundEffect.value = presetValue.backgroundEffect;
   }
 
-  async function persistAppearance(preset, presets) {
+  async function persistAppearance(presetValue, presets) {
     const settings = await readSettings();
     const appearance = isRecord(settings.appearance) ? settings.appearance : {};
-    const next = {
+    await writeSettings({
       ...settings,
       appearance: {
         ...appearance,
-        backgroundColor: preset.backgroundColor,
-        backgroundImage: preset.backgroundImage,
-        backgroundEffect: preset.backgroundEffect,
-        activeBackgroundPresetId: preset.id,
+        backgroundColor: presetValue.backgroundColor,
+        backgroundImage: presetValue.backgroundImage,
+        backgroundEffect: presetValue.backgroundEffect,
+        activeBackgroundPresetId: presetValue.id,
         backgroundPresets: presets,
       },
-    };
-    await writeSettings(next);
-    updateFormControls(preset);
+    });
+    updateFormControls(presetValue);
   }
 
   async function selectPreset(id) {
-    const settings = await readSettings();
-    const model = normalize(settings);
-    const preset = model.presets.find((item) => item.id === id);
-    if (!preset) return;
-    await persistAppearance(preset, model.presets);
-    await renderManager();
+    const model = normalize(await readSettings());
+    const selected = model.presets.find((item) => item.id === id);
+    if (!selected) return;
+    await persistAppearance(selected, model.presets);
+    scheduleRender();
   }
 
   async function toggleLike(id) {
-    const settings = await readSettings();
-    const model = normalize(settings);
-    const presets = model.presets.map((preset) => preset.id === id ? { ...preset, liked: !preset.liked } : preset);
-    const active = presets.find((preset) => preset.id === model.activeId) || presets[0];
+    const model = normalize(await readSettings());
+    const presets = model.presets.map((item) => item.id === id ? { ...item, liked: !item.liked } : item);
+    const active = presets.find((item) => item.id === model.activeId) || presets[0];
+    if (!active) return;
     await persistAppearance(active, presets);
-    await renderManager();
+    scheduleRender();
   }
 
   async function removePreset(id) {
     if (BUILT_IN_IDS.has(id)) return;
-    const settings = await readSettings();
-    const model = normalize(settings);
-    const presets = model.presets.filter((preset) => preset.id !== id);
-    const active = id === model.activeId ? presets[0] : presets.find((preset) => preset.id === model.activeId) || presets[0];
+    const model = normalize(await readSettings());
+    const presets = model.presets.filter((item) => item.id !== id);
+    const active = id === model.activeId ? presets[0] : presets.find((item) => item.id === model.activeId) || presets[0];
     if (!active) return;
     await persistAppearance(active, presets);
-    await renderManager();
+    scheduleRender();
   }
 
-  function tile(preset, activeId) {
+  function tile(presetValue, activeId) {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = preset.id === activeId ? "background-tile background-tile--active" : "background-tile";
-    button.dataset.presetId = preset.id;
+    button.className = presetValue.id === activeId ? "background-tile background-tile--active" : "background-tile";
 
     const preview = document.createElement("span");
-    preview.className = `background-tile__preview background-tile__preview--${preset.backgroundEffect}`;
-    preview.style.backgroundColor = preset.backgroundColor;
-    if (preset.backgroundImage) preview.style.backgroundImage = `url("${preset.backgroundImage}")`;
+    preview.className = `background-tile__preview background-tile__preview--${presetValue.backgroundEffect}`;
+    preview.style.backgroundColor = presetValue.backgroundColor;
+    if (presetValue.backgroundImage) preview.style.backgroundImage = `url("${presetValue.backgroundImage}")`;
 
     const title = document.createElement("span");
     title.className = "background-tile__title";
-    title.textContent = preset.title;
+    title.textContent = presetValue.title;
 
     const meta = document.createElement("span");
     meta.className = "background-tile__meta";
-    meta.textContent = preset.id === activeId ? t("backgroundPresetActive") : preset.type;
+    meta.textContent = presetValue.id === activeId ? t("backgroundPresetActive") : presetValue.type;
 
     const actions = document.createElement("span");
     actions.className = "background-tile__actions";
-
-    const like = document.createElement("span");
-    like.className = preset.liked ? "background-tile__action background-tile__action--liked" : "background-tile__action";
-    like.dataset.action = "like";
-    like.textContent = preset.liked ? t("backgroundPresetUnlike") : t("backgroundPresetLike");
-    actions.append(like);
-
-    if (!BUILT_IN_IDS.has(preset.id)) {
-      const remove = document.createElement("span");
-      remove.className = "background-tile__action";
-      remove.dataset.action = "remove";
-      remove.textContent = t("backgroundPresetRemove");
-      actions.append(remove);
-    }
+    actions.append(action("like", presetValue.liked ? t("backgroundPresetUnlike") : t("backgroundPresetLike"), presetValue.liked));
+    if (!BUILT_IN_IDS.has(presetValue.id)) actions.append(action("remove", t("backgroundPresetRemove")));
 
     button.append(preview, title, meta, actions);
     button.addEventListener("click", (event) => {
       const target = event.target instanceof HTMLElement ? event.target : null;
-      const action = target?.dataset.action;
-      if (action === "like") {
+      const actionName = target?.dataset.action;
+      if (actionName === "like") {
         event.stopPropagation();
-        void toggleLike(preset.id);
+        void toggleLike(presetValue.id);
         return;
       }
-      if (action === "remove") {
+      if (actionName === "remove") {
         event.stopPropagation();
-        void removePreset(preset.id);
+        void removePreset(presetValue.id);
         return;
       }
-      void selectPreset(preset.id);
+      void selectPreset(presetValue.id);
     });
     return button;
+  }
+
+  function action(name, label, active = false) {
+    const element = document.createElement("span");
+    element.className = active ? "background-tile__action background-tile__action--liked" : "background-tile__action";
+    element.dataset.action = name;
+    element.textContent = label;
+    return element;
   }
 
   function tileGroup(title, presets, activeId) {
@@ -309,7 +270,7 @@
     heading.textContent = title;
     const grid = document.createElement("div");
     grid.className = "background-preset-grid";
-    for (const preset of presets) grid.append(tile(preset, activeId));
+    for (const item of presets) grid.append(tile(item, activeId));
     group.append(heading, grid);
     return group;
   }
@@ -373,10 +334,10 @@
     span.textContent = labelText;
     const select = document.createElement("select");
     select.id = id;
-    for (const [value, optionLabel] of options) {
+    for (const [value, labelTextValue] of options) {
       const option = document.createElement("option");
       option.value = value;
-      option.textContent = optionLabel;
+      option.textContent = labelTextValue;
       select.append(option);
     }
     label.append(span, select);
@@ -385,15 +346,15 @@
 
   async function addPreset(form) {
     const type = form.querySelector("#presetType")?.value || "color";
-    const title = form.querySelector("#presetTitle")?.value.trim() || t(`backgroundPresetType${type[0].toUpperCase()}${type.slice(1)}`);
-    const colorA = sanitizeColor(form.querySelector("#presetColorA")?.value, "#08111f");
-    const colorB = sanitizeColor(form.querySelector("#presetColorB")?.value, "#1e3a8a");
-    const colorC = sanitizeColor(form.querySelector("#presetColorC")?.value, "#0f766e");
-    const effect = form.querySelector("#presetEffect")?.value || "aurora";
+    const title = form.querySelector("#presetTitle")?.value.trim() || strings[`backgroundPresetType${type[0].toUpperCase()}${type.slice(1)}`] || type;
+    const colorA = colorValue(form.querySelector("#presetColorA")?.value, "#08111f");
+    const colorB = colorValue(form.querySelector("#presetColorB")?.value, "#1e3a8a");
+    const colorC = colorValue(form.querySelector("#presetColorC")?.value, "#0f766e");
+    const effect = oneOf(form.querySelector("#presetEffect")?.value, EFFECTS, "aurora");
     const imageUrl = form.querySelector("#presetImageUrl")?.value.trim() || "";
     const imageFile = form.querySelector("#presetImageFile")?.files?.[0];
 
-    const preset = {
+    const next = {
       id: `background-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       title,
       type,
@@ -405,19 +366,18 @@
     };
 
     if (type === "gradient") {
-      preset.gradientColors = [colorA, colorB, colorC];
-      preset.backgroundImage = gradientDataUri(preset.gradientColors);
+      next.gradientColors = [colorA, colorB, colorC];
+      next.backgroundImage = gradientDataUri(next.gradientColors);
     } else if (type === "effect") {
-      preset.backgroundEffect = effect;
+      next.backgroundEffect = effect;
     } else if (type === "image") {
-      preset.backgroundImage = imageFile ? await imageFileToDataUrl(imageFile) : imageUrl;
+      next.backgroundImage = imageFile ? await imageFileToDataUrl(imageFile) : imageUrl;
     }
 
-    const settings = await readSettings();
-    const model = normalize(settings);
-    const presets = [preset, ...model.presets.filter((item) => item.id !== preset.id)].slice(0, MAX_PRESETS);
-    await persistAppearance(preset, presets);
-    await renderManager();
+    const model = normalize(await readSettings());
+    const presets = [next, ...model.presets.filter((item) => item.id !== next.id)].slice(0, MAX_PRESETS);
+    await persistAppearance(next, presets);
+    scheduleRender();
   }
 
   function gradientDataUri(colors) {
@@ -462,35 +422,45 @@
   }
 
   async function renderManager() {
+    window.clearTimeout(renderTimer);
     const backgroundEffect = document.getElementById("backgroundEffect");
     const backgroundImage = document.getElementById("backgroundImage");
     if (backgroundImage instanceof HTMLInputElement) backgroundImage.type = "text";
     if (!(backgroundEffect instanceof HTMLElement)) return;
 
-    let manager = document.getElementById("backgroundPresetManager");
-    if (!manager) {
-      manager = document.createElement("div");
-      manager.id = "backgroundPresetManager";
-      manager.className = "background-preset-manager field--wide";
-      const anchor = backgroundEffect.closest(".field") || backgroundEffect;
-      anchor.insertAdjacentElement("afterend", manager);
+    observer?.disconnect();
+    try {
+      let manager = document.getElementById("backgroundPresetManager");
+      if (!manager) {
+        manager = document.createElement("div");
+        manager.id = "backgroundPresetManager";
+        manager.className = "background-preset-manager field--wide";
+        const anchor = backgroundEffect.closest(".field") || backgroundEffect;
+        anchor.insertAdjacentElement("afterend", manager);
+      }
+
+      const settings = await readSettings();
+      const model = normalize(settings);
+      const active = activePreset(model);
+      if (!active) return;
+      updateFormControls(active);
+      const shouldPersist = !Array.isArray(model.appearance.backgroundPresets)
+        || model.appearance.activeBackgroundPresetId !== model.activeId;
+      if (shouldPersist) await persistAppearance(active, model.presets);
+
+      manager.textContent = "";
+      const heading = document.createElement("h3");
+      heading.textContent = t("backgroundPresetManager");
+      const description = document.createElement("p");
+      description.textContent = t("backgroundPresetDescription");
+      manager.append(heading, description);
+
+      const favorites = model.presets.filter((item) => item.liked);
+      if (favorites.length > 0) manager.append(tileGroup(t("backgroundPresetFavorites"), favorites, model.activeId));
+      manager.append(tileGroup(t("backgroundPresetAll"), model.presets, model.activeId), createForm());
+    } finally {
+      observe();
     }
-
-    const settings = await readSettings();
-    const model = normalize(settings);
-    const active = model.presets.find((preset) => preset.id === model.activeId) || model.presets[0];
-    if (active) await persistAppearance(active, model.presets);
-
-    manager.innerHTML = "";
-    const heading = document.createElement("h3");
-    heading.textContent = t("backgroundPresetManager");
-    const description = document.createElement("p");
-    description.textContent = t("backgroundPresetDescription");
-    manager.append(heading, description);
-
-    const favorites = model.presets.filter((preset) => preset.liked);
-    if (favorites.length > 0) manager.append(tileGroup(t("backgroundPresetFavorites"), favorites, model.activeId));
-    manager.append(tileGroup(t("backgroundPresetAll"), model.presets, model.activeId), createForm());
   }
 
   function preservePresetsAfterCoreSave() {
@@ -503,8 +473,6 @@
 
   async function restorePresets(before) {
     const settings = await readSettings();
-    const active = before.presets.find((preset) => preset.id === before.activeId) || before.presets[0];
-    if (!active) return;
     const appearance = isRecord(settings.appearance) ? settings.appearance : {};
     await writeSettings({
       ...settings,
@@ -514,14 +482,27 @@
         backgroundPresets: before.presets,
       },
     });
+    scheduleRender();
+  }
+
+  function scheduleRender() {
+    window.clearTimeout(renderTimer);
+    renderTimer = window.setTimeout(() => void renderManager(), 80);
+  }
+
+  function observe() {
+    if (!observer) return;
+    observer.observe(document.documentElement, { childList: true, subtree: true });
   }
 
   document.addEventListener("submit", (event) => {
     if (event.target instanceof HTMLFormElement && event.target.id === "form") preservePresetsAfterCoreSave();
   }, true);
 
-  const observer = new MutationObserver(() => void renderManager());
-  observer.observe(document.documentElement, { childList: true, subtree: true });
-  window.addEventListener("DOMContentLoaded", () => void renderManager());
-  window.setTimeout(() => void renderManager(), 500);
+  observer = new MutationObserver(() => {
+    if (document.getElementById("backgroundEffect")) scheduleRender();
+  });
+  observe();
+  window.addEventListener("DOMContentLoaded", scheduleRender);
+  scheduleRender();
 })();
