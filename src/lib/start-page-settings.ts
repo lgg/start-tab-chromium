@@ -123,6 +123,31 @@ export interface StartPageSettings {
 }
 
 const SETTINGS_KEY = "startPageSettings";
+const BACKGROUND_EFFECTS: readonly BackgroundEffect[] = ["none", "gradient", "aurora", "mesh", "spotlight", "noise"];
+const SETTINGS_BUTTON_VISIBILITIES: readonly SettingsButtonVisibility[] = ["always", "hover"];
+const SETTINGS_BUTTON_HOVER_AREAS = ["top", "top-right", "right"] as const;
+const DATE_TIME_MODES: readonly DateTimeMode[] = ["both", "date", "time"];
+const LINK_PAGE_DIRECTIONS: readonly LinkPageDirection[] = ["horizontal", "vertical"];
+const WEATHER_DISPLAY_MODES: readonly WeatherDisplayMode[] = ["current", "day", "week"];
+const WEATHER_PROVIDERS: readonly WeatherProviderId[] = ["open-meteo"];
+const BLOCK_TYPES: readonly BlockType[] = [
+  "dateTime",
+  "ip",
+  "links",
+  "search",
+  "timer",
+  "stopwatch",
+  "pomodoro",
+  "note",
+  "localTasks",
+  "googleCalendar",
+  "weather",
+  "commands",
+  "recent",
+  "browserPinned",
+  "startPinned",
+  "stats",
+];
 
 export const DEFAULT_SEARCH_PROVIDERS: SearchProvider[] = [
   { id: "google", title: "Google", urlTemplate: "https://www.google.com/search?q={query}" },
@@ -263,14 +288,14 @@ export const DEFAULT_SETTINGS: StartPageSettings = {
       { icon: "YT", title: "YouTube", url: "https://youtube.com" },
       { icon: "TG", title: "Telegram", url: "https://web.telegram.org" },
       { icon: "AI", title: "ChatGPT", url: "https://chatgpt.com" },
-      { icon: "DDG", title: "DuckDuckGo", url: "https://duckduckgo.com" }
+      { icon: "DDG", title: "DuckDuckGo", url: "https://duckduckgo.com" },
     ],
   },
   startPinned: {
     items: [
       { icon: "AI", title: "ChatGPT", url: "https://chatgpt.com" },
       { icon: "GH", title: "GitHub", url: "https://github.com" },
-      { icon: "DOC", title: "Docs", url: "https://docs.google.com" }
+      { icon: "DOC", title: "Docs", url: "https://docs.google.com" },
     ],
   },
   search: {
@@ -312,6 +337,39 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function stringValue(value: unknown, fallback: string): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function booleanValue(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function finiteNumber(value: unknown, fallback: number, min: number, max: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
+function finiteInteger(value: unknown, fallback: number, min: number, max: number): number {
+  return Math.round(finiteNumber(value, fallback, min, max));
+}
+
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value) ? value as T : fallback;
+}
+
+function isStartLink(value: unknown): value is StartLink {
+  return isRecord(value)
+    && typeof value.icon === "string"
+    && typeof value.title === "string"
+    && typeof value.url === "string";
+}
+
+function mergeStartLinks(base: StartLink[], value: unknown): StartLink[] {
+  if (!Array.isArray(value)) return base.map((item) => ({ ...item }));
+  return value.filter(isStartLink).map((item) => ({ ...item }));
+}
+
 function isSearchProvider(value: unknown): value is SearchProvider {
   return isRecord(value)
     && typeof value.id === "string"
@@ -331,29 +389,134 @@ function mergeSearchProviders(base: SearchProvider[], value: unknown): SearchPro
   return [...byId.values()];
 }
 
+function mergeDomainMinutes(value: unknown): Record<string, number> {
+  const next: Record<string, number> = {};
+  if (!isRecord(value)) return next;
+  for (const [domain, minutes] of Object.entries(value)) {
+    if (typeof minutes === "number" && Number.isFinite(minutes) && minutes >= 0) {
+      next[domain] = Math.min(240, minutes);
+    }
+  }
+  return next;
+}
+
+function mergeLayoutBlocks(base: LayoutBlock[], value: unknown, columns: number): LayoutBlock[] {
+  if (!Array.isArray(value)) return cloneLayoutBlocks(base);
+  const fallbackById = new Map(base.map((block) => [block.id, block]));
+  return value.filter(isRecord).map((block, index) => {
+    const fallback = fallbackById.get(stringValue(block.id, "")) ?? base[index] ?? DEFAULT_LAYOUT_BLOCKS[0];
+    const width = finiteInteger(block.width, fallback.width, 1, columns);
+    return {
+      id: stringValue(block.id, fallback.id),
+      type: oneOf(block.type, BLOCK_TYPES, fallback.type),
+      title: stringValue(block.title, fallback.title),
+      enabled: booleanValue(block.enabled, fallback.enabled),
+      column: finiteInteger(block.column, fallback.column, 1, Math.max(1, columns - width + 1)),
+      row: finiteInteger(block.row, fallback.row, 1, 48),
+      width,
+      height: finiteInteger(block.height, fallback.height, 1, 24),
+    };
+  });
+}
+
 function mergeSettings(base: StartPageSettings, value: unknown): StartPageSettings {
   if (!isRecord(value)) return base;
+
+  const appearance = isRecord(value.appearance) ? value.appearance : {};
+  const settingsButton = isRecord(value.settingsButton) ? value.settingsButton : {};
+  const dateTime = isRecord(value.dateTime) ? value.dateTime : {};
+  const ip = isRecord(value.ip) ? value.ip : {};
+  const links = isRecord(value.links) ? value.links : {};
+  const startPinned = isRecord(value.startPinned) ? value.startPinned : {};
   const search = isRecord(value.search) ? value.search : {};
+  const providers = mergeSearchProviders(base.search.providers, search.providers);
+  const searchProvider = typeof search.provider === "string" && providers.some((provider) => provider.id === search.provider)
+    ? search.provider
+    : base.search.provider;
+  const googleCalendar = isRecord(value.googleCalendar) ? value.googleCalendar : {};
+  const weather = isRecord(value.weather) ? value.weather : {};
+  const timers = isRecord(value.timers) ? value.timers : {};
+  const focusStats = isRecord(value.focusStats) ? value.focusStats : {};
+  const layout = isRecord(value.layout) ? value.layout : {};
+  const columns = finiteInteger(layout.columns, base.layout.columns, 1, 24);
+
   return {
-    ...base,
-    ...value,
-    appearance: { ...base.appearance, ...(isRecord(value.appearance) ? value.appearance : {}) },
-    settingsButton: { ...base.settingsButton, ...(isRecord(value.settingsButton) ? value.settingsButton : {}) },
-    dateTime: { ...base.dateTime, ...(isRecord(value.dateTime) ? value.dateTime : {}) },
-    ip: { ...base.ip, ...(isRecord(value.ip) ? value.ip : {}) },
-    links: { ...base.links, ...(isRecord(value.links) ? value.links : {}) },
-    startPinned: { ...base.startPinned, ...(isRecord(value.startPinned) ? value.startPinned : {}) },
-    search: {
-      ...base.search,
-      ...search,
-      providers: mergeSearchProviders(base.search.providers, search.providers),
+    appearance: {
+      fontFamily: stringValue(appearance.fontFamily, base.appearance.fontFamily),
+      baseFontSize: finiteNumber(appearance.baseFontSize, base.appearance.baseFontSize, 10, 32),
+      textColor: stringValue(appearance.textColor, base.appearance.textColor),
+      backgroundColor: stringValue(appearance.backgroundColor, base.appearance.backgroundColor),
+      backgroundImage: stringValue(appearance.backgroundImage, base.appearance.backgroundImage),
+      backgroundEffect: oneOf(appearance.backgroundEffect, BACKGROUND_EFFECTS, base.appearance.backgroundEffect),
     },
-    googleCalendar: { ...base.googleCalendar, ...(isRecord(value.googleCalendar) ? value.googleCalendar : {}) },
-    weather: { ...base.weather, ...(isRecord(value.weather) ? value.weather : {}) },
-    timers: { ...base.timers, ...(isRecord(value.timers) ? value.timers : {}) },
-    focusStats: { ...base.focusStats, ...(isRecord(value.focusStats) ? value.focusStats : {}) },
-    layout: { ...base.layout, ...(isRecord(value.layout) ? value.layout : {}) },
-  } as StartPageSettings;
+    settingsButton: {
+      visibility: oneOf(settingsButton.visibility, SETTINGS_BUTTON_VISIBILITIES, base.settingsButton.visibility),
+      hoverArea: oneOf(settingsButton.hoverArea, SETTINGS_BUTTON_HOVER_AREAS, base.settingsButton.hoverArea),
+    },
+    dateTime: {
+      mode: oneOf(dateTime.mode, DATE_TIME_MODES, base.dateTime.mode),
+      dateFormat: stringValue(dateTime.dateFormat, base.dateTime.dateFormat),
+      timeFormat: stringValue(dateTime.timeFormat, base.dateTime.timeFormat),
+    },
+    ip: {
+      endpoint: stringValue(ip.endpoint, base.ip.endpoint),
+    },
+    links: {
+      columns: finiteInteger(links.columns, base.links.columns, 1, 12),
+      rows: finiteInteger(links.rows, base.links.rows, 1, 8),
+      pageDirection: oneOf(links.pageDirection, LINK_PAGE_DIRECTIONS, base.links.pageDirection),
+      fontFamily: stringValue(links.fontFamily, base.links.fontFamily),
+      fontSize: finiteNumber(links.fontSize, base.links.fontSize, 8, 48),
+      iconSize: finiteNumber(links.iconSize, base.links.iconSize, 12, 128),
+      items: mergeStartLinks(base.links.items, links.items),
+    },
+    startPinned: {
+      items: mergeStartLinks(base.startPinned.items, startPinned.items),
+    },
+    search: {
+      provider: searchProvider,
+      providers,
+    },
+    googleCalendar: {
+      calendarId: stringValue(googleCalendar.calendarId, base.googleCalendar.calendarId),
+      maxResults: finiteInteger(googleCalendar.maxResults, base.googleCalendar.maxResults, 1, 25),
+    },
+    weather: {
+      provider: oneOf(weather.provider, WEATHER_PROVIDERS, base.weather.provider),
+      city: stringValue(weather.city, base.weather.city),
+      latitude: finiteNumber(weather.latitude, base.weather.latitude, -90, 90),
+      longitude: finiteNumber(weather.longitude, base.weather.longitude, -180, 180),
+      displayMode: oneOf(weather.displayMode, WEATHER_DISPLAY_MODES, base.weather.displayMode),
+      forecastEndpoint: stringValue(weather.forecastEndpoint, base.weather.forecastEndpoint),
+      geocodingEndpoint: stringValue(weather.geocodingEndpoint, base.weather.geocodingEndpoint),
+    },
+    timers: {
+      timerSeconds: finiteInteger(timers.timerSeconds, base.timers.timerSeconds, 1, 86400),
+      pomodoroWorkSeconds: finiteInteger(timers.pomodoroWorkSeconds, base.timers.pomodoroWorkSeconds, 1, 86400),
+      pomodoroBreakSeconds: finiteInteger(timers.pomodoroBreakSeconds, base.timers.pomodoroBreakSeconds, 1, 86400),
+      notifyOnComplete: booleanValue(timers.notifyOnComplete, base.timers.notifyOnComplete),
+    },
+    focusStats: {
+      defaultMinutesPerAvoidedVisit: finiteNumber(
+        focusStats.defaultMinutesPerAvoidedVisit,
+        base.focusStats.defaultMinutesPerAvoidedVisit,
+        0,
+        240,
+      ),
+      avoidedVisitDedupeSeconds: finiteInteger(
+        focusStats.avoidedVisitDedupeSeconds,
+        base.focusStats.avoidedVisitDedupeSeconds,
+        0,
+        86400,
+      ),
+      domainMinutes: mergeDomainMinutes(focusStats.domainMinutes),
+    },
+    layout: {
+      columns,
+      profile: stringValue(layout.profile, base.layout.profile),
+      blocks: mergeLayoutBlocks(base.layout.blocks, layout.blocks, columns),
+    },
+  };
 }
 
 export async function getStartPageSettings(): Promise<StartPageSettings> {
