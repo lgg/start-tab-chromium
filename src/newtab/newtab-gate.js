@@ -3,6 +3,12 @@
   const OVERLAY_ID = "startTabGateOverlay";
   const STYLE_ID = "startTabGateStyle";
   const DIAGNOSTICS_KEY = "startTabLastNativeNewTabContext";
+  const NATIVE_NEW_TAB_BYPASS_KEY = "startTabNativeNewTabBypass";
+  const NATIVE_NEW_TAB_URLS = [
+    "chrome://new-tab-page/",
+    "chrome-search://local-ntp/local-ntp.html",
+    "about:newtab",
+  ];
   const SPLIT_VIEW_MARKERS = [
     "split-view",
     "split_view",
@@ -25,8 +31,9 @@
     startTabDisabledTitle: "Start Tab is disabled",
     startTabDisabledText: "The extension is still active for blocking, backups, and other settings. Re-enable Start Tab content in extension settings.",
     openSettings: "Open settings",
+    openNativeNewTab: "Open browser new tab",
     splitViewTitle: "Choose a tab for Split View",
-    splitViewText: "Start Tab detected a browser split-view tab picker context. Select an open tab below, or open settings if this was detected incorrectly.",
+    splitViewText: "Start Tab detected a browser split-view tab picker context. Select an open tab below, or open the browser new tab if this was detected incorrectly.",
     noTabsAvailable: "No open tabs are available in this window.",
   };
 
@@ -65,24 +72,58 @@
     const tab = await currentTab();
     const explicitMarker = [location.href, document.referrer, window.name].some(hasSplitViewMarker);
     const openerNewTab = typeof tab?.openerTabId === "number" && location.pathname.endsWith("/newtab.html");
+    const cometLike = isCometLikeBrowser();
+
+    if (explicitMarker || openerNewTab) {
+      await chrome.storage.local.set({
+        [DIAGNOSTICS_KEY]: {
+          checkedAt: new Date().toISOString(),
+          href: location.href,
+          referrer: document.referrer,
+          windowName: window.name,
+          openerTabId: tab?.openerTabId ?? null,
+          tabId: tab?.id ?? null,
+          userAgent: navigator.userAgent,
+          userAgentBrands: userAgentBrands(),
+          explicitMarker,
+          openerNewTab,
+          cometLike,
+        },
+      });
+    }
+
+    return explicitMarker || openerNewTab;
+  }
+
+  async function openNativeNewTab() {
+    const tab = await currentTab();
+    if (tab?.id === undefined) return;
 
     await chrome.storage.local.set({
-      [DIAGNOSTICS_KEY]: {
-        checkedAt: new Date().toISOString(),
-        href: location.href,
-        referrer: document.referrer,
-        windowName: window.name,
-        openerTabId: tab?.openerTabId ?? null,
-        tabId: tab?.id ?? null,
-        userAgent: navigator.userAgent,
-        userAgentBrands: userAgentBrands(),
-        explicitMarker,
-        openerNewTab,
-        cometLike: isCometLikeBrowser(),
+      [NATIVE_NEW_TAB_BYPASS_KEY]: {
+        tabId: tab.id,
+        expiresAt: Date.now() + 5000,
       },
     });
 
-    return explicitMarker || openerNewTab;
+    for (const url of NATIVE_NEW_TAB_URLS) {
+      try {
+        await chrome.tabs.update(tab.id, { url });
+        return;
+      } catch {
+        // Try the next browser-specific native new tab URL.
+      }
+    }
+
+    await chrome.storage.local.remove(NATIVE_NEW_TAB_BYPASS_KEY);
+  }
+
+  function installNativeNewTabButton() {
+    const button = document.getElementById("nativeNewTab");
+    if (!button) return;
+    button.title = t("openNativeNewTab");
+    button.setAttribute("aria-label", t("openNativeNewTab"));
+    button.addEventListener("click", () => void openNativeNewTab());
   }
 
   function ensureStyle() {
@@ -146,6 +187,10 @@
         color: #07111f;
         text-align: center;
       }
+      .start-tab-gate-actions button.start-tab-gate-secondary {
+        background: rgb(2 6 23 / 0.72);
+        color: inherit;
+      }
       .start-tab-gate-tabs button:hover,
       .start-tab-gate-actions button:hover {
         filter: brightness(1.12);
@@ -197,15 +242,20 @@
     return content;
   }
 
+  function actionButton(label, handler, className = "") {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    if (className) button.className = className;
+    button.addEventListener("click", () => void handler());
+    return button;
+  }
+
   function renderDisabledOverlay() {
     const content = panel(t("startTabDisabledTitle"), t("startTabDisabledText"));
     const actions = document.createElement("div");
     actions.className = "start-tab-gate-actions";
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = t("openSettings");
-    button.addEventListener("click", () => void chrome.runtime.openOptionsPage());
-    actions.append(button);
+    actions.append(actionButton(t("openSettings"), () => chrome.runtime.openOptionsPage()));
     content.append(actions);
   }
 
@@ -249,11 +299,10 @@
 
     const actions = document.createElement("div");
     actions.className = "start-tab-gate-actions";
-    const settings = document.createElement("button");
-    settings.type = "button";
-    settings.textContent = t("openSettings");
-    settings.addEventListener("click", () => void chrome.runtime.openOptionsPage());
-    actions.append(settings);
+    actions.append(
+      actionButton(t("openNativeNewTab"), openNativeNewTab, "start-tab-gate-secondary"),
+      actionButton(t("openSettings"), () => chrome.runtime.openOptionsPage()),
+    );
     content.append(list, actions);
   }
 
@@ -280,5 +329,6 @@
     renderDisabledOverlay();
   });
 
+  installNativeNewTabButton();
   void applyGate();
 })();
