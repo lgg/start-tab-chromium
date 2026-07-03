@@ -20,6 +20,7 @@ import { isMessage, type Ack, type Message } from "./lib/messages.js";
 import { getStartPageSettings } from "./lib/start-page-settings.js";
 
 const START_TAB_PAGE = "newtab.html";
+const NATIVE_NEW_TAB_BYPASS_KEY = "startTabNativeNewTabBypass";
 const NEW_TAB_INTERNAL_SCHEMES = new Set([
   "chrome:",
   "chrome-search:",
@@ -49,6 +50,11 @@ const SPLIT_VIEW_MARKERS = [
   "picker",
   "pane",
 ];
+
+interface NativeNewTabBypass {
+  tabId?: number;
+  expiresAt?: number;
+}
 
 chrome.runtime.onInstalled.addListener(() => {
   void migrateAndSyncRules();
@@ -106,6 +112,7 @@ async function redirectBrowserNewTab(tabId: number | undefined, url: string | un
   if (tabId === undefined || !url) return;
   if (isStartTabUrl(url) || !isBrowserNewTabUrl(url)) return;
   if (isNativeSplitViewPickerUrl(url)) return;
+  if (await shouldBypassNativeNewTab(tabId)) return;
   if (!await shouldRedirectBrowserNewTabs()) return;
 
   try {
@@ -120,6 +127,21 @@ async function shouldRedirectBrowserNewTabs(): Promise<boolean> {
   const manifest = chrome.runtime.getManifest();
   if (manifest.chrome_url_overrides?.newtab !== START_TAB_PAGE) return false;
   return (await getStartPageSettings()).startTab.enabled;
+}
+
+async function shouldBypassNativeNewTab(tabId: number): Promise<boolean> {
+  const items = await chrome.storage.local.get(NATIVE_NEW_TAB_BYPASS_KEY);
+  const value = items[NATIVE_NEW_TAB_BYPASS_KEY] as NativeNewTabBypass | undefined;
+  if (typeof value?.tabId !== "number" || typeof value.expiresAt !== "number") return false;
+
+  if (value.expiresAt < Date.now()) {
+    await chrome.storage.local.remove(NATIVE_NEW_TAB_BYPASS_KEY);
+    return false;
+  }
+
+  if (value.tabId !== tabId) return false;
+  await chrome.storage.local.remove(NATIVE_NEW_TAB_BYPASS_KEY);
+  return true;
 }
 
 function isStartTabUrl(url: string): boolean {
