@@ -465,8 +465,12 @@
       const active = activePreset(model);
       if (!active) return;
       updateFormControls(active);
+      const storedPresets = Array.isArray(model.appearance.backgroundPresets) ? model.appearance.backgroundPresets : [];
+      const storedActive = storedPresets.map((item) => normalizePreset(item)).find((item) => item.id === model.activeId);
       const shouldPersist = !Array.isArray(model.appearance.backgroundPresets)
-        || model.appearance.activeBackgroundPresetId !== model.activeId;
+        || model.appearance.activeBackgroundPresetId !== model.activeId
+        || !storedActive
+        || !sameBackground(storedActive, active);
       if (shouldPersist) await persistAppearance(active, model.presets);
 
       manager.textContent = "";
