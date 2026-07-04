@@ -82,9 +82,6 @@ export async function uploadChromeSyncBackup(): Promise<void> {
 
   const existing = await chrome.storage.sync.get(META_KEY);
   const previousChunks = isSyncMeta(existing[META_KEY]) ? existing[META_KEY].chunks : 0;
-  const removeKeys = Array.from({ length: previousChunks }, (_, index) => chunkKey(index));
-  if (removeKeys.length > 0) await chrome.storage.sync.remove(removeKeys);
-
   const meta: SyncMeta = {
     version: 2,
     updatedAt: new Date().toISOString(),
@@ -97,6 +94,11 @@ export async function uploadChromeSyncBackup(): Promise<void> {
     payload[chunkKey(index)] = chunks[index] ?? "";
   }
   await chrome.storage.sync.set(payload);
+  const staleKeys = Array.from(
+    { length: Math.max(0, previousChunks - chunks.length) },
+    (_, index) => chunkKey(index + chunks.length),
+  );
+  if (staleKeys.length > 0) await chrome.storage.sync.remove(staleKeys);
   await writeLocalMeta(meta);
 }
 

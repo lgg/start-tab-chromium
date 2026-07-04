@@ -56,25 +56,29 @@ interface NativeNewTabBypass {
   expiresAt?: number;
 }
 
+function ignoreBackgroundError(): void {
+  // Event listeners cannot surface async failures to callers in MV3.
+}
+
 chrome.runtime.onInstalled.addListener(() => {
-  void migrateAndSyncRules();
+  void migrateAndSyncRules().catch(ignoreBackgroundError);
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  void migrateAndSyncRules();
+  void migrateAndSyncRules().catch(ignoreBackgroundError);
 });
 
 chrome.tabs.onCreated.addListener((tab) => {
-  void redirectBrowserNewTab(tab.id, tab.url ?? tab.pendingUrl);
+  void redirectBrowserNewTab(tab.id, tab.url ?? tab.pendingUrl).catch(ignoreBackgroundError);
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  void redirectBrowserNewTab(tabId, changeInfo.url ?? tab.url ?? tab.pendingUrl);
+  void redirectBrowserNewTab(tabId, changeInfo.url ?? tab.url ?? tab.pendingUrl).catch(ignoreBackgroundError);
 });
 
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
   if (details.frameId !== 0 || !details.url) return;
-  void rememberIfBlocked(details.url);
+  void rememberIfBlocked(details.url).catch(ignoreBackgroundError);
 });
 
 chrome.runtime.onMessage.addListener(
