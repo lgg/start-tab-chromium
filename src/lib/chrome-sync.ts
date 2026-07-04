@@ -4,7 +4,7 @@ const META_KEY = "startTabSyncMeta";
 const LOCAL_META_KEY = "startTabLocalSyncMeta";
 const CHUNK_PREFIX = "startTabSyncChunk";
 const DEVICE_ID_KEY = "startTabDeviceId";
-const CHUNK_SIZE = 7000;
+const CHUNK_MAX_BYTES = 7000;
 const MAX_SYNC_CHUNKS = 12;
 
 export interface SyncMeta {
@@ -34,6 +34,27 @@ async function checksum(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function chunkForChromeSync(value: string): string[] {
+  const encoder = new TextEncoder();
+  const chunks: string[] = [];
+  let current = "";
+  let currentBytes = 0;
+
+  for (const char of value) {
+    const charBytes = encoder.encode(char).byteLength;
+    if (current && currentBytes + charBytes > CHUNK_MAX_BYTES) {
+      chunks.push(current);
+      current = "";
+      currentBytes = 0;
+    }
+    current += char;
+    currentBytes += charBytes;
+  }
+
+  if (current || value.length === 0) chunks.push(current);
+  return chunks;
 }
 
 function isIsoTimestamp(value: unknown): value is string {
@@ -80,10 +101,7 @@ export async function getChromeSyncBackupMeta(): Promise<SyncMeta | null> {
 
 export async function uploadChromeSyncBackup(): Promise<void> {
   const json = JSON.stringify(await exportBackup());
-  const chunks: string[] = [];
-  for (let index = 0; index < json.length; index += CHUNK_SIZE) {
-    chunks.push(json.slice(index, index + CHUNK_SIZE));
-  }
+  const chunks = chunkForChromeSync(json);
 
   if (chunks.length > MAX_SYNC_CHUNKS) {
     throw new Error("Start Tab backup is too large for browser sync. Use JSON export or Google Drive backup instead.");
