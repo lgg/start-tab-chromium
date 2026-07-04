@@ -688,12 +688,22 @@
     }, 80);
   }
 
+  function clearRuntimePatchMarkers() {
+    for (const card of cards()) {
+      delete card.dataset.instanceSearch;
+      delete card.dataset.instanceClock;
+      delete card.dataset.instanceTasks;
+      delete card.dataset.instanceWeather;
+    }
+  }
+
   const observer = new MutationObserver(schedule);
   observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
   window.addEventListener("DOMContentLoaded", schedule);
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "local" || !changes[SETTINGS_KEY]) return;
     currentSettings = normalizeSettings(changes[SETTINGS_KEY].newValue);
+    clearRuntimePatchMarkers();
     schedule();
   });
   schedule();
