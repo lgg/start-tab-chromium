@@ -27,6 +27,18 @@
     return typeof value === "object" && value !== null;
   }
 
+  function ignoreHelperError() {
+    // Options helper enhancements are progressive UI; failures should not break the typed options form.
+  }
+
+  function runHelperAction(action) {
+    try {
+      void Promise.resolve(action()).catch(ignoreHelperError);
+    } catch {
+      ignoreHelperError();
+    }
+  }
+
   async function rawSettings() {
     const items = await chrome.storage.local.get(SETTINGS_KEY);
     return isRecord(items[SETTINGS_KEY]) ? items[SETTINGS_KEY] : {};
@@ -176,7 +188,7 @@
       select.append(custom);
       select.value = IP_PROVIDERS.some(([endpoint]) => endpoint === currentEndpoint) ? currentEndpoint : "custom";
       select.addEventListener("change", () => {
-        if (select.value !== "custom") void patchIpEndpoint(select.value);
+        if (select.value !== "custom") runHelperAction(() => patchIpEndpoint(select.value));
         endpointInput.disabled = select.value !== "custom";
       });
 
@@ -208,7 +220,7 @@
         ["free", "layoutModeFree", "Free"],
       ],
       layout.mode === "free" ? "free" : "grid",
-      (mode) => void patchLayout({ mode }),
+      (mode) => runHelperAction(() => patchLayout({ mode })),
     );
 
     const zoneLabel = layoutSelect(
@@ -220,7 +232,7 @@
         ["full", "layoutZoneFull", "Full viewport"],
       ],
       layout.zone === "full" ? "full" : "contained",
-      (zone) => void patchLayout({ zone }),
+      (zone) => runHelperAction(() => patchLayout({ zone })),
     );
 
     const titlesLabel = document.createElement("label");
@@ -233,7 +245,7 @@
     titles.id = "showBlockTitles";
     titles.type = "checkbox";
     titles.checked = layout.showBlockTitles !== false;
-    titles.addEventListener("change", () => void patchLayout({ showBlockTitles: titles.checked }));
+    titles.addEventListener("change", () => runHelperAction(() => patchLayout({ showBlockTitles: titles.checked })));
     checkboxWrap.append(titles, document.createTextNode(t("enabled", "Enabled")));
     titlesLabel.append(titlesText, checkboxWrap);
 
@@ -251,7 +263,7 @@
     insertBeforeOnce(panel, "general", groupHeader("startTabGroupGeneral", "Start Tab general"), startSection);
     insertBeforeOnce(panel, "layout", groupHeader("startTabGroupLayout", "Layout and blocks"), layoutSection);
     insertBeforeOnce(panel, "blocks", groupHeader("startTabGroupBlocks", "Block settings"), dateSection);
-    if (layoutSection) void addLayoutExtraFields(layoutSection);
+    if (layoutSection) runHelperAction(() => addLayoutExtraFields(layoutSection));
   }
 
   function reapplyPendingLayoutPatch() {
@@ -261,7 +273,7 @@
     if (mode instanceof HTMLSelectElement) pendingLayoutPatch.mode = mode.value;
     if (zone instanceof HTMLSelectElement) pendingLayoutPatch.zone = zone.value;
     if (titles instanceof HTMLInputElement) pendingLayoutPatch.showBlockTitles = titles.checked;
-    if (Object.keys(pendingLayoutPatch).length > 0) void patchLayout(pendingLayoutPatch);
+    if (Object.keys(pendingLayoutPatch).length > 0) runHelperAction(() => patchLayout(pendingLayoutPatch));
   }
 
   function reapplyPendingIpEndpoint() {
@@ -271,7 +283,7 @@
     if (provider instanceof HTMLSelectElement && provider.value === "custom" && endpointInput instanceof HTMLInputElement) {
       pendingIpEndpoint = endpointInput.value;
     }
-    if (pendingIpEndpoint) void patchIpEndpoint(pendingIpEndpoint);
+    if (pendingIpEndpoint) runHelperAction(() => patchIpEndpoint(pendingIpEndpoint));
   }
 
   function enhance() {
@@ -279,7 +291,7 @@
     enhanceBackupControls();
     enhanceStartTabSections();
     fixWeatherCoordinateInputs();
-    void addIpProviderField();
+    runHelperAction(addIpProviderField);
   }
 
   function scheduleEnhance() {
