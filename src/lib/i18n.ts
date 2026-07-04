@@ -59,6 +59,19 @@ async function loadCatalog(locale: SupportedLocale): Promise<LocaleCatalog> {
   return (await response.json()) as LocaleCatalog;
 }
 
+async function mergeCatalogs(locale: SupportedLocale, defaultCatalog: LocaleCatalog): Promise<{ locale: SupportedLocale; catalog: LocaleCatalog }> {
+  if (locale === DEFAULT_LOCALE) return { locale, catalog: defaultCatalog };
+
+  try {
+    return {
+      locale,
+      catalog: { ...defaultCatalog, ...(await loadCatalog(locale)) },
+    };
+  } catch {
+    return { locale: DEFAULT_LOCALE, catalog: defaultCatalog };
+  }
+}
+
 function renderTemplate(template: string, replacements: Record<string, string | number>): string {
   let result = template;
   for (const [key, value] of Object.entries(replacements)) {
@@ -68,11 +81,9 @@ function renderTemplate(template: string, replacements: Record<string, string | 
 }
 
 export async function loadI18n(): Promise<I18n> {
-  const locale = await detectLocale();
+  const preferredLocale = await detectLocale();
   const defaultCatalog = await loadCatalog(DEFAULT_LOCALE);
-  const catalog = locale === DEFAULT_LOCALE
-    ? defaultCatalog
-    : { ...defaultCatalog, ...(await loadCatalog(locale)) };
+  const { locale, catalog } = await mergeCatalogs(preferredLocale, defaultCatalog);
 
   document.documentElement.lang = locale;
 

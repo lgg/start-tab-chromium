@@ -16,6 +16,10 @@ function t(key: string): string {
   return chrome.i18n.getMessage(key) || key;
 }
 
+function ignoreOnboardingError(): void {
+  // Onboarding is optional; storage failures should not break the Start Tab runtime.
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -82,12 +86,12 @@ function renderOnboarding(): void {
   actions.className = "onboarding__actions";
   for (const preset of LAYOUT_PRESETS) {
     const item = button(preset.title);
-    item.addEventListener("click", () => void applyPreset(preset.id));
+    item.addEventListener("click", () => void applyPreset(preset.id).catch(ignoreOnboardingError));
     actions.append(item);
   }
 
   const skip = button(t("onboardingSkip"), "button button--ghost");
-  skip.addEventListener("click", () => void dismiss());
+  skip.addEventListener("click", () => void dismiss().catch(ignoreOnboardingError));
 
   panel.append(title, text, actions, skip);
   overlay.append(panel);
@@ -97,4 +101,4 @@ function renderOnboarding(): void {
 void (async () => {
   const state = await readState();
   if (!state.onboarded) renderOnboarding();
-})();
+})().catch(ignoreOnboardingError);
