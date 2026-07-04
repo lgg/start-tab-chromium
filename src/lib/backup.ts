@@ -15,6 +15,8 @@ const STORAGE_KEYS = [
   FOCUS_STATS_KEY,
 ] as const;
 
+type StorageKey = (typeof STORAGE_KEYS)[number];
+
 export interface BackupBundle {
   app: "Start Tab";
   version: number;
@@ -71,7 +73,7 @@ function migrateBackup(value: LegacyBackupBundle): BackupBundle {
   return migrated;
 }
 
-function importStorageValue(key: typeof STORAGE_KEYS[number], value: unknown): unknown {
+function importStorageValue(key: StorageKey, value: unknown): unknown {
   if (key === "startPageSettings") return normalizeStartPageSettings(value);
   return value;
 }
