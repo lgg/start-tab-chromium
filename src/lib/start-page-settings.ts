@@ -392,6 +392,22 @@ function recordValue(value: unknown, fallback?: Record<string, unknown>): Record
   return fallback ? { ...fallback } : undefined;
 }
 
+function safeWebUrl(value: string): string | null {
+  const trimmed = value.trim();
+  try {
+    const url = new URL(trimmed);
+    return url.protocol === "http:" || url.protocol === "https:" ? trimmed : null;
+  } catch {
+    return null;
+  }
+}
+
+function safeWebUrlTemplate(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed.includes("{query}")) return null;
+  return safeWebUrl(trimmed.replace("{query}", "start-tab-query")) ? trimmed : null;
+}
+
 function freeRectValue(value: unknown, fallback?: FreeBlockRect): FreeBlockRect | undefined {
   const source = isRecord(value) ? value : fallback;
   if (!source) return undefined;
@@ -407,12 +423,13 @@ function isStartLink(value: unknown): value is StartLink {
   return isRecord(value)
     && typeof value.icon === "string"
     && typeof value.title === "string"
-    && typeof value.url === "string";
+    && typeof value.url === "string"
+    && safeWebUrl(value.url) !== null;
 }
 
 function mergeStartLinks(base: StartLink[], value: unknown): StartLink[] {
   if (!Array.isArray(value)) return base.map((item) => ({ ...item }));
-  return value.filter(isStartLink).map((item) => ({ ...item }));
+  return value.filter(isStartLink).map((item) => ({ ...item, url: safeWebUrl(item.url) ?? item.url }));
 }
 
 function isSearchProvider(value: unknown): value is SearchProvider {
@@ -420,7 +437,7 @@ function isSearchProvider(value: unknown): value is SearchProvider {
     && typeof value.id === "string"
     && typeof value.title === "string"
     && typeof value.urlTemplate === "string"
-    && value.urlTemplate.includes("{query}");
+    && safeWebUrlTemplate(value.urlTemplate) !== null;
 }
 
 function mergeSearchProviders(base: SearchProvider[], value: unknown): SearchProvider[] {
@@ -428,7 +445,7 @@ function mergeSearchProviders(base: SearchProvider[], value: unknown): SearchPro
   for (const provider of base) byId.set(provider.id, { ...provider });
   if (Array.isArray(value)) {
     for (const provider of value) {
-      if (isSearchProvider(provider)) byId.set(provider.id, { ...provider });
+      if (isSearchProvider(provider)) byId.set(provider.id, { ...provider, urlTemplate: safeWebUrlTemplate(provider.urlTemplate) ?? provider.urlTemplate });
     }
   }
   return [...byId.values()];
