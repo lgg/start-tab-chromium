@@ -3,7 +3,7 @@ import { access, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = dirname(fileURLToPath(new URL("../", import.meta.url)));
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 async function readJson(path) {
   return JSON.parse(await readFile(resolve(root, path), "utf8"));
