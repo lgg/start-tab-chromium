@@ -74,7 +74,8 @@ export function normalizeLastBlockedUrls(value: unknown): Record<string, string>
     if (typeof url !== "string") continue;
     const normalizedHost = normalizeStoredHost(host);
     if (!normalizedHost) continue;
-    if (!hostFromUrl(url)) continue;
+    const urlHost = hostFromUrl(url);
+    if (!urlHost || !hostMatchesBlockedSite(urlHost, normalizedHost)) continue;
     normalized[normalizedHost] = url;
   }
 
