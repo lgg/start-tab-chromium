@@ -72,6 +72,18 @@ function requireElement<T extends HTMLElement>(id: string): T {
   return element as T;
 }
 
+function ignoreRuntimeError(): void {
+  // New tab helpers are progressive UI; failures should not break the page shell.
+}
+
+function runRuntimeAction(action: () => void | Promise<void>): void {
+  try {
+    void Promise.resolve(action()).catch(ignoreRuntimeError);
+  } catch {
+    ignoreRuntimeError();
+  }
+}
+
 function secondsToMs(seconds: number): number {
   return Math.max(1, seconds) * 1000;
 }
@@ -171,7 +183,7 @@ async function loadRuntimeState(): Promise<RuntimeState> {
 
 function saveStateNow(): void {
   window.clearTimeout(saveTimer);
-  void chrome.storage.local.set({ [STATE_KEY]: state });
+  runRuntimeAction(() => chrome.storage.local.set({ [STATE_KEY]: state }));
 }
 
 function queueSaveState(): void {
@@ -266,7 +278,7 @@ function renderBlock(block: LayoutBlock, element: HTMLElement): void {
       renderLocalTasks(element);
       break;
     case "googleCalendar":
-      void renderGoogleCalendar(element);
+      runRuntimeAction(() => renderGoogleCalendar(element));
       break;
     case "weather":
       renderWeatherPlaceholder(element);
@@ -275,16 +287,16 @@ function renderBlock(block: LayoutBlock, element: HTMLElement): void {
       renderCommands(element);
       break;
     case "recent":
-      void renderRecent(element);
+      runRuntimeAction(() => renderRecent(element));
       break;
     case "browserPinned":
-      void renderBrowserPinned(element);
+      runRuntimeAction(() => renderBrowserPinned(element));
       break;
     case "startPinned":
       renderStartPinned(element);
       break;
     case "stats":
-      void renderStats(element);
+      runRuntimeAction(() => renderStats(element));
       break;
   }
 }
@@ -429,7 +441,7 @@ function startClock(id: ClockId): void {
   if (id !== "stopwatch" && elapsedBeforeStart >= clock.durationMs) clock.elapsedMs = 0;
   if (id === "pomodoro" && clock.pomodoroPhase !== "break" && !clock.focusSessionStarted && elapsedBeforeStart === 0) {
     clock.focusSessionStarted = true;
-    void recordFocusSessionStarted();
+    runRuntimeAction(recordFocusSessionStarted);
   }
   clock.running = true;
   clock.startedAt = Date.now();
@@ -450,7 +462,7 @@ function resetClock(id: ClockId): void {
   const clock = ensureClock(id);
   const elapsedMs = clockElapsed(clock);
   if (id === "pomodoro" && clock.focusSessionStarted && clock.pomodoroPhase !== "break" && elapsedMs > 0 && elapsedMs < clock.durationMs) {
-    void recordFocusSessionInterrupted(elapsedMs);
+    runRuntimeAction(() => recordFocusSessionInterrupted(elapsedMs));
   }
   const fresh = defaultClock(id);
   if (id === "pomodoro") fresh.pomodoroPhase = clock.pomodoroPhase ?? "work";
@@ -515,7 +527,7 @@ function finishClock(id: ClockId, clock: ClockState): void {
   clock.running = false;
   clock.startedAt = null;
   clock.elapsedMs = clock.durationMs;
-  if (completedFocus) void recordFocusSessionCompleted(clock.durationMs);
+  if (completedFocus) runRuntimeAction(() => recordFocusSessionCompleted(clock.durationMs));
   if (id === "pomodoro") {
     const nextPhase: PomodoroPhase = clock.pomodoroPhase === "break" ? "work" : "break";
     clock.pomodoroPhase = nextPhase;
@@ -526,8 +538,8 @@ function finishClock(id: ClockId, clock: ClockState): void {
     clock.elapsedMs = 0;
   }
   saveStateNow();
-  if (settings.timers.notifyOnComplete) void notify(i18n.t(`${id}Done`));
-  void refreshStats();
+  if (settings.timers.notifyOnComplete) runRuntimeAction(() => notify(i18n.t(`${id}Done`)));
+  runRuntimeAction(refreshStats);
 }
 
 async function notify(message: string): Promise<void> {
@@ -637,7 +649,7 @@ function renderCalendarEvents(container: HTMLElement, events: GoogleCalendarEven
 function appendSettingsButton(container: HTMLElement): void {
   const button = el("button", "button", i18n.t("openSettings")) as HTMLButtonElement;
   button.type = "button";
-  button.addEventListener("click", () => void chrome.runtime.openOptionsPage());
+  button.addEventListener("click", () => runRuntimeAction(() => chrome.runtime.openOptionsPage()));
   container.append(button);
 }
 
@@ -730,7 +742,7 @@ function renderUrlItems(container: HTMLElement, items: UrlItem[]): void {
 function commandButton(label: string, handler: () => void | Promise<void>): HTMLButtonElement {
   const button = el("button", "button", label) as HTMLButtonElement;
   button.type = "button";
-  button.addEventListener("click", () => void handler());
+  button.addEventListener("click", () => runRuntimeAction(handler));
   return button;
 }
 
@@ -825,7 +837,7 @@ function replaceTokens(format: string, tokens: Record<string, string>): string {
 }
 
 settingsEl.title = "";
-settingsEl.addEventListener("click", () => void chrome.runtime.openOptionsPage());
+settingsEl.addEventListener("click", () => runRuntimeAction(() => chrome.runtime.openOptionsPage()));
 
 void (async () => {
   [i18n, settings] = await Promise.all([
@@ -839,4 +851,4 @@ void (async () => {
   render();
   window.addEventListener("pagehide", saveStateNow);
   if (hasDynamicBlocks()) window.setInterval(updateDynamicBlocks, 1000);
-})();
+})().catch(ignoreRuntimeError);
