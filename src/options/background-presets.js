@@ -100,6 +100,18 @@
     return typeof value === "boolean" ? value : fallback;
   }
 
+  function ignorePresetError() {
+    // Background presets are progressive UI; failures should not break the core options form.
+  }
+
+  function runPresetAction(action) {
+    try {
+      void Promise.resolve(action()).catch(ignorePresetError);
+    } catch {
+      ignorePresetError();
+    }
+  }
+
   function oneOf(value, allowed, fallback) {
     return typeof value === "string" && allowed.includes(value) ? value : fallback;
   }
@@ -286,15 +298,15 @@
       const actionName = target?.dataset.action;
       if (actionName === "like") {
         event.stopPropagation();
-        void toggleLike(presetValue.id);
+        runPresetAction(() => toggleLike(presetValue.id));
         return;
       }
       if (actionName === "remove") {
         event.stopPropagation();
-        void removePreset(presetValue.id);
+        runPresetAction(() => removePreset(presetValue.id));
         return;
       }
-      void selectPreset(presetValue.id);
+      runPresetAction(() => selectPreset(presetValue.id));
     });
     return button;
   }
@@ -351,7 +363,7 @@
     save.className = "button";
     save.type = "button";
     save.textContent = t("backgroundPresetSave");
-    save.addEventListener("click", () => void addPreset(form));
+    save.addEventListener("click", () => runPresetAction(() => addPreset(form)));
     form.append(save);
 
     const type = form.querySelector("#presetType");
@@ -539,11 +551,11 @@
   }
 
   function preservePresetsAfterCoreSave() {
-    void (async () => {
+    runPresetAction(async () => {
       const before = normalize(await readSettings());
-      window.setTimeout(() => void restorePresetsAfterCoreSave(before), 700);
-      window.setTimeout(() => void restorePresetsAfterCoreSave(before), 1800);
-    })();
+      window.setTimeout(() => runPresetAction(() => restorePresetsAfterCoreSave(before)), 700);
+      window.setTimeout(() => runPresetAction(() => restorePresetsAfterCoreSave(before)), 1800);
+    });
   }
 
   async function restorePresetsAfterCoreSave(before) {
@@ -561,7 +573,7 @@
 
   function scheduleRender() {
     window.clearTimeout(renderTimer);
-    renderTimer = window.setTimeout(() => void renderManager(), 80);
+    renderTimer = window.setTimeout(() => runPresetAction(renderManager), 80);
   }
 
   function observe() {
