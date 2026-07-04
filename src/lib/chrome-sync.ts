@@ -36,13 +36,22 @@ async function checksum(value: string): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+function isIsoTimestamp(value: unknown): value is string {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
+
+function isSha256Checksum(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+}
+
 function isSyncMeta(value: unknown): value is SyncMeta {
   return typeof value === "object"
     && value !== null
     && (value as SyncMeta).version === 2
-    && typeof (value as SyncMeta).updatedAt === "string"
+    && isIsoTimestamp((value as SyncMeta).updatedAt)
     && typeof (value as SyncMeta).deviceId === "string"
-    && typeof (value as SyncMeta).checksum === "string"
+    && (value as SyncMeta).deviceId.length > 0
+    && isSha256Checksum((value as SyncMeta).checksum)
     && Number.isInteger((value as SyncMeta).chunks)
     && (value as SyncMeta).chunks > 0
     && (value as SyncMeta).chunks <= MAX_SYNC_CHUNKS;
