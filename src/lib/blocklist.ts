@@ -61,6 +61,11 @@ function normalizeSites(sites: string[]): string[] {
     .sort();
 }
 
+export function normalizeBlockedSites(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return normalizeSites(value.filter((site): site is string => typeof site === "string"));
+}
+
 function requireHost(host: string): string {
   const normalized = normalizeStoredHost(host);
   if (!normalized) throw new Error("Invalid host");
@@ -79,8 +84,7 @@ export async function getBlockedSites(): Promise<string[]> {
 
 async function readBlockedSites(): Promise<string[]> {
   const items = await chrome.storage.local.get(STORAGE_KEY);
-  const sites = items[STORAGE_KEY];
-  return Array.isArray(sites) ? normalizeSites(sites as string[]) : [];
+  return normalizeBlockedSites(items[STORAGE_KEY]);
 }
 
 /** Convert the old MV2 `blocked` URL list into the MV3 host-only list. */
@@ -115,11 +119,11 @@ async function getLastBlockedUrls(): Promise<Record<string, string>> {
 }
 
 async function setBlockedSites(sites: string[]): Promise<void> {
-  await chrome.storage.local.set({ [STORAGE_KEY]: normalizeSites(sites) });
+  await chrome.storage.local.set({ [STORAGE_KEY]: normalizeBlockedSites(sites) });
 }
 
 export async function replaceBlockedSites(sites: string[]): Promise<string[]> {
-  const normalized = normalizeSites(sites);
+  const normalized = normalizeBlockedSites(sites);
   await chrome.storage.local.set({ [STORAGE_KEY]: normalized });
   await chrome.storage.local.remove(LAST_BLOCKED_URLS_KEY);
   await syncRules();
@@ -167,7 +171,7 @@ export async function clearLastBlockedUrl(host: string): Promise<void> {
 
 /** Build the full DNR ruleset from a list of hosts. */
 function buildRules(sites: string[]): chrome.declarativeNetRequest.Rule[] {
-  return normalizeSites(sites).map((host, index) => ({
+  return normalizeBlockedSites(sites).map((host, index) => ({
     id: index + 1,
     priority: 1,
     action: {
