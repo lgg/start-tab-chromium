@@ -603,13 +603,17 @@ function mergeSettings(base: StartPageSettings, value: unknown): StartPageSettin
   };
 }
 
+export function normalizeStartPageSettings(value: unknown): StartPageSettings {
+  return mergeSettings(DEFAULT_SETTINGS, value);
+}
+
 export async function getStartPageSettings(): Promise<StartPageSettings> {
   const items = await chrome.storage.local.get(SETTINGS_KEY);
-  return mergeSettings(DEFAULT_SETTINGS, items[SETTINGS_KEY]);
+  return normalizeStartPageSettings(items[SETTINGS_KEY]);
 }
 
 export async function setStartPageSettings(settings: StartPageSettings): Promise<void> {
-  await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
+  await chrome.storage.local.set({ [SETTINGS_KEY]: normalizeStartPageSettings(settings) });
 }
 
 export async function resetStartPageSettings(): Promise<StartPageSettings> {
