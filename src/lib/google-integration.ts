@@ -4,6 +4,9 @@ const GOOGLE_CALENDAR_EVENTS_URL = "https://www.googleapis.com/calendar/v3/calen
 const GOOGLE_DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files";
 const GOOGLE_DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files";
 const DRIVE_BACKUP_FILE_NAME = "start-tab-backup.json";
+const DEFAULT_CALENDAR_ID = "primary";
+const MIN_CALENDAR_RESULTS = 1;
+const MAX_CALENDAR_RESULTS = 25;
 
 export interface GoogleCalendarEvent {
   id: string;
@@ -76,12 +79,22 @@ async function googleFetch<T>(url: string, init: RequestInit = {}, interactive =
   return (await response.json()) as T;
 }
 
-export async function listCalendarEvents(calendarId = "primary", maxResults = 8): Promise<GoogleCalendarEvent[]> {
-  const url = new URL(GOOGLE_CALENDAR_EVENTS_URL.replace("{calendarId}", encodeURIComponent(calendarId)));
+function normalizedCalendarId(calendarId: string): string {
+  const trimmed = calendarId.trim();
+  return trimmed || DEFAULT_CALENDAR_ID;
+}
+
+function normalizedCalendarMaxResults(maxResults: number): number {
+  if (!Number.isFinite(maxResults)) return 8;
+  return Math.min(MAX_CALENDAR_RESULTS, Math.max(MIN_CALENDAR_RESULTS, Math.round(maxResults)));
+}
+
+export async function listCalendarEvents(calendarId = DEFAULT_CALENDAR_ID, maxResults = 8): Promise<GoogleCalendarEvent[]> {
+  const url = new URL(GOOGLE_CALENDAR_EVENTS_URL.replace("{calendarId}", encodeURIComponent(normalizedCalendarId(calendarId))));
   url.searchParams.set("singleEvents", "true");
   url.searchParams.set("orderBy", "startTime");
   url.searchParams.set("timeMin", new Date().toISOString());
-  url.searchParams.set("maxResults", String(maxResults));
+  url.searchParams.set("maxResults", String(normalizedCalendarMaxResults(maxResults)));
 
   const payload = await googleFetch<CalendarEventsResponse>(url.toString());
   return (payload.items ?? []).map((event) => ({
