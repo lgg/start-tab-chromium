@@ -97,6 +97,18 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  function ignoreRuntimeError() {
+    // Instance runtime helpers are progressive UI; failures should not break the new tab page.
+  }
+
+  function runRuntimeAction(action) {
+    try {
+      void Promise.resolve(action()).catch(ignoreRuntimeError);
+    } catch {
+      ignoreRuntimeError();
+    }
+  }
+
   function blockType(block, fallback) {
     return typeof block.type === "string" && block.type ? block.type : fallback.type;
   }
@@ -342,7 +354,7 @@
       const add = document.createElement("button");
       add.type = "button";
       add.textContent = "+";
-      add.addEventListener("click", () => void addBlock(select.value));
+      add.addEventListener("click", () => runRuntimeAction(() => addBlock(select.value)));
       label.append(select);
       palette.append(label, add);
       document.body.append(palette);
@@ -380,9 +392,9 @@
       const actions = document.createElement("div");
       actions.className = "block-instance-actions";
       actions.dataset.blockId = block.id;
-      const config = iconButton("⚙", "Configure block", () => void configureBlock(block));
-      const duplicate = iconButton("⧉", "Duplicate block", () => void duplicateBlock(block));
-      const remove = iconButton("×", "Remove block", () => void removeBlock(block.id));
+      const config = iconButton("⚙", "Configure block", () => configureBlock(block));
+      const duplicate = iconButton("⧉", "Duplicate block", () => duplicateBlock(block));
+      const remove = iconButton("×", "Remove block", () => removeBlock(block.id));
       actions.append(config);
       if (!SINGLETON_TYPES.has(block.type)) actions.append(duplicate);
       actions.append(remove);
@@ -398,7 +410,7 @@
     button.setAttribute("aria-label", title);
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      handler();
+      runRuntimeAction(handler);
     });
     return button;
   }
@@ -500,7 +512,7 @@
     button.className = "button";
     button.type = "button";
     button.textContent = label;
-    button.addEventListener("click", () => void handler());
+    button.addEventListener("click", () => runRuntimeAction(handler));
     return button;
   }
 
@@ -602,12 +614,12 @@
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
       checkbox.checked = task.done === true;
-      checkbox.addEventListener("change", () => void withState((next) => {
+      checkbox.addEventListener("change", () => runRuntimeAction(() => withState((next) => {
         const items = Array.isArray(next.localTasks[block.id]) ? next.localTasks[block.id] : [];
         const found = items.find((item) => item.id === task.id);
         if (found) found.done = checkbox.checked;
         next.localTasks[block.id] = items;
-      }));
+      })));
       label.append(checkbox, document.createTextNode(task.title));
       list.append(label);
     }
@@ -615,12 +627,13 @@
       event.preventDefault();
       const title = input.value.trim();
       if (!title) return;
-      void withState((next) => {
-        const items = Array.isArray(next.localTasks[block.id]) ? next.localTasks[block.id] : [];
-        next.localTasks[block.id] = [{ id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, title, done: false }, ...items];
-      }).then(() => {
+      runRuntimeAction(async () => {
+        await withState((next) => {
+          const items = Array.isArray(next.localTasks[block.id]) ? next.localTasks[block.id] : [];
+          next.localTasks[block.id] = [{ id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, title, done: false }, ...items];
+        });
         card.dataset.instanceTasks = "";
-        void patchLocalTasks(block, card);
+        await patchLocalTasks(block, card);
       });
     });
     body.append(form, list);
@@ -692,7 +705,7 @@
     }
     if (hasDynamicBlocks && !ticking) {
       ticking = true;
-      window.setInterval(() => void tick(), 1000);
+      window.setInterval(() => runRuntimeAction(tick), 1000);
     }
   }
 
@@ -709,7 +722,7 @@
   function schedule() {
     if (applying) return;
     window.clearTimeout(renderTimer);
-    renderTimer = window.setTimeout(async () => {
+    renderTimer = window.setTimeout(() => runRuntimeAction(async () => {
       if (applying) return;
       applying = true;
       try {
@@ -719,7 +732,7 @@
       } finally {
         applying = false;
       }
-    }, 80);
+    }), 80);
   }
 
   function clearRuntimePatchMarkers() {
