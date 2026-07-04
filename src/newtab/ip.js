@@ -51,11 +51,22 @@
     return typeof value === "object" && value !== null;
   }
 
+  function safeEndpoint(value) {
+    const endpoint = typeof value === "string" ? value.trim() : "";
+    if (!endpoint) return null;
+    try {
+      const url = new URL(endpoint);
+      return url.protocol === "http:" || url.protocol === "https:" ? endpoint : null;
+    } catch {
+      return null;
+    }
+  }
+
   async function readEndpoint() {
     const items = await chrome.storage.local.get(SETTINGS_KEY);
     const settings = isRecord(items[SETTINGS_KEY]) ? items[SETTINGS_KEY] : {};
     const ip = isRecord(settings.ip) ? settings.ip : {};
-    return typeof ip.endpoint === "string" && ip.endpoint ? ip.endpoint : PROVIDERS[0].endpoint;
+    return safeEndpoint(ip.endpoint) ?? PROVIDERS[0].endpoint;
   }
 
   function orderedProviders(endpoint) {
