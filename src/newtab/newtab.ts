@@ -580,7 +580,7 @@ function renderLocalTasks(container: HTMLElement): void {
       queueSaveState();
     });
     const title = el("span", "task-item__title", task.title);
-    const remove = el("button", "button button--tiny", "×") as HTMLButtonElement;
+    const remove = el("button", "button button--tiny", "x") as HTMLButtonElement;
     remove.type = "button";
     remove.title = i18n.t("removeTask");
     remove.addEventListener("click", () => {
@@ -698,9 +698,22 @@ function renderStartPinned(container: HTMLElement): void {
   container.append(list);
 }
 
+function normalizedWebUrl(value: string): string | null {
+  const trimmed = value.trim();
+  try {
+    const url = new URL(trimmed);
+    return url.protocol === "http:" || url.protocol === "https:" ? trimmed : null;
+  } catch {
+    return null;
+  }
+}
+
 function renderUrlItems(container: HTMLElement, items: UrlItem[]): void {
   container.textContent = "";
-  const valid = items.filter((item) => item.url.startsWith("http://") || item.url.startsWith("https://"));
+  const valid = items.flatMap((item) => {
+    const url = normalizedWebUrl(item.url);
+    return url ? [{ ...item, url }] : [];
+  });
   if (valid.length === 0) {
     container.textContent = i18n.t("emptyList");
     return;
