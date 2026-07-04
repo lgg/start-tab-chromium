@@ -97,19 +97,53 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  function blockType(block, fallback) {
+    return typeof block.type === "string" && block.type ? block.type : fallback.type;
+  }
+
+  function uniqueBlockId(id, type, seenIds) {
+    const base = typeof id === "string" && id.trim() ? id.trim() : type;
+    if (!seenIds.has(base)) return base;
+
+    let suffix = 2;
+    let candidate = `${base}-${suffix}`;
+    while (seenIds.has(candidate)) {
+      suffix += 1;
+      candidate = `${base}-${suffix}`;
+    }
+    return candidate;
+  }
+
+  function normalizeLayoutBlocks(blocks) {
+    const seenIds = new Set();
+    return blocks.map((block, index) => {
+      const fallback = DEFAULT_BLOCKS[index] || DEFAULT_BLOCKS[0];
+      const source = isRecord(block) ? block : fallback;
+      const type = blockType(source, fallback);
+      const normalized = {
+        ...source,
+        id: uniqueBlockId(source.id, type, seenIds),
+        type,
+      };
+      seenIds.add(normalized.id);
+      return normalized;
+    });
+  }
+
   function normalizeSettings(value) {
     const source = isRecord(value) ? value : {};
     const layout = isRecord(source.layout) ? source.layout : {};
     const search = isRecord(source.search) ? source.search : {};
     const weather = isRecord(source.weather) ? source.weather : {};
     const timers = isRecord(source.timers) ? source.timers : {};
+    const blocks = Array.isArray(layout.blocks) && layout.blocks.length > 0 ? layout.blocks : clone(DEFAULT_BLOCKS);
     return {
       ...DEFAULT_SETTINGS,
       ...source,
       layout: {
         ...DEFAULT_SETTINGS.layout,
         ...layout,
-        blocks: Array.isArray(layout.blocks) && layout.blocks.length > 0 ? layout.blocks : clone(DEFAULT_BLOCKS),
+        blocks: normalizeLayoutBlocks(blocks),
       },
       search: {
         ...DEFAULT_SETTINGS.search,
