@@ -145,7 +145,8 @@
     if (renderCached()) return;
     queueRenderOrLookup();
   });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  const observerRoot = document.getElementById("grid") ?? document.body ?? document.documentElement;
+  observer.observe(observerRoot, { childList: true, subtree: true });
   window.addEventListener("DOMContentLoaded", queueRenderOrLookup);
   queueRenderOrLookup();
 })();
