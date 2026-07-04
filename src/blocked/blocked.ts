@@ -56,7 +56,7 @@ function startCountdown(): void {
     });
     if (remaining <= 0) {
       clearCountdownTimer();
-      void finishUnblock();
+      void finishUnblock().catch(showUnblockFailed);
       return;
     }
     remaining -= 1;
@@ -82,6 +82,19 @@ function showUnblockFailed(): void {
   countdownEl.hidden = true;
 }
 
+function showStartupFailed(error: unknown): void {
+  clearCountdownTimer();
+  countdownActive = false;
+  unblockEl.disabled = true;
+  actionsEl.hidden = true;
+  countdownEl.hidden = false;
+  countdownTextEl.textContent = error instanceof Error ? error.message : String(error);
+}
+
+function ignoreStatsError(): void {
+  // Focus stats are secondary; they must not block the completed unblock redirect.
+}
+
 async function requestUnblock(): Promise<boolean> {
   try {
     const ack = await sendMessage({ type: "unblock", host });
@@ -92,14 +105,22 @@ async function requestUnblock(): Promise<boolean> {
   }
 }
 
+async function redirectUrlAfterUnblock(): Promise<string> {
+  try {
+    return (await getLastBlockedUrl(host)) ?? `https://${host}/`;
+  } catch {
+    return `https://${host}/`;
+  }
+}
+
 async function finishUnblock(): Promise<void> {
   countdownTextEl.textContent = i18n.t("unblockingNow", { host });
-  const redirectUrl = (await getLastBlockedUrl(host)) ?? `https://${host}/`;
+  const redirectUrl = await redirectUrlAfterUnblock();
   if (!(await requestUnblock())) {
     showUnblockFailed();
     return;
   }
-  await recordUnblockAfterCountdown(host);
+  await recordUnblockAfterCountdown(host).catch(ignoreStatsError);
   location.replace(redirectUrl);
 }
 
@@ -114,4 +135,4 @@ async function init(): Promise<void> {
   renderMessage();
 }
 
-void init();
+void init().catch(showStartupFailed);
