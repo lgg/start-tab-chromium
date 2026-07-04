@@ -40,15 +40,34 @@ function hide(el: HTMLElement): void {
   el.hidden = true;
 }
 
+function errorText(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return typeof error === "string" && error ? error : i18n?.t("somethingWentWrong") ?? "Something went wrong";
+}
+
+function showError(error?: unknown): void {
+  show(noteEl, errorText(error));
+}
+
+async function reloadTabIfPossible(tabId: number | undefined): Promise<void> {
+  if (tabId === undefined) return;
+  try {
+    await chrome.tabs.reload(tabId);
+  } catch {
+    // Some browser/internal pages cannot be reloaded by an extension after the mutation succeeds.
+  }
+}
+
 async function sendAction(message: Message): Promise<boolean> {
   try {
     const ack = await sendMessage(message);
     if (ack.ok) return true;
+    showError(ack.error);
   } catch {
     // The service worker can restart while the popup is open.
+    showError();
   }
 
-  show(noteEl, i18n.t("somethingWentWrong"));
   return false;
 }
 
@@ -87,10 +106,10 @@ async function render(): Promise<void> {
 
   if (blockedHost) {
     show(primaryEl, i18n.t("removeFromBlocklist"));
-    primaryEl.onclick = () => void unblock(blockedHost, tab.id);
+    primaryEl.onclick = () => void unblock(blockedHost, tab.id).catch(showError);
   } else {
     show(primaryEl, i18n.t("blockThisSite"));
-    primaryEl.onclick = () => void block(host, tab.id);
+    primaryEl.onclick = () => void block(host, tab.id).catch(showError);
   }
 }
 
@@ -100,7 +119,7 @@ async function block(host: string, tabId: number | undefined): Promise<void> {
     primaryEl.disabled = false;
     return;
   }
-  if (tabId !== undefined) await chrome.tabs.reload(tabId);
+  await reloadTabIfPossible(tabId);
   window.close();
 }
 
@@ -110,26 +129,43 @@ async function unblock(host: string, tabId: number | undefined): Promise<void> {
     primaryEl.disabled = false;
     return;
   }
-  if (tabId !== undefined) await chrome.tabs.reload(tabId);
+  await reloadTabIfPossible(tabId);
   window.close();
 }
 
-clearEl.addEventListener("click", async () => {
+async function clearBlocklist(): Promise<void> {
   clearEl.disabled = true;
   try {
     if (await sendAction({ type: "clear" })) {
       await render();
     }
+  } catch (error) {
+    showError(error);
   } finally {
     clearEl.disabled = false;
   }
+}
+
+async function changeLanguage(): Promise<void> {
+  languageEl.disabled = true;
+  try {
+    await setLocalePreference(languageEl.value as LocalePreference);
+    i18n = await loadI18n();
+    applyStaticText();
+    await render();
+  } catch (error) {
+    showError(error);
+  } finally {
+    languageEl.disabled = false;
+  }
+}
+
+clearEl.addEventListener("click", () => {
+  void clearBlocklist();
 });
 
-languageEl.addEventListener("change", async () => {
-  await setLocalePreference(languageEl.value as LocalePreference);
-  i18n = await loadI18n();
-  applyStaticText();
-  await render();
+languageEl.addEventListener("change", () => {
+  void changeLanguage();
 });
 
 async function init(): Promise<void> {
@@ -139,4 +175,4 @@ async function init(): Promise<void> {
   await render();
 }
 
-void init();
+void init().catch(showError);
