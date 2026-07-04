@@ -74,16 +74,29 @@ function cancelCountdown(): void {
   actionsEl.hidden = false;
 }
 
+function showUnblockFailed(): void {
+  countdownTextEl.textContent = i18n.t("failedToUnblock");
+  countdownActive = false;
+  unblockEl.disabled = false;
+  actionsEl.hidden = false;
+  countdownEl.hidden = true;
+}
+
+async function requestUnblock(): Promise<boolean> {
+  try {
+    const ack = await sendMessage({ type: "unblock", host });
+    return ack.ok;
+  } catch {
+    // The MV3 service worker can restart while the blocked page is open.
+    return false;
+  }
+}
+
 async function finishUnblock(): Promise<void> {
   countdownTextEl.textContent = i18n.t("unblockingNow", { host });
   const redirectUrl = (await getLastBlockedUrl(host)) ?? `https://${host}/`;
-  const ack = await sendMessage({ type: "unblock", host });
-  if (!ack.ok) {
-    countdownTextEl.textContent = i18n.t("failedToUnblock");
-    countdownActive = false;
-    unblockEl.disabled = false;
-    actionsEl.hidden = false;
-    countdownEl.hidden = true;
+  if (!(await requestUnblock())) {
+    showUnblockFailed();
     return;
   }
   await recordUnblockAfterCountdown(host);
