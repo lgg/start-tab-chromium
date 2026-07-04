@@ -3,7 +3,7 @@
  * from the blocklist. Mutations are routed through the service worker.
  */
 
-import { getBlockedSites, hostFromUrl } from "../lib/blocklist.js";
+import { blockedSiteForUrl, hostFromUrl } from "../lib/blocklist.js";
 import {
   getLocalePreference,
   loadI18n,
@@ -71,7 +71,7 @@ async function render(): Promise<void> {
   const tab = await getActiveTab();
   const host = tab?.url ? hostFromUrl(tab.url) : null;
 
-  if (!tab || !host) {
+  if (!tab || !host || !tab.url) {
     show(noteEl, i18n.t("unsupportedPage"));
     return;
   }
@@ -83,11 +83,11 @@ async function render(): Promise<void> {
   siteEl.append(strong);
   siteEl.hidden = false;
 
-  const blocked = (await getBlockedSites()).includes(host);
+  const blockedHost = await blockedSiteForUrl(tab.url);
 
-  if (blocked) {
+  if (blockedHost) {
     show(primaryEl, i18n.t("removeFromBlocklist"));
-    primaryEl.onclick = () => void unblock(host, tab.id);
+    primaryEl.onclick = () => void unblock(blockedHost, tab.id);
   } else {
     show(primaryEl, i18n.t("blockThisSite"));
     primaryEl.onclick = () => void block(host, tab.id);
