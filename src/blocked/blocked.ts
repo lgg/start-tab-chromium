@@ -1,4 +1,4 @@
-import { getLastBlockedUrl, normalizeHost } from "../lib/blocklist.js";
+import { getLastBlockedUrl, hostFromUrl, normalizeHost } from "../lib/blocklist.js";
 import { recordUnblockAfterCountdown } from "../lib/focus-stats.js";
 import { loadI18n, type I18n } from "../lib/i18n.js";
 import { sendMessage } from "../lib/messages.js";
@@ -12,10 +12,16 @@ const countdownTextEl = document.getElementById("countdownText") as HTMLParagrap
 const unblockEl = document.getElementById("unblock") as HTMLButtonElement;
 const cancelEl = document.getElementById("cancel") as HTMLButtonElement;
 
-const host = normalizeHost(new URLSearchParams(location.search).get("site") ?? "");
+const host = readBlockedHost();
 let interval: number | undefined;
 let countdownActive = false;
 let i18n: I18n;
+
+function readBlockedHost(): string {
+  const value = new URLSearchParams(location.search).get("site") ?? "";
+  const normalized = normalizeHost(value);
+  return normalized && hostFromUrl(`https://${normalized}/`) === normalized ? normalized : "";
+}
 
 function unit(value: number): string {
   if (i18n.locale !== "ru") return i18n.t(value === 1 ? "secondOne" : "secondMany");
@@ -129,6 +135,7 @@ async function init(): Promise<void> {
   document.title = i18n.t("blockedPageTitle");
   unblockEl.textContent = i18n.t("unblockThisSite");
   cancelEl.textContent = i18n.t("cancelUnblocking");
+  unblockEl.disabled = !host;
   unblockEl.addEventListener("click", startCountdown);
   cancelEl.addEventListener("click", cancelCountdown);
   window.addEventListener("pagehide", clearCountdownTimer);
