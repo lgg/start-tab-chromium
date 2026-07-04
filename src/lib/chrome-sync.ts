@@ -44,7 +44,8 @@ function isSyncMeta(value: unknown): value is SyncMeta {
     && typeof (value as SyncMeta).deviceId === "string"
     && typeof (value as SyncMeta).checksum === "string"
     && Number.isInteger((value as SyncMeta).chunks)
-    && (value as SyncMeta).chunks > 0;
+    && (value as SyncMeta).chunks > 0
+    && (value as SyncMeta).chunks <= MAX_SYNC_CHUNKS;
 }
 
 async function readLocalMeta(): Promise<SyncMeta | null> {
