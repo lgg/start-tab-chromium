@@ -104,6 +104,12 @@
     for (const target of targets()) target.textContent = message("ipUnavailable", "IP lookup is unavailable.");
   }
 
+  function markUnavailable() {
+    lastResult = null;
+    lastUnavailable = true;
+    renderUnavailable();
+  }
+
   function renderCached() {
     if (lastResult) {
       render(lastResult);
@@ -128,16 +134,14 @@
         // Try the next public provider. Public IP APIs can rate-limit or block CORS per browser.
       }
     }
-    lastResult = null;
-    lastUnavailable = true;
-    renderUnavailable();
+    markUnavailable();
   }
 
   function loadIpOnce() {
     if (renderCached()) return lookupPromise;
     if (lookupStarted) return lookupPromise;
     lookupStarted = true;
-    lookupPromise = performLookup();
+    lookupPromise = performLookup().catch(markUnavailable);
     return lookupPromise;
   }
 
