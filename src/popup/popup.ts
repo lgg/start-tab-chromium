@@ -11,7 +11,7 @@ import {
   type I18n,
   type LocalePreference,
 } from "../lib/i18n.js";
-import { sendMessage } from "../lib/messages.js";
+import { sendMessage, type Message } from "../lib/messages.js";
 
 const titleEl = document.getElementById("title") as HTMLHeadingElement;
 const siteEl = document.getElementById("site") as HTMLParagraphElement;
@@ -38,6 +38,18 @@ function show(el: HTMLElement, text?: string): void {
 
 function hide(el: HTMLElement): void {
   el.hidden = true;
+}
+
+async function sendAction(message: Message): Promise<boolean> {
+  try {
+    const ack = await sendMessage(message);
+    if (ack.ok) return true;
+  } catch {
+    // The service worker can restart while the popup is open.
+  }
+
+  show(noteEl, i18n.t("somethingWentWrong"));
+  return false;
 }
 
 function applyStaticText(): void {
@@ -84,9 +96,7 @@ async function render(): Promise<void> {
 
 async function block(host: string, tabId: number | undefined): Promise<void> {
   primaryEl.disabled = true;
-  const ack = await sendMessage({ type: "block", host });
-  if (!ack.ok) {
-    show(noteEl, i18n.t("somethingWentWrong"));
+  if (!(await sendAction({ type: "block", host }))) {
     primaryEl.disabled = false;
     return;
   }
@@ -96,9 +106,7 @@ async function block(host: string, tabId: number | undefined): Promise<void> {
 
 async function unblock(host: string, tabId: number | undefined): Promise<void> {
   primaryEl.disabled = true;
-  const ack = await sendMessage({ type: "unblock", host });
-  if (!ack.ok) {
-    show(noteEl, i18n.t("somethingWentWrong"));
+  if (!(await sendAction({ type: "unblock", host }))) {
     primaryEl.disabled = false;
     return;
   }
@@ -107,12 +115,14 @@ async function unblock(host: string, tabId: number | undefined): Promise<void> {
 }
 
 clearEl.addEventListener("click", async () => {
-  const ack = await sendMessage({ type: "clear" });
-  if (ack.ok) {
-    await render();
-    return;
+  clearEl.disabled = true;
+  try {
+    if (await sendAction({ type: "clear" })) {
+      await render();
+    }
+  } finally {
+    clearEl.disabled = false;
   }
-  show(noteEl, i18n.t("somethingWentWrong"));
 });
 
 languageEl.addEventListener("change", async () => {
