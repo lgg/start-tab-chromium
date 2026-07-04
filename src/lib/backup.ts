@@ -1,5 +1,6 @@
 import { syncRules } from "./blocklist.js";
 import { FOCUS_STATS_KEY } from "./focus-stats.js";
+import { normalizeStartPageSettings } from "./start-page-settings.js";
 
 const BACKUP_VERSION = 3;
 
@@ -70,6 +71,11 @@ function migrateBackup(value: LegacyBackupBundle): BackupBundle {
   return migrated;
 }
 
+function importStorageValue(key: typeof STORAGE_KEYS[number], value: unknown): unknown {
+  if (key === "startPageSettings") return normalizeStartPageSettings(value);
+  return value;
+}
+
 export async function exportBackup(): Promise<BackupBundle> {
   const storage = await chrome.storage.local.get([...STORAGE_KEYS]);
   return {
@@ -91,7 +97,7 @@ export async function importBackup(value: unknown): Promise<void> {
   const nextStorage: Record<string, unknown> = {};
   for (const key of STORAGE_KEYS) {
     if (Object.prototype.hasOwnProperty.call(backup.storage, key)) {
-      nextStorage[key] = backup.storage[key];
+      nextStorage[key] = importStorageValue(key, backup.storage[key]);
     }
   }
 
