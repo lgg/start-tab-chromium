@@ -45,6 +45,18 @@
     return chrome.i18n.getMessage(key) || FALLBACK_MESSAGES[key] || key;
   }
 
+  function ignoreGateError() {
+    // The gate is optional UI; failed browser APIs should not break Start Tab.
+  }
+
+  function runGateAction(handler) {
+    try {
+      void Promise.resolve(handler()).catch(ignoreGateError);
+    } catch {
+      ignoreGateError();
+    }
+  }
+
   function hasSplitViewMarker(value) {
     const normalized = String(value || "").toLowerCase();
     return SPLIT_VIEW_MARKERS.some((marker) => normalized.includes(marker));
@@ -75,21 +87,25 @@
     const cometLike = isCometLikeBrowser();
 
     if (explicitMarker || openerNewTab) {
-      await chrome.storage.local.set({
-        [DIAGNOSTICS_KEY]: {
-          checkedAt: new Date().toISOString(),
-          href: location.href,
-          referrer: document.referrer,
-          windowName: window.name,
-          openerTabId: tab?.openerTabId ?? null,
-          tabId: tab?.id ?? null,
-          userAgent: navigator.userAgent,
-          userAgentBrands: userAgentBrands(),
-          explicitMarker,
-          openerNewTab,
-          cometLike,
-        },
-      });
+      try {
+        await chrome.storage.local.set({
+          [DIAGNOSTICS_KEY]: {
+            checkedAt: new Date().toISOString(),
+            href: location.href,
+            referrer: document.referrer,
+            windowName: window.name,
+            openerTabId: tab?.openerTabId ?? null,
+            tabId: tab?.id ?? null,
+            userAgent: navigator.userAgent,
+            userAgentBrands: userAgentBrands(),
+            explicitMarker,
+            openerNewTab,
+            cometLike,
+          },
+        });
+      } catch {
+        ignoreGateError();
+      }
     }
 
     return explicitMarker || openerNewTab;
@@ -123,7 +139,7 @@
     if (!button) return;
     button.title = t("openNativeNewTab");
     button.setAttribute("aria-label", t("openNativeNewTab"));
-    button.addEventListener("click", () => void openNativeNewTab());
+    button.addEventListener("click", () => runGateAction(openNativeNewTab));
   }
 
   function ensureStyle() {
@@ -247,7 +263,7 @@
     button.type = "button";
     button.textContent = label;
     if (className) button.className = className;
-    button.addEventListener("click", () => void handler());
+    button.addEventListener("click", () => runGateAction(handler));
     return button;
   }
 
@@ -292,7 +308,7 @@
       url.textContent = tab.url || "";
       button.append(title, url);
       button.addEventListener("click", () => {
-        if (current?.id !== undefined && tab.url) void chrome.tabs.update(current.id, { url: tab.url });
+        if (current?.id !== undefined && tab.url) void chrome.tabs.update(current.id, { url: tab.url }).catch(ignoreGateError);
       });
       list.append(button);
     }
@@ -330,5 +346,5 @@
   });
 
   installNativeNewTabButton();
-  void applyGate();
+  void applyGate().catch(ignoreGateError);
 })();
