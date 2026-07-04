@@ -205,13 +205,17 @@ function cached<T>(
   return next;
 }
 
+function cssUrl(value: string): string {
+  return `url("${value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}")`;
+}
+
 function applyAppearance(): void {
   document.body.style.setProperty("--text-color", settings.appearance.textColor);
   document.body.style.setProperty("--base-font-size", `${settings.appearance.baseFontSize}px`);
   document.body.style.setProperty("--font-family", settings.appearance.fontFamily);
   document.body.style.setProperty("--background-color", settings.appearance.backgroundColor);
   backgroundEl.style.backgroundImage = settings.appearance.backgroundImage
-    ? `url("${settings.appearance.backgroundImage}")`
+    ? cssUrl(settings.appearance.backgroundImage)
     : "";
   document.body.className = `effect-${settings.appearance.backgroundEffect}`;
   if (settings.settingsButton.visibility === "hover") {
