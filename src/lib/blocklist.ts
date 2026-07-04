@@ -66,6 +66,21 @@ export function normalizeBlockedSites(value: unknown): string[] {
   return normalizeSites(value.filter((site): site is string => typeof site === "string"));
 }
 
+export function normalizeLastBlockedUrls(value: unknown): Record<string, string> {
+  const normalized: Record<string, string> = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return normalized;
+
+  for (const [host, url] of Object.entries(value)) {
+    if (typeof url !== "string") continue;
+    const normalizedHost = normalizeStoredHost(host);
+    if (!normalizedHost) continue;
+    if (!hostFromUrl(url)) continue;
+    normalized[normalizedHost] = url;
+  }
+
+  return normalized;
+}
+
 function requireHost(host: string): string {
   const normalized = normalizeStoredHost(host);
   if (!normalized) throw new Error("Invalid host");
@@ -112,10 +127,7 @@ export async function migrateLegacyStorage(): Promise<void> {
 
 async function getLastBlockedUrls(): Promise<Record<string, string>> {
   const items = await chrome.storage.local.get(LAST_BLOCKED_URLS_KEY);
-  const urls = items[LAST_BLOCKED_URLS_KEY];
-  return urls && typeof urls === "object"
-    ? (urls as Record<string, string>)
-    : {};
+  return normalizeLastBlockedUrls(items[LAST_BLOCKED_URLS_KEY]);
 }
 
 async function setBlockedSites(sites: string[]): Promise<void> {
