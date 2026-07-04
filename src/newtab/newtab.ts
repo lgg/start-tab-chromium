@@ -580,7 +580,7 @@ function renderLocalTasks(container: HTMLElement): void {
       queueSaveState();
     });
     const title = el("span", "task-item__title", task.title);
-    const remove = el("button", "button button--tiny", "x") as HTMLButtonElement;
+    const remove = el("button", "button button--tiny", "×") as HTMLButtonElement;
     remove.type = "button";
     remove.title = i18n.t("removeTask");
     remove.addEventListener("click", () => {
