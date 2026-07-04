@@ -39,6 +39,18 @@
     return typeof value === "object" && value !== null;
   }
 
+  function ignoreEditorError() {
+    // Layout editor is progressive UI; storage/runtime failures should not break Start Tab.
+  }
+
+  function runEditorAction(action) {
+    try {
+      void Promise.resolve(action()).catch(ignoreEditorError);
+    } catch {
+      ignoreEditorError();
+    }
+  }
+
   function blockType(block, fallback) {
     return typeof block.type === "string" && block.type ? block.type : fallback.type;
   }
@@ -156,7 +168,7 @@
       settingsButton.setAttribute("aria-label", settingsButton.title);
       settingsButton.addEventListener("click", (event) => {
         event.stopPropagation();
-        void openBlockSettings(block);
+        runEditorAction(() => openBlockSettings(block));
       });
       const handle = document.createElement("span");
       handle.className = "layout-resize-handle";
@@ -367,7 +379,7 @@
         ["grid", t("layoutModeGrid", "Grid")],
         ["free", t("layoutModeFree", "Free")],
       ],
-      (mode) => void patchLayout({ mode }),
+      (mode) => runEditorAction(() => patchLayout({ mode })),
     );
 
     const zoneLabel = toolbarSelect(
@@ -377,7 +389,7 @@
         ["contained", t("layoutZoneContained", "Contained")],
         ["full", t("layoutZoneFull", "Full viewport")],
       ],
-      (zone) => void patchLayout({ zone }),
+      (zone) => runEditorAction(() => patchLayout({ zone })),
     );
 
     const titleToggle = document.createElement("label");
@@ -385,7 +397,7 @@
     const titleCheckbox = document.createElement("input");
     titleCheckbox.type = "checkbox";
     titleCheckbox.checked = settings.layout.showBlockTitles !== false;
-    titleCheckbox.addEventListener("change", () => void patchLayout({ showBlockTitles: titleCheckbox.checked }));
+    titleCheckbox.addEventListener("change", () => runEditorAction(() => patchLayout({ showBlockTitles: titleCheckbox.checked })));
     titleToggle.append(titleCheckbox, document.createTextNode(t("showBlockTitles", "Show block titles")));
 
     const blocks = document.createElement("div");
@@ -396,7 +408,7 @@
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
       checkbox.checked = block.enabled;
-      checkbox.addEventListener("change", () => void toggleBlock(block.id, checkbox.checked));
+      checkbox.addEventListener("change", () => runEditorAction(() => toggleBlock(block.id, checkbox.checked)));
       label.append(checkbox, document.createTextNode(block.title));
       blocks.append(label);
     }
@@ -550,7 +562,7 @@
     const patch = settings.layout.mode === "free" ? freePatchFromCard(card) : gridPatchFromPointer(event);
     const id = dragState.id;
     dragState = null;
-    if (patch) void saveBlock(id, patch);
+    if (patch) runEditorAction(() => saveBlock(id, patch));
   }
 
   function installPointerHandlers() {
@@ -574,7 +586,7 @@
     renderToolbar();
   });
 
-  void (async () => {
+  runEditorAction(async () => {
     await readSettings();
     installEditButton();
     installPointerHandlers();
@@ -582,5 +594,5 @@
     window.setTimeout(applyLayout, 0);
     window.setTimeout(applyLayout, 250);
     window.addEventListener("resize", applyLayout);
-  })();
+  });
 })();
