@@ -421,12 +421,24 @@ function blocklistControls(): HTMLElement {
   return wrapper;
 }
 
+function showActionError(error: unknown): void {
+  statusEl.textContent = error instanceof Error ? error.message : String(error);
+}
+
 function actionButton(labelKey: string, handler: () => Promise<void> | void): HTMLButtonElement {
   const button = document.createElement("button");
   button.className = "button button--secondary";
   button.type = "button";
   button.textContent = i18n.t(labelKey);
-  button.addEventListener("click", () => void handler());
+  button.addEventListener("click", () => {
+    button.disabled = true;
+    void Promise.resolve()
+      .then(handler)
+      .catch(showActionError)
+      .finally(() => {
+        button.disabled = false;
+      });
+  });
   return button;
 }
 
@@ -874,13 +886,21 @@ formEl.addEventListener("submit", async (event) => {
   }
 });
 
-resetEl.addEventListener("click", async () => {
-  settings = await resetStartPageSettings();
-  await setLocalePreference("auto");
-  localePreference = "auto";
-  i18n = await loadI18n();
-  render();
-  statusEl.textContent = i18n.t("settingsReset");
+resetEl.addEventListener("click", () => {
+  resetEl.disabled = true;
+  void Promise.resolve()
+    .then(async () => {
+      settings = await resetStartPageSettings();
+      await setLocalePreference("auto");
+      localePreference = "auto";
+      i18n = await loadI18n();
+      render();
+      statusEl.textContent = i18n.t("settingsReset");
+    })
+    .catch(showActionError)
+    .finally(() => {
+      resetEl.disabled = false;
+    });
 });
 
 void (async () => {
@@ -891,4 +911,4 @@ void (async () => {
     getBlockedSites(),
   ]);
   render();
-})();
+})().catch(showActionError);
