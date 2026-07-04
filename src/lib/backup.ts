@@ -106,8 +106,6 @@ export async function importBackup(value: unknown): Promise<void> {
   }
 
   if (Object.keys(nextStorage).length > 0) await chrome.storage.local.set(nextStorage);
-  const keysToRemove = STORAGE_KEYS.filter((key) => !Object.prototype.hasOwnProperty.call(nextStorage, key));
-  if (keysToRemove.length > 0) await chrome.storage.local.remove(keysToRemove);
   await syncRules();
 }
 
