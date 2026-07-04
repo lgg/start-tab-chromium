@@ -449,18 +449,33 @@ function cloneDisabledLayoutBlock(block: LayoutBlock): LayoutBlock {
   return cloneLayoutBlocks([{ ...block, enabled: false }])[0]!;
 }
 
+function uniqueLayoutBlockId(id: string, type: BlockType, seenIds: Set<string>): string {
+  const base = id.trim() || type;
+  if (!seenIds.has(base)) return base;
+
+  let suffix = 2;
+  let candidate = `${base}-${suffix}`;
+  while (seenIds.has(candidate)) {
+    suffix += 1;
+    candidate = `${base}-${suffix}`;
+  }
+  return candidate;
+}
+
 function mergeLayoutBlocks(base: LayoutBlock[], value: unknown, columns: number): LayoutBlock[] {
   if (!Array.isArray(value)) return cloneLayoutBlocks(base);
   const fallbackById = new Map(base.map((block) => [block.id, block]));
   const seenIds = new Set<string>();
   const blocks = value.filter(isRecord).map((block, index) => {
     const fallback = fallbackById.get(stringValue(block.id, "")) ?? base[index] ?? DEFAULT_LAYOUT_BLOCKS[0]!;
+    const type = oneOf(block.type, BLOCK_TYPES, fallback.type);
+    const id = uniqueLayoutBlockId(stringValue(block.id, fallback.id), type, seenIds);
     const width = finiteInteger(block.width, fallback.width, 1, columns);
     const free = freeRectValue(block.free, fallback.free);
     const config = recordValue(block.config, fallback.config);
     const merged = {
-      id: stringValue(block.id, fallback.id),
-      type: oneOf(block.type, BLOCK_TYPES, fallback.type),
+      id,
+      type,
       title: stringValue(block.title, fallback.title),
       enabled: booleanValue(block.enabled, fallback.enabled),
       column: finiteInteger(block.column, fallback.column, 1, Math.max(1, columns - width + 1)),
