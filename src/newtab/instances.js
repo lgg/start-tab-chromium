@@ -461,6 +461,15 @@
     body.append(form);
   }
 
+  function formatDateTime(date, options) {
+    try {
+      return new Intl.DateTimeFormat(undefined, options).format(date);
+    } catch {
+      const { timeZone: _timeZone, ...fallbackOptions } = options;
+      return new Intl.DateTimeFormat(undefined, fallbackOptions).format(date);
+    }
+  }
+
   function patchDateTime(settings, block, card) {
     const config = blockConfig(block);
     const time = card.querySelector(".date-time__time");
@@ -474,11 +483,11 @@
     if (time instanceof HTMLElement) {
       time.hidden = mode === "date";
       if (fontSize) time.style.fontSize = `${fontSize}px`;
-      time.textContent = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone }).format(now);
+      time.textContent = formatDateTime(now, { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone });
     }
     if (date instanceof HTMLElement) {
       date.hidden = mode === "time";
-      date.textContent = new Intl.DateTimeFormat(undefined, { weekday: "long", day: "2-digit", month: "long", year: "numeric", timeZone }).format(now);
+      date.textContent = formatDateTime(now, { weekday: "long", day: "2-digit", month: "long", year: "numeric", timeZone });
     }
   }
 
