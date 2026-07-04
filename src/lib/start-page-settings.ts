@@ -405,7 +405,7 @@ function safeWebUrl(value: string): string | null {
 function safeWebUrlTemplate(value: string): string | null {
   const trimmed = value.trim();
   if (!trimmed.includes("{query}")) return null;
-  return safeWebUrl(trimmed.replace("{query}", "start-tab-query")) ? trimmed : null;
+  return safeWebUrl(trimmed.split("{query}").join("start-tab-query")) ? trimmed : null;
 }
 
 function freeRectValue(value: unknown, fallback?: FreeBlockRect): FreeBlockRect | undefined {

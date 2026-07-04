@@ -317,7 +317,7 @@ function renderSearch(container: HTMLElement): void {
     const query = input.value.trim();
     if (!query) return;
     const provider = activeSearchProvider();
-    location.href = provider.urlTemplate.replace("{query}", encodeURIComponent(query));
+    location.href = provider.urlTemplate.split("{query}").join(encodeURIComponent(query));
   });
   container.append(form);
 }
