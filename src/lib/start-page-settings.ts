@@ -445,15 +445,20 @@ function mergeDomainMinutes(value: unknown): Record<string, number> {
   return next;
 }
 
+function cloneDisabledLayoutBlock(block: LayoutBlock): LayoutBlock {
+  return cloneLayoutBlocks([{ ...block, enabled: false }])[0]!;
+}
+
 function mergeLayoutBlocks(base: LayoutBlock[], value: unknown, columns: number): LayoutBlock[] {
   if (!Array.isArray(value)) return cloneLayoutBlocks(base);
   const fallbackById = new Map(base.map((block) => [block.id, block]));
-  return value.filter(isRecord).map((block, index) => {
+  const seenIds = new Set<string>();
+  const blocks = value.filter(isRecord).map((block, index) => {
     const fallback = fallbackById.get(stringValue(block.id, "")) ?? base[index] ?? DEFAULT_LAYOUT_BLOCKS[0]!;
     const width = finiteInteger(block.width, fallback.width, 1, columns);
     const free = freeRectValue(block.free, fallback.free);
     const config = recordValue(block.config, fallback.config);
-    return {
+    const merged = {
       id: stringValue(block.id, fallback.id),
       type: oneOf(block.type, BLOCK_TYPES, fallback.type),
       title: stringValue(block.title, fallback.title),
@@ -465,7 +470,15 @@ function mergeLayoutBlocks(base: LayoutBlock[], value: unknown, columns: number)
       ...(free ? { free } : {}),
       ...(config ? { config } : {}),
     };
+    seenIds.add(merged.id);
+    return merged;
   });
+
+  for (const block of base) {
+    if (!seenIds.has(block.id)) blocks.push(cloneDisabledLayoutBlock(block));
+  }
+
+  return blocks;
 }
 
 function mergeSettings(base: StartPageSettings, value: unknown): StartPageSettings {
