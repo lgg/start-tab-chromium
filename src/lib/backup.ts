@@ -1,4 +1,4 @@
-import { normalizeBlockedSites, syncRules } from "./blocklist.js";
+import { normalizeBlockedSites, normalizeLastBlockedUrls, syncRules } from "./blocklist.js";
 import { FOCUS_STATS_KEY } from "./focus-stats.js";
 import { normalizeStartPageSettings } from "./start-page-settings.js";
 
@@ -75,6 +75,7 @@ function migrateBackup(value: LegacyBackupBundle): BackupBundle {
 
 function importStorageValue(key: StorageKey, value: unknown): unknown {
   if (key === "blockedSites") return normalizeBlockedSites(value);
+  if (key === "lastBlockedUrls") return normalizeLastBlockedUrls(value);
   if (key === "startPageSettings") return normalizeStartPageSettings(value);
   return value;
 }
