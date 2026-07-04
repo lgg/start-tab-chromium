@@ -35,6 +35,43 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  function isRecord(value) {
+    return typeof value === "object" && value !== null;
+  }
+
+  function blockType(block, fallback) {
+    return typeof block.type === "string" && block.type ? block.type : fallback.type;
+  }
+
+  function uniqueBlockId(id, type, seenIds) {
+    const base = typeof id === "string" && id.trim() ? id.trim() : type;
+    if (!seenIds.has(base)) return base;
+
+    let suffix = 2;
+    let candidate = `${base}-${suffix}`;
+    while (seenIds.has(candidate)) {
+      suffix += 1;
+      candidate = `${base}-${suffix}`;
+    }
+    return candidate;
+  }
+
+  function normalizeLayoutBlocks(blocks) {
+    const seenIds = new Set();
+    return blocks.map((block, index) => {
+      const fallback = DEFAULT_BLOCKS[index] || DEFAULT_BLOCKS[0];
+      const source = isRecord(block) ? block : fallback;
+      const type = blockType(source, fallback);
+      const normalized = {
+        ...source,
+        id: uniqueBlockId(source.id, type, seenIds),
+        type,
+      };
+      seenIds.add(normalized.id);
+      return normalized;
+    });
+  }
+
   function normalizeSettings(value) {
     const layout = value?.layout && typeof value.layout === "object" ? value.layout : {};
     const blocks = Array.isArray(layout.blocks) && layout.blocks.length > 0 ? layout.blocks : DEFAULT_BLOCKS;
@@ -46,7 +83,7 @@
         mode: layout.mode === "free" ? "free" : "grid",
         zone: layout.zone === "full" ? "full" : "contained",
         showBlockTitles: layout.showBlockTitles !== false,
-        blocks: blocks.map((block) => ({ ...block })),
+        blocks: normalizeLayoutBlocks(blocks),
       },
     };
   }
