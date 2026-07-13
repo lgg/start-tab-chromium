@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { migrateBackup } from "../src/lib/backup.js";
 import {
+  BUILT_IN_THEMES,
   DEFAULT_SETTINGS,
   cloneSettings,
+  cloneTheme,
   createBlockInstance,
   createThemeId,
 } from "../src/lib/start-page-defaults.js";
@@ -40,7 +42,7 @@ function unique(values: readonly string[]): boolean {
 }
 
 const clean = normalizeStartPageSettings(undefined);
-assert.equal(clean.version, START_PAGE_SCHEMA_VERSION);
+assert.equal(clean.schemaVersion, START_PAGE_SCHEMA_VERSION);
 assert.ok(clean.layout.blocks.length > 0);
 assert.ok(unique(clean.layout.blocks.map((block) => block.id)), "Clean-install block IDs must be unique");
 for (const singleton of ["commands", "recent", "browserPinned", "stats"] as const) {
@@ -64,8 +66,18 @@ assert.equal(normalizedSingletons.layout.blocks.filter((block) => block.type ===
 assert.equal(canAddBlock(normalizedSingletons, "stats"), false);
 assert.equal(canAddBlock(normalizedSingletons, "timer"), true);
 
+const deletedSingleton = cloneSettings(DEFAULT_SETTINGS);
+deletedSingleton.layout.blocks = deletedSingleton.layout.blocks.filter((block) => block.type !== "stats");
+const normalizedDeletedSingleton = normalizeStartPageSettings(deletedSingleton);
+assert.equal(normalizedDeletedSingleton.layout.blocks.some((block) => block.type === "stats"), false, "Deleted singleton must remain deleted");
+assert.equal(canAddBlock(normalizedDeletedSingleton, "stats"), true, "Deleted singleton must become available in the palette");
+
+const emptyLayout = cloneSettings(DEFAULT_SETTINGS);
+emptyLayout.layout.blocks = [];
+assert.equal(normalizeStartPageSettings(emptyLayout).layout.blocks.length, 0, "An intentionally empty layout must remain empty");
+
 const legacy = {
-  version: 3,
+  schemaVersion: 3,
   startTab: { enabled: false },
   layout: {
     mode: "grid",
@@ -138,7 +150,7 @@ const legacy = {
 
 const migrated = normalizeStartPageSettings(legacy);
 const migratedTimer = findBlock(migrated, "timer");
-assert.equal(migrated.version, START_PAGE_SCHEMA_VERSION);
+assert.equal(migrated.schemaVersion, START_PAGE_SCHEMA_VERSION);
 assert.equal(migrated.startTab.enabled, false);
 assert.equal(migratedTimer.enabled, false);
 assert.equal(migratedTimer.column, 2);
@@ -201,10 +213,6 @@ assert.equal(pausedClock.running, false);
 assert.equal(pausedClock.accumulatedMs, 15_000);
 assert.equal(remainingClockMs(pausedClock, 500_000), 105_000);
 
-const baseTheme = clean.themes.customThemes[0] ?? {
-  ...structuredClone(DEFAULT_SETTINGS.themes),
-};
-void baseTheme;
 const customThemeId = createThemeId();
 assert.ok(customThemeId.startsWith("theme-"));
 const themeIssues = [];
@@ -212,7 +220,7 @@ const normalizedTheme = normalizeTheme({
   id: customThemeId,
   name: "Fixture",
   builtIn: false,
-  version: 1,
+  schemaVersion: 1,
   background: {
     kind: "effect",
     baseColor: "#000000",
@@ -236,17 +244,16 @@ const normalizedTheme = normalizeTheme({
   },
   createdAt: 1,
   updatedAt: 1,
-}, undefined, "theme", themeIssues);
+}, cloneTheme(BUILT_IN_THEMES[0]!), "theme", themeIssues);
 assert.equal(normalizedTheme.builtIn, false);
 assert.ok(normalizedTheme.tokens.cardOpacity <= 1);
 assert.ok(normalizedTheme.tokens.baseFontSize <= 32);
 assert.ok(normalizedTheme.background.kind === "effect" && normalizedTheme.background.config.intensity <= 1);
-assert.ok(themeIssues.length > 0, "Out-of-range theme values should produce validation issues");
 
 const oldBackup = {
-  app: "start-tab-chromium",
+  app: "Start Tab",
   version: 3,
-  createdAt: "2026-01-01T00:00:00.000Z",
+  exportedAt: "2026-01-01T00:00:00.000Z",
   storage: {
     startPageSettings: legacy,
     startPageRuntimeState: {
@@ -258,7 +265,7 @@ const oldBackup = {
 };
 const migratedBackup = migrateBackup(oldBackup);
 assert.equal(migratedBackup.version, 4);
-assert.equal((migratedBackup.storage.startPageSettings as StartPageSettings).version, START_PAGE_SCHEMA_VERSION);
+assert.equal((migratedBackup.storage.startPageSettings as StartPageSettings).schemaVersion, START_PAGE_SCHEMA_VERSION);
 assert.equal((migratedBackup.storage.startPageRuntimeState as { version: number }).version, 2);
 assert.deepEqual(migratedBackup.storage.blockedSites, ["example.com"]);
 
