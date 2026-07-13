@@ -1,6 +1,7 @@
 import { editBlockInstance } from "../lib/block-settings-editor.js";
 import type { I18n } from "../lib/i18n.js";
-import { deleteInstanceRuntime, instanceRuntimeHasUserData } from "../lib/start-page-runtime.js";
+import { sendMessage } from "../lib/messages.js";
+import { instanceRuntimeHasUserData } from "../lib/start-page-runtime.js";
 import {
   BLOCK_DESCRIPTORS,
   blockDescriptor,
@@ -8,6 +9,7 @@ import {
   cloneBlock,
   cloneSettings,
   createBlockInstance,
+  getStartPageSettings,
   hasBlockUserData,
   isSingletonBlockType,
   setStartPageSettings,
@@ -149,9 +151,10 @@ export class LayoutEditor {
   async save(): Promise<void> {
     if (!this.active) return;
     await setStartPageSettings(this.draft);
-    for (const id of this.removedIds) await deleteInstanceRuntime(id);
-    this.saved = cloneSettings(this.draft);
-    this.draft = cloneSettings(this.saved);
+    for (const id of this.removedIds) await sendMessage({ type: "delete-instance-runtime", instanceId: id });
+    const persisted = await getStartPageSettings();
+    this.saved = cloneSettings(persisted);
+    this.draft = cloneSettings(persisted);
     this.active = false;
     this.dirty = false;
     this.removedIds.clear();
