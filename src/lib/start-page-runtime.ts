@@ -1,4 +1,5 @@
 import { markStartTabDataChanged } from "./data-revision.js";
+import { sendMessage } from "./messages.js";
 import {
   RUNTIME_SCHEMA_VERSION,
   type BlockInstance,
@@ -335,6 +336,10 @@ export async function completeClockInstance(instanceId: string, expectedToken: s
 }
 
 export async function deleteInstanceRuntime(instanceId: string): Promise<void> {
+  if (typeof document !== "undefined") {
+    await sendMessage({ type: "delete-instance-runtime", instanceId });
+    return;
+  }
   const settings = await getStartPageSettings();
   const runtime = await getStartPageRuntimeState(settings);
   delete runtime.clocks[instanceId];
