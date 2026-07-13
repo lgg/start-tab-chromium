@@ -9,6 +9,7 @@ export type DateTimeMode = "both" | "date" | "time";
 export type LinkPageDirection = "horizontal" | "vertical";
 export type WeatherDisplayMode = "current" | "day" | "week";
 export type WeatherProviderId = "open-meteo";
+export type SearchProviderId = string;
 export type SettingsButtonVisibility = "always" | "hover";
 export type SettingsButtonHoverArea = "top" | "top-right" | "right";
 export type LayoutPresetId = "work" | "minimal" | "focus" | "dashboard" | "development" | "rest";
@@ -53,7 +54,7 @@ export interface StartLink {
 }
 
 export interface SearchProvider {
-  id: string;
+  id: SearchProviderId;
   title: string;
   urlTemplate: string;
 }
@@ -86,7 +87,7 @@ export interface LinksBlockConfig {
 
 export interface SearchBlockConfig {
   type: "search";
-  provider: string;
+  provider: SearchProviderId;
   providers: SearchProvider[];
   placeholder: string;
 }
