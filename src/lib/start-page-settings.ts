@@ -397,14 +397,14 @@ export async function saveNewCustomTheme(theme: StartPageTheme): Promise<StartPa
 
 export async function createCustomTheme(name: string, sourceThemeId?: string): Promise<StartPageTheme> {
   const current = await getStartPageSettings();
-  return saveNewCustomTheme(createCustomThemeDraft(current, name, sourceThemeId));
+  return createCustomThemeDraft(current, name, sourceThemeId);
 }
 
 export async function updateCustomTheme(theme: StartPageTheme): Promise<StartPageTheme> {
   const current = await getStartPageSettings();
   if (getBuiltInTheme(theme.id)) throw new Error("Built-in themes cannot be edited");
   const existing = current.themes.customThemes.find((item) => item.id === theme.id);
-  if (!existing) throw new Error(`Custom theme not found: ${theme.id}`);
+  if (!existing) return saveNewCustomTheme(theme);
   const normalized = normalizeTheme({
     ...theme,
     builtIn: false,
