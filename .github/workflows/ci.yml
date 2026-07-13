@@ -68,5 +68,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: validation-logs
-          path: validation-logs
+          path: |
+            validation-logs
+            package-lock.json
+            src/lib/chrome-sync.ts
+            src/lib/start-page-runtime.ts
+            src/lib/start-page-validation.ts
+            src/lib/theme-editor.ts
+            src/newtab/block-renderers.ts
           retention-days: 1
