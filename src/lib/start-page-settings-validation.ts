@@ -29,7 +29,6 @@ import {
   finiteNumber,
   isBlockType,
   isRecord,
-  legacyConfigSource,
   normalizeDomainMinutes,
   oneOf,
   stringValue,
@@ -70,7 +69,7 @@ function normalizeBlock(value: unknown, index: number, root: Record<string, unkn
   const blockZone = oneOf(value.zone, LAYOUT_ZONES, zone);
   const free = isRecord(value.free) ? value.free : {};
   const createdAt = timestampValue(value.createdAt, 0);
-  const configValue = isRecord(value.config) && value.config.type === type ? value.config : legacyConfigSource(type, root);
+  const configValue = isRecord(value.config) ? value.config : undefined;
   const block = {
     schemaVersion: BLOCK_INSTANCE_SCHEMA_VERSION,
     id,
