@@ -1,9 +1,8 @@
 /**
- * Service worker (MV3 replacement for the old persistent background page).
+ * Manifest V3 service worker.
  *
- * It owns the single source of truth for declarativeNetRequest rules: it
- * resyncs them from storage on install/startup and whenever the popup or
- * blocked page asks it to mutate the blocklist.
+ * It owns declarativeNetRequest synchronization, fallback new-tab redirects,
+ * focus statistics, schema migration, and durable per-instance clock alarms.
  */
 
 import {
@@ -15,12 +14,18 @@ import {
   syncRules,
   unblockHost,
 } from "./lib/blocklist.js";
-import { recordBlockedNavigation } from "./lib/focus-stats.js";
+import { recordBlockedNavigation, recordFocusSessionCompleted } from "./lib/focus-stats.js";
 import { isMessage, type Ack, type Message } from "./lib/messages.js";
+import {
+  completeClockInstance,
+  getStartPageRuntimeState,
+  parseClockAlarmName,
+} from "./lib/start-page-runtime.js";
 import { getStartPageSettings } from "./lib/start-page-settings.js";
 
 const START_TAB_PAGE = "newtab.html";
 const NATIVE_NEW_TAB_BYPASS_KEY = "startTabNativeNewTabBypass";
+const LOCALE_OVERRIDE_KEY = "localeOverride";
 const NEW_TAB_INTERNAL_SCHEMES = new Set([
   "chrome:",
   "chrome-search:",
@@ -56,6 +61,10 @@ interface NativeNewTabBypass {
   expiresAt?: number;
 }
 
+interface LocaleCatalog {
+  [key: string]: { message?: string };
+}
+
 function ignoreBackgroundError(): void {
   // Event listeners cannot surface async failures to callers in MV3.
 }
@@ -81,6 +90,10 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
   void rememberIfBlocked(details.url).catch(ignoreBackgroundError);
 });
 
+chrome.alarms.onAlarm.addListener((alarm) => {
+  void handleClockAlarm(alarm.name).catch(ignoreBackgroundError);
+});
+
 chrome.runtime.onMessage.addListener(
   (message: unknown, _sender, sendResponse: (ack: Ack) => void) => {
     if (!isMessage(message)) {
@@ -93,7 +106,6 @@ chrome.runtime.onMessage.addListener(
       .catch((error: unknown) =>
         sendResponse({ ok: false, error: String(error) }),
       );
-    // Returning true keeps the message channel open for the async response.
     return true;
   },
 );
@@ -112,6 +124,37 @@ async function handle(message: Message): Promise<void> {
   }
 }
 
+async function handleClockAlarm(name: string): Promise<void> {
+  const parsed = parseClockAlarmName(name);
+  if (!parsed) return;
+  const result = await completeClockInstance(parsed.instanceId, parsed.token);
+  if (!result.completed || !result.block) return;
+  if (result.focusTimeMs > 0) await recordFocusSessionCompleted(result.focusTimeMs);
+  if (!result.notify) return;
+  const messageKey = result.block.type === "pomodoro" ? "pomodoroDone" : "timerDone";
+  await chrome.notifications.create(`start-tab-clock-${parsed.instanceId}-${parsed.token}`, {
+    type: "basic",
+    iconUrl: "icons/icon.128.png",
+    title: result.block.title,
+    message: await workerMessage(messageKey),
+  });
+}
+
+async function workerMessage(key: string): Promise<string> {
+  const nativeMessage = chrome.i18n.getMessage(key);
+  const items = await chrome.storage.local.get(LOCALE_OVERRIDE_KEY);
+  const override = items[LOCALE_OVERRIDE_KEY];
+  if (override !== "en" && override !== "ru") return nativeMessage || key;
+  try {
+    const response = await fetch(chrome.runtime.getURL(`_locales/${override}/messages.json`));
+    if (!response.ok) return nativeMessage || key;
+    const catalog = await response.json() as LocaleCatalog;
+    return catalog[key]?.message || nativeMessage || key;
+  } catch {
+    return nativeMessage || key;
+  }
+}
+
 async function redirectBrowserNewTab(tabId: number | undefined, url: string | undefined): Promise<void> {
   if (tabId === undefined || !url) return;
   if (isStartTabUrl(url) || !isBrowserNewTabUrl(url)) return;
@@ -122,7 +165,7 @@ async function redirectBrowserNewTab(tabId: number | undefined, url: string | un
   try {
     await chrome.tabs.update(tabId, { url: chrome.runtime.getURL(START_TAB_PAGE) });
   } catch {
-    // Some Chromium-derived browsers may not expose their internal new tab page
+    // Some Chromium-derived browsers do not expose their internal new tab page
     // to extension tab updates. The manifest override remains the primary path.
   }
 }
@@ -191,5 +234,7 @@ async function rememberIfBlocked(url: string): Promise<void> {
 
 async function migrateAndSyncRules(): Promise<void> {
   await migrateLegacyStorage();
+  const settings = await getStartPageSettings();
+  await getStartPageRuntimeState(settings);
   await syncRules();
 }
