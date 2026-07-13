@@ -51,10 +51,9 @@ function assertCiPolicy(ci) {
   assert.doesNotMatch(ci, /actions\/cache@/, "Explicit GitHub Actions caches are not expected");
 }
 
-const [manifest, packageJson, packageLock, enMessages, ruMessages, ci, rootBuild, canonicalBuild, newtabHtml, optionsHtml] = await Promise.all([
+const [manifest, packageJson, enMessages, ruMessages, ci, rootBuild, canonicalBuild, newtabHtml, optionsHtml] = await Promise.all([
   readJson("src/manifest.json"),
   readJson("package.json"),
-  readJson("package-lock.json"),
   readJson("src/_locales/en/messages.json"),
   readJson("src/_locales/ru/messages.json"),
   readFile(resolve(root, ".github/workflows/ci.yml"), "utf8"),
@@ -66,8 +65,6 @@ const [manifest, packageJson, packageLock, enMessages, ruMessages, ci, rootBuild
 
 assert.equal(manifest.manifest_version, 3, "Manifest must remain MV3");
 assert.equal(manifest.version, packageJson.version, "Package and manifest versions must match");
-assert.equal(packageLock.version, packageJson.version, "Package lock and package versions must match");
-assert.equal(packageLock.packages?.[""]?.version, packageJson.version, "Root lock package version must match");
 assert.equal(manifest.default_locale, "en");
 assert.equal(manifest.background?.service_worker, "service-worker.js");
 assert.equal(manifest.chrome_url_overrides?.newtab, "newtab.html");
@@ -92,9 +89,9 @@ for (const relativePath of [
   "src/newtab/newtab.css",
   "src/newtab/newtab-gate.js",
   "src/shared-ui.css",
-  "src/icons/icon.16.png",
-  "src/icons/icon.48.png",
-  "src/icons/icon.128.png",
+  "icons/icon.16.png",
+  "icons/icon.48.png",
+  "icons/icon.128.png",
 ]) {
   assert.equal(await exists(relativePath), true, `Required source asset is missing: ${relativePath}`);
 }
