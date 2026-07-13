@@ -20,6 +20,7 @@ import {
   completeClockInstance,
   getStartPageRuntimeState,
   parseClockAlarmName,
+  scheduleClockAlarm,
 } from "./lib/start-page-runtime.js";
 import { getStartPageSettings } from "./lib/start-page-settings.js";
 
@@ -100,27 +101,18 @@ chrome.runtime.onMessage.addListener(
       sendResponse({ ok: false, error: "Unsupported message" });
       return false;
     }
-
     handle(message)
       .then(() => sendResponse({ ok: true }))
-      .catch((error: unknown) =>
-        sendResponse({ ok: false, error: String(error) }),
-      );
+      .catch((error: unknown) => sendResponse({ ok: false, error: String(error) }));
     return true;
   },
 );
 
 async function handle(message: Message): Promise<void> {
   switch (message.type) {
-    case "block":
-      await blockHost(message.host);
-      break;
-    case "unblock":
-      await unblockHost(message.host);
-      break;
-    case "clear":
-      await clearAll();
-      break;
+    case "block": await blockHost(message.host); break;
+    case "unblock": await unblockHost(message.host); break;
+    case "clear": await clearAll(); break;
   }
 }
 
@@ -155,18 +147,42 @@ async function workerMessage(key: string): Promise<string> {
   }
 }
 
+async function reconcileClockAlarms(): Promise<void> {
+  const settings = await getStartPageSettings();
+  const runtime = await getStartPageRuntimeState(settings);
+  const clocks = new Map(Object.entries(runtime.clocks));
+  const existing = await chrome.alarms.getAll();
+  await Promise.all(existing.flatMap((alarm) => {
+    const parsed = parseClockAlarmName(alarm.name);
+    if (!parsed) return [];
+    const clock = clocks.get(parsed.instanceId);
+    if (!clock || !clock.running || clock.completionToken !== parsed.token || clock.targetAt === null) {
+      return [chrome.alarms.clear(alarm.name)];
+    }
+    return [];
+  }));
+
+  const now = Date.now();
+  for (const [instanceId, clock] of clocks) {
+    if (!clock.running || clock.type === "stopwatch" || clock.targetAt === null || !clock.completionToken) continue;
+    if (clock.targetAt <= now + 1000) {
+      await handleClockAlarm(`start-tab-clock:${encodeURIComponent(instanceId)}:${encodeURIComponent(clock.completionToken)}`);
+    } else {
+      await scheduleClockAlarm(instanceId, clock);
+    }
+  }
+}
+
 async function redirectBrowserNewTab(tabId: number | undefined, url: string | undefined): Promise<void> {
   if (tabId === undefined || !url) return;
   if (isStartTabUrl(url) || !isBrowserNewTabUrl(url)) return;
   if (isNativeSplitViewPickerUrl(url)) return;
   if (await shouldBypassNativeNewTab(tabId)) return;
   if (!await shouldRedirectBrowserNewTabs()) return;
-
   try {
     await chrome.tabs.update(tabId, { url: chrome.runtime.getURL(START_TAB_PAGE) });
   } catch {
-    // Some Chromium-derived browsers do not expose their internal new tab page
-    // to extension tab updates. The manifest override remains the primary path.
+    // Some Chromium-derived browsers do not expose their internal new tab page.
   }
 }
 
@@ -180,12 +196,10 @@ async function shouldBypassNativeNewTab(tabId: number): Promise<boolean> {
   const items = await chrome.storage.local.get(NATIVE_NEW_TAB_BYPASS_KEY);
   const value = items[NATIVE_NEW_TAB_BYPASS_KEY] as NativeNewTabBypass | undefined;
   if (typeof value?.tabId !== "number" || typeof value.expiresAt !== "number") return false;
-
   if (value.expiresAt < Date.now()) {
     await chrome.storage.local.remove(NATIVE_NEW_TAB_BYPASS_KEY);
     return false;
   }
-
   if (value.tabId !== tabId) return false;
   await chrome.storage.local.remove(NATIVE_NEW_TAB_BYPASS_KEY);
   return true;
@@ -197,18 +211,12 @@ function isStartTabUrl(url: string): boolean {
 
 function isBrowserNewTabUrl(url: string): boolean {
   if (url === "about:newtab") return true;
-
   try {
     const parsed = new URL(url);
     const protocol = parsed.protocol.toLowerCase();
     const marker = `${parsed.hostname}${parsed.pathname}`.toLowerCase();
-
     if (!NEW_TAB_INTERNAL_SCHEMES.has(protocol)) return false;
-    return marker === "newtab/"
-      || marker.includes("newtab")
-      || marker.includes("new-tab")
-      || marker.includes("new_tab")
-      || marker.includes("local-ntp");
+    return marker === "newtab/" || marker.includes("newtab") || marker.includes("new-tab") || marker.includes("new_tab") || marker.includes("local-ntp");
   } catch {
     return false;
   }
@@ -234,7 +242,7 @@ async function rememberIfBlocked(url: string): Promise<void> {
 
 async function migrateAndSyncRules(): Promise<void> {
   await migrateLegacyStorage();
-  const settings = await getStartPageSettings();
-  await getStartPageRuntimeState(settings);
+  await getStartPageSettings();
+  await reconcileClockAlarms();
   await syncRules();
 }
