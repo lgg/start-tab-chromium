@@ -1,5 +1,4 @@
-import { getStartPageRuntimeState, setStartPageRuntimeState } from "../lib/start-page-runtime.js";
-import type { BlockInstance, StartPageRuntimeState } from "../lib/start-page-settings.js";
+import type { BlockInstance } from "../lib/start-page-settings.js";
 import type { BlockRenderContext } from "./block-renderer-types.js";
 import { renderBrowserPinned, renderCommands, renderGoogleCalendar, renderRecent, renderStats, renderWeather } from "./block-renderers-integrations.js";
 import { renderClock, renderLocalTasks, renderNote } from "./block-renderers-runtime.js";
@@ -26,12 +25,4 @@ export function renderBlockContent(block: BlockInstance, container: HTMLElement,
     case "browserPinned": renderBrowserPinned(container, context); break;
     case "stats": renderStats(container, context); break;
   }
-}
-
-export async function refreshRuntime(context: BlockRenderContext): Promise<void> {
-  context.runtime = await getStartPageRuntimeState(context.settings);
-}
-
-export async function persistRuntime(runtime: StartPageRuntimeState): Promise<void> {
-  await setStartPageRuntimeState(runtime);
 }
