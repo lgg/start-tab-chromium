@@ -23,6 +23,7 @@ import {
 import {
   hasBlockUserData,
   isBlockType,
+  isFutureStartPageSchema,
   isRecord,
   normalizeBlockConfig,
   normalizeStartPageSettings,
@@ -91,6 +92,7 @@ export {
   getTheme,
   hasBlockUserData,
   isBlockType,
+  isFutureStartPageSchema,
   isRecord,
   isSingletonBlockType,
   normalizeBlockConfig,
@@ -136,6 +138,13 @@ function jsonEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function blockContentEqual(left: BlockInstance, right: BlockInstance): boolean {
+  return jsonEqual(
+    { ...left, createdAt: 0, updatedAt: 0 },
+    { ...right, createdAt: 0, updatedAt: 0 },
+  );
+}
+
 function withBlockTimestamps(previous: StartPageSettings | null, next: StartPageSettings, now: number): StartPageSettings {
   const previousById = new Map(previous?.layout.blocks.map((block) => [block.id, block]) ?? []);
   return {
@@ -146,7 +155,7 @@ function withBlockTimestamps(previous: StartPageSettings | null, next: StartPage
       blocks: next.layout.blocks.map((block) => {
         const prior = previousById.get(block.id);
         const createdAt = prior?.createdAt || block.createdAt || now;
-        const updatedAt = prior && jsonEqual(prior, block) ? prior.updatedAt : block.updatedAt || now;
+        const updatedAt = prior && blockContentEqual(prior, block) ? prior.updatedAt : now;
         return { ...block, createdAt, updatedAt };
       }),
     },
@@ -168,6 +177,10 @@ async function persistSettings(settings: StartPageSettings, report?: MigrationRe
 export async function getStartPageSettings(): Promise<StartPageSettings> {
   const raw = await readRawSettings();
   const { settings, report } = normalizeStartPageSettingsWithReport(raw);
+  if (isFutureStartPageSchema(raw)) {
+    await chrome.storage.local.set({ [START_PAGE_MIGRATION_REPORT_KEY]: report });
+    return settings;
+  }
   if (jsonEqual(raw, settings)) return settings;
   const stamped = withBlockTimestamps(null, settings, Date.now());
   await persistSettings(stamped, report);
@@ -193,7 +206,11 @@ export async function getStartPageMigrationReport(): Promise<MigrationReport | n
 }
 
 export async function setStartPageSettings(value: StartPageSettings): Promise<ValidationIssue[]> {
-  const previous = normalizeStartPageSettings(await readRawSettings());
+  const raw = await readRawSettings();
+  if (isFutureStartPageSchema(raw)) {
+    throw new Error("Start Tab settings were created by a newer extension version and cannot be modified safely");
+  }
+  const previous = normalizeStartPageSettings(raw);
   const validation = validateStartPageSettings(value);
   const stamped = withBlockTimestamps(previous, validation.value, Date.now());
   await persistSettings(stamped);
@@ -266,7 +283,7 @@ export async function setBlockEnabled(id: string, enabled: boolean): Promise<Blo
   return updateBlockInstance(id, (block) => ({ ...block, enabled }));
 }
 
-export async function duplicateBlockInstance(id: string): Promise<BlockInstance> {
+export async function duplicateBlockInstance(id: string, title?: string): Promise<BlockInstance> {
   const current = await getStartPageSettings();
   const source = current.layout.blocks.find((block) => block.id === id);
   if (!source) throw new Error(`Block instance not found: ${id}`);
@@ -275,7 +292,7 @@ export async function duplicateBlockInstance(id: string): Promise<BlockInstance>
   const duplicate: BlockInstance = {
     ...cloneBlock(source),
     id: createBlockId(source.type),
-    title: `${source.title} copy`,
+    title: title?.trim() || source.title,
     column: Math.min(current.layout.columns, source.column + 1),
     row: source.row + 1,
     order: current.layout.blocks.length,
@@ -341,23 +358,46 @@ export async function setLayoutZone(zone: LayoutZone): Promise<StartPageSettings
   return getStartPageSettings();
 }
 
-export async function createCustomTheme(name: string, sourceThemeId?: string): Promise<StartPageTheme> {
-  const current = await getStartPageSettings();
-  const source = getTheme(current, sourceThemeId ?? current.themes.selectedThemeId);
+export function createCustomThemeDraft(
+  settings: StartPageSettings,
+  name: string,
+  sourceThemeId = settings.themes.selectedThemeId,
+): StartPageTheme {
+  const source = getTheme(settings, sourceThemeId);
   const now = Date.now();
-  const theme: StartPageTheme = {
+  return {
     ...cloneTheme(source),
     id: createThemeId(),
-    name: name.trim() || "Custom theme",
+    name: name.trim() || source.name,
     builtIn: false,
     createdAt: now,
     updatedAt: now,
   };
+}
+
+export async function saveNewCustomTheme(theme: StartPageTheme): Promise<StartPageTheme> {
+  const current = await getStartPageSettings();
+  const now = Date.now();
+  const fallback = cloneTheme(getTheme(current));
+  fallback.id = theme.id;
+  fallback.builtIn = false;
+  const normalized = normalizeTheme({ ...theme, builtIn: false, updatedAt: now }, fallback);
+  normalized.id = getBuiltInTheme(normalized.id) || current.themes.customThemes.some((item) => item.id === normalized.id)
+    ? createThemeId()
+    : normalized.id;
+  normalized.builtIn = false;
+  normalized.createdAt = now;
+  normalized.updatedAt = now;
   await setStartPageSettings({
     ...current,
-    themes: { selectedThemeId: theme.id, customThemes: [...current.themes.customThemes, theme] },
+    themes: { selectedThemeId: normalized.id, customThemes: [...current.themes.customThemes, normalized] },
   });
-  return theme;
+  return normalized;
+}
+
+export async function createCustomTheme(name: string, sourceThemeId?: string): Promise<StartPageTheme> {
+  const current = await getStartPageSettings();
+  return saveNewCustomTheme(createCustomThemeDraft(current, name, sourceThemeId));
 }
 
 export async function updateCustomTheme(theme: StartPageTheme): Promise<StartPageTheme> {
@@ -382,14 +422,14 @@ export async function updateCustomTheme(theme: StartPageTheme): Promise<StartPag
   return normalized;
 }
 
-export async function duplicateTheme(themeId: string): Promise<StartPageTheme> {
+export async function duplicateTheme(themeId: string, name?: string): Promise<StartPageTheme> {
   const current = await getStartPageSettings();
   const source = getTheme(current, themeId);
   const now = Date.now();
   const duplicate: StartPageTheme = {
     ...cloneTheme(source),
     id: createThemeId(),
-    name: `${source.name} copy`,
+    name: name?.trim() || source.name,
     builtIn: false,
     createdAt: now,
     updatedAt: now,
