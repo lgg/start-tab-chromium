@@ -10,9 +10,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export async function markStartTabDataChanged(at = Date.now()): Promise<void> {
+  const current = await readStartTabDataRevision();
   const revision: DataRevision = {
     version: 1,
-    updatedAt: Math.max(0, Math.round(at)),
+    updatedAt: Math.max(current, Math.max(0, Math.round(at))),
   };
   await chrome.storage.local.set({ [DATA_REVISION_KEY]: revision });
 }
