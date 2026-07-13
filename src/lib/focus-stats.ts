@@ -26,6 +26,7 @@ export interface FocusStats {
   totals: CountSet;
   byDay: Record<string, CountSet>;
   byDomain: Record<string, DomainStats>;
+  processedClockCompletions: Record<string, number>;
 }
 
 const EMPTY_COUNTS: CountSet = {
@@ -45,6 +46,7 @@ function emptyStats(): FocusStats {
     totals: { ...EMPTY_COUNTS },
     byDay: {},
     byDomain: {},
+    processedClockCompletions: {},
   };
 }
 
@@ -116,7 +118,7 @@ function normalizeDomainStats(value: unknown): DomainStats {
   };
 }
 
-function normalizeStats(value: unknown): FocusStats {
+export function normalizeFocusStats(value: unknown): FocusStats {
   if (!isRecord(value) || value.version !== 1) return emptyStats();
 
   const stats: FocusStats = {
@@ -124,6 +126,7 @@ function normalizeStats(value: unknown): FocusStats {
     totals: normalizeCounts(value.totals),
     byDay: {},
     byDomain: {},
+    processedClockCompletions: {},
   };
 
   if (isRecord(value.byDay)) {
@@ -138,12 +141,23 @@ function normalizeStats(value: unknown): FocusStats {
     }
   }
 
+  if (isRecord(value.processedClockCompletions)) {
+    const entries = Object.entries(value.processedClockCompletions)
+      .flatMap(([token, completedAt]) => typeof token === "string" && token.length <= 520
+        ? [[token, nonNegativeNumber(completedAt)] as const]
+        : [])
+      .filter((entry) => entry[1] > 0)
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, 512);
+    stats.processedClockCompletions = Object.fromEntries(entries);
+  }
+
   return stats;
 }
 
 async function readStats(): Promise<FocusStats> {
   const items = await chrome.storage.local.get(FOCUS_STATS_KEY);
-  return normalizeStats(items[FOCUS_STATS_KEY]);
+  return normalizeFocusStats(items[FOCUS_STATS_KEY]);
 }
 
 async function writeStats(stats: FocusStats): Promise<void> {
@@ -215,10 +229,18 @@ export async function recordFocusSessionStarted(): Promise<void> {
   await writeStats(stats);
 }
 
-export async function recordFocusSessionCompleted(focusTimeMs: number): Promise<void> {
+export async function recordFocusSessionCompleted(focusTimeMs: number, completionId?: string): Promise<void> {
   const stats = await readStats();
+  if (completionId && stats.processedClockCompletions[completionId]) return;
   addToCounts(stats.totals, { focusSessionsCompleted: 1, focusTimeMs });
   addToCounts(ensureDay(stats), { focusSessionsCompleted: 1, focusTimeMs });
+  if (completionId) {
+    stats.processedClockCompletions[completionId] = Date.now();
+    const newest = Object.entries(stats.processedClockCompletions)
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, 512);
+    stats.processedClockCompletions = Object.fromEntries(newest);
+  }
   await writeStats(stats);
 }
 
