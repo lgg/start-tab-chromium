@@ -44,29 +44,32 @@ function browserLanguages(): string[] {
 async function detectLocale(): Promise<SupportedLocale> {
   const override = await readLocaleOverride();
   if (override) return override;
-
   for (const language of browserLanguages()) {
     const supported = normalizeLocale(language);
     if (supported) return supported;
   }
-
   return DEFAULT_LOCALE;
 }
 
-async function loadCatalog(locale: SupportedLocale): Promise<LocaleCatalog> {
-  const response = await fetch(chrome.runtime.getURL(`_locales/${locale}/messages.json`));
-  if (!response.ok) throw new Error(`Unable to load locale catalog: ${locale}`);
+async function fetchCatalog(path: string, required: boolean): Promise<LocaleCatalog> {
+  const response = await fetch(chrome.runtime.getURL(path));
+  if (!response.ok) {
+    if (required) throw new Error(`Unable to load locale catalog: ${path}`);
+    return {};
+  }
   return (await response.json()) as LocaleCatalog;
+}
+
+async function loadCatalog(locale: SupportedLocale): Promise<LocaleCatalog> {
+  const base = await fetchCatalog(`_locales/${locale}/messages.json`, true);
+  const overlay = await fetchCatalog(`_locales/${locale}/roadmap-messages.json`, false);
+  return { ...base, ...overlay };
 }
 
 async function mergeCatalogs(locale: SupportedLocale, defaultCatalog: LocaleCatalog): Promise<{ locale: SupportedLocale; catalog: LocaleCatalog }> {
   if (locale === DEFAULT_LOCALE) return { locale, catalog: defaultCatalog };
-
   try {
-    return {
-      locale,
-      catalog: { ...defaultCatalog, ...(await loadCatalog(locale)) },
-    };
+    return { locale, catalog: { ...defaultCatalog, ...(await loadCatalog(locale)) } };
   } catch {
     return { locale: DEFAULT_LOCALE, catalog: defaultCatalog };
   }
@@ -84,17 +87,10 @@ export async function loadI18n(): Promise<I18n> {
   const preferredLocale = await detectLocale();
   const defaultCatalog = await loadCatalog(DEFAULT_LOCALE);
   const { locale, catalog } = await mergeCatalogs(preferredLocale, defaultCatalog);
-
   document.documentElement.lang = locale;
-
   const t = (key: string, replacements: Record<string, string | number> = {}): string => {
     const template = catalog[key]?.message ?? key;
     return renderTemplate(template, replacements);
   };
-
-  return {
-    locale,
-    t,
-    list: (key: string) => t(key).split("|").filter(Boolean),
-  };
+  return { locale, t, list: (key: string) => t(key).split("|").filter(Boolean) };
 }

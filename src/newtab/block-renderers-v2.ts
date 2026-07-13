@@ -2,7 +2,7 @@ import { getStartPageRuntimeState, setStartPageRuntimeState } from "../lib/start
 import type { BlockInstance, StartPageRuntimeState } from "../lib/start-page-settings.js";
 import type { BlockRenderContext } from "./block-renderer-types.js";
 import { renderBrowserPinned, renderCommands, renderGoogleCalendar, renderRecent, renderStats, renderWeather } from "./block-renderers-integrations.js";
-import { renderClock, renderLocalTasks, renderNote } from "./block-renderers-runtime.js";
+import { renderClock, renderLocalTasks, renderNote } from "./block-renderers-runtime-v2.js";
 import { renderDateTime, renderIp, renderLinkCollection, renderSearch } from "./block-renderers-static.js";
 
 export type { BlockRenderContext } from "./block-renderer-types.js";

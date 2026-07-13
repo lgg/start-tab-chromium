@@ -25,6 +25,7 @@ interface LayoutEditorOptions {
   paletteHost: HTMLElement;
   getRuntime: () => StartPageRuntimeState;
   requestRender: () => void;
+  previewBlock: (card: HTMLElement, block: BlockInstance, settings: StartPageSettings) => void;
   onSaved: (settings: StartPageSettings) => void;
 }
 
@@ -38,11 +39,7 @@ interface PointerSession {
   card: HTMLElement;
 }
 
-function element<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  className = "",
-  text = "",
-): HTMLElementTagNameMap[K] {
+function element<K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text = ""): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   node.className = className;
   node.textContent = text;
@@ -75,7 +72,8 @@ function overlap(left: BlockInstance, right: BlockInstance): boolean {
 
 function clampGrid(block: BlockInstance, columns: number): BlockInstance {
   const descriptor = blockDescriptor(block.type);
-  const width = Math.min(columns, Math.max(descriptor.minGridWidth, Math.round(block.width)));
+  const minimumWidth = Math.min(descriptor.minGridWidth, columns);
+  const width = Math.min(columns, Math.max(minimumWidth, Math.round(block.width)));
   const height = Math.max(descriptor.minGridHeight, Math.round(block.height));
   return {
     ...block,
@@ -185,12 +183,12 @@ export class LayoutEditor {
     const controls = element("div", "card-editor-controls");
     const drag = button("⠿", "icon-button card__drag-handle");
     drag.title = this.options.i18n.t("moveBlock");
-    drag.setAttribute("aria-label", this.options.i18n.t("moveBlock"));
+    drag.setAttribute("aria-label", drag.title);
     drag.addEventListener("pointerdown", (event) => this.startPointerSession(event, block.id, card, "move"));
 
     const settings = button("⚙", "icon-button");
     settings.title = this.options.i18n.t("editBlock");
-    settings.setAttribute("aria-label", this.options.i18n.t("editBlock"));
+    settings.setAttribute("aria-label", settings.title);
     settings.addEventListener("click", () => void this.configure(block.id));
 
     const enabled = button(block.enabled ? "◉" : "○", "icon-button");
@@ -242,8 +240,7 @@ export class LayoutEditor {
     const block = this.draft.layout.blocks.find((candidate) => candidate.id === id);
     if (!block) return;
     const configured = await editBlockInstance(block, this.options.i18n);
-    if (!configured) return;
-    this.updateBlock(id, () => configured);
+    if (configured) this.updateBlock(id, () => configured);
   }
 
   private duplicate(id: string): void {
@@ -261,9 +258,7 @@ export class LayoutEditor {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     });
-    const placed = this.draft.layout.mode === "grid"
-      ? placeGridBlock(copy, this.draft.layout.blocks, this.draft.layout.columns)
-      : copy;
+    const placed = this.draft.layout.mode === "grid" ? placeGridBlock(copy, this.draft.layout.blocks, this.draft.layout.columns) : copy;
     this.mutate((settings) => ({ ...settings, layout: { ...settings.layout, blocks: [...settings.layout.blocks, placed] } }));
   }
 
@@ -307,19 +302,14 @@ export class LayoutEditor {
   }
 
   private setMode(mode: LayoutMode): void {
-    if (this.draft.layout.mode === mode) return;
-    this.mutate((settings) => ({ ...settings, layout: { ...settings.layout, mode } }));
+    if (this.draft.layout.mode !== mode) this.mutate((settings) => ({ ...settings, layout: { ...settings.layout, mode } }));
   }
 
   private setZone(zone: LayoutZone): void {
     if (this.draft.layout.zone === zone) return;
     this.mutate((settings) => ({
       ...settings,
-      layout: {
-        ...settings.layout,
-        zone,
-        blocks: settings.layout.blocks.map((block) => ({ ...block, zone })),
-      },
+      layout: { ...settings.layout, zone, blocks: settings.layout.blocks.map((block) => ({ ...block, zone })) },
     }));
   }
 
@@ -328,7 +318,6 @@ export class LayoutEditor {
     toolbarHost.replaceChildren();
     paletteHost.replaceChildren();
     toolbarHost.hidden = false;
-
     if (!this.active) {
       const edit = button(i18n.t("editLayout"), "button button--primary");
       edit.addEventListener("click", () => this.enter());
@@ -343,7 +332,7 @@ export class LayoutEditor {
     const zone = select<LayoutZone>(this.draft.layout.zone, [["contained", i18n.t("layoutZoneContained")], ["full", i18n.t("layoutZoneFull")]]);
     zone.setAttribute("aria-label", i18n.t("layoutZone"));
     zone.addEventListener("change", () => this.setZone(zone.value as LayoutZone));
-    const modeLabel = element("span", "editor-toolbar__status", i18n.t("layoutEditorStatus", {
+    const status = element("span", "editor-toolbar__status", i18n.t("layoutEditorStatus", {
       mode: i18n.t(this.draft.layout.mode === "grid" ? "layoutModeGrid" : "layoutModeFree"),
       zone: i18n.t(this.draft.layout.zone === "contained" ? "layoutZoneContained" : "layoutZoneFull"),
     }));
@@ -351,7 +340,7 @@ export class LayoutEditor {
     save.addEventListener("click", () => void this.save());
     const cancel = button(i18n.t("cancel"), "button button--secondary");
     cancel.addEventListener("click", () => this.cancel());
-    toolbarHost.append(modeLabel, mode, zone, cancel, save);
+    toolbarHost.append(status, mode, zone, cancel, save);
 
     paletteHost.hidden = false;
     const heading = element("h2", "palette__title", i18n.t("blockPalette"));
@@ -365,39 +354,26 @@ export class LayoutEditor {
         element("span", "palette-tile__description", i18n.t(descriptor.descriptionKey)),
         element("span", "palette-tile__badge", i18n.t(descriptor.repeatable ? "repeatableBlock" : "singletonBlock")),
       );
-      if (!available) {
-        tile.title = i18n.t("singletonAlreadyAdded");
-        tile.setAttribute("aria-label", `${i18n.t(descriptor.titleKey)}. ${i18n.t("singletonAlreadyAdded")}`);
-      } else {
+      if (available) {
         tile.setAttribute("aria-label", i18n.t("addBlockNamed", { title: i18n.t(descriptor.titleKey) }));
         tile.addEventListener("click", () => this.add(descriptor.type));
+      } else {
+        tile.title = i18n.t("singletonAlreadyAdded");
+        tile.setAttribute("aria-label", `${i18n.t(descriptor.titleKey)}. ${tile.title}`);
       }
       list.append(tile);
     }
     paletteHost.append(heading, list);
   }
 
-  private startPointerSession(
-    event: PointerEvent,
-    blockId: string,
-    card: HTMLElement,
-    kind: PointerSession["kind"],
-  ): void {
+  private startPointerSession(event: PointerEvent, blockId: string, card: HTMLElement, kind: PointerSession["kind"]): void {
     if (event.button !== 0) return;
     const block = this.draft.layout.blocks.find((candidate) => candidate.id === blockId);
     if (!block) return;
     event.preventDefault();
     event.stopPropagation();
     card.setPointerCapture(event.pointerId);
-    this.pointerSession = {
-      pointerId: event.pointerId,
-      blockId,
-      kind,
-      startX: event.clientX,
-      startY: event.clientY,
-      startBlock: cloneBlock(block),
-      card,
-    };
+    this.pointerSession = { pointerId: event.pointerId, blockId, kind, startX: event.clientX, startY: event.clientY, startBlock: cloneBlock(block), card };
     card.classList.add(kind === "move" ? "card--moving" : "card--resizing");
     const move = (moveEvent: PointerEvent): void => this.handlePointerMove(moveEvent);
     const end = (endEvent: PointerEvent): void => {
@@ -405,12 +381,16 @@ export class LayoutEditor {
       card.removeEventListener("pointermove", move);
       card.removeEventListener("pointerup", end);
       card.removeEventListener("pointercancel", end);
+      card.removeEventListener("lostpointercapture", end);
       card.classList.remove("card--moving", "card--resizing");
       this.pointerSession = null;
+      this.renderControls();
+      this.options.requestRender();
     };
     card.addEventListener("pointermove", move);
     card.addEventListener("pointerup", end);
     card.addEventListener("pointercancel", end);
+    card.addEventListener("lostpointercapture", end);
   }
 
   private handlePointerMove(event: PointerEvent): void {
@@ -421,7 +401,6 @@ export class LayoutEditor {
     const layout = this.draft.layout;
     const gridElement = session.card.parentElement;
     if (!gridElement) return;
-
     let candidate = cloneBlock(session.startBlock);
     if (layout.mode === "free") {
       if (session.kind === "move") {
@@ -448,7 +427,7 @@ export class LayoutEditor {
     }
     this.updateBlockWithoutRender(session.blockId, candidate);
     this.dirty = true;
-    this.options.requestRender();
+    this.options.previewBlock(session.card, candidate, this.draft);
   }
 
   private updateBlockWithoutRender(id: string, replacement: BlockInstance): void {

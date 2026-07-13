@@ -58,15 +58,16 @@ let i18n: I18n;
 let savedSettings: StartPageSettings;
 let runtime: StartPageRuntimeState;
 let editor: LayoutEditor;
-let cleanups: Array<() => void> = [];
+let renderCleanups: Array<() => void> = [];
 let renderQueued = false;
+let disposed = false;
 
 function clearRenderCleanups(): void {
-  for (const cleanup of cleanups.splice(0)) cleanup();
+  for (const cleanup of renderCleanups.splice(0)) cleanup();
 }
 
-function registerCleanup(cleanup: () => void): void {
-  cleanups.push(cleanup);
+function registerRenderCleanup(cleanup: () => void): void {
+  renderCleanups.push(cleanup);
 }
 
 function announce(message: string): void {
@@ -102,12 +103,19 @@ function cardFor(block: BlockInstance, context: BlockRenderContext): HTMLElement
 }
 
 function positionCard(card: HTMLElement, block: BlockInstance, settings: StartPageSettings): void {
+  card.style.removeProperty("grid-column");
+  card.style.removeProperty("grid-row");
+  card.style.removeProperty("left");
+  card.style.removeProperty("top");
+  card.style.removeProperty("width");
+  card.style.removeProperty("height");
   if (settings.layout.mode === "grid") {
     card.style.gridColumn = `${block.column} / span ${block.width}`;
     card.style.gridRow = `${block.row} / span ${block.height}`;
     card.style.minHeight = `calc(${block.height} * var(--row-height) + (${block.height} - 1) * var(--layout-gap))`;
     return;
   }
+  card.style.minHeight = "";
   card.style.left = `${block.free.x}px`;
   card.style.top = `${block.free.y}px`;
   card.style.width = `${block.free.width}px`;
@@ -131,12 +139,14 @@ function updateLayoutMetrics(settings: StartPageSettings, blocks: readonly Block
   page.style.setProperty("--contained-max-width", `${layout.containedMaxWidth}px`);
   grid.className = layout.mode === "grid" ? "grid grid--grid" : "grid grid--free";
 
+  const viewportWidth = Math.max(320, window.innerWidth - (layout.zone === "contained" ? 48 : 32));
+  const standardWidth = layout.zone === "contained"
+    ? Math.min(layout.containedMaxWidth, viewportWidth)
+    : viewportWidth;
+
   if (layout.mode === "grid") {
     const maxColumn = blocks.reduce((maximum, block) => Math.max(maximum, block.column + block.width - 1), layout.columns);
     const maxRow = blocks.reduce((maximum, block) => Math.max(maximum, block.row + block.height - 1), 1);
-    const standardWidth = layout.zone === "contained"
-      ? Math.min(layout.containedMaxWidth, Math.max(640, window.innerWidth - 48))
-      : Math.max(320, window.innerWidth - 32);
     const columnWidth = Math.max(48, (standardWidth - layout.gap * (layout.columns - 1)) / layout.columns);
     const neededWidth = maxColumn <= layout.columns
       ? standardWidth
@@ -146,9 +156,6 @@ function updateLayoutMetrics(settings: StartPageSettings, blocks: readonly Block
   } else {
     const contentWidth = blocks.reduce((maximum, block) => Math.max(maximum, block.free.x + block.free.width), 0);
     const contentHeight = blocks.reduce((maximum, block) => Math.max(maximum, block.free.y + block.free.height), 0);
-    const standardWidth = layout.zone === "contained"
-      ? Math.min(layout.containedMaxWidth, Math.max(640, window.innerWidth - 48))
-      : Math.max(320, window.innerWidth - 32);
     grid.style.width = `${Math.ceil(Math.max(standardWidth, contentWidth))}px`;
     grid.style.minHeight = `${Math.ceil(Math.max(window.innerHeight - 96, contentHeight))}px`;
   }
@@ -164,6 +171,7 @@ function updateSettingsButton(settings: StartPageSettings): void {
 }
 
 function render(): void {
+  if (disposed) return;
   clearRenderCleanups();
   const settings = editor.settings;
   const blocks = visibleBlocks(settings);
@@ -180,14 +188,14 @@ function render(): void {
       await setStartPageRuntimeState(next);
     },
     requestRender: () => queueStateRefresh(),
-    registerCleanup,
+    registerCleanup: registerRenderCleanup,
   };
   grid.replaceChildren(...blocks.map((block) => cardFor(block, context)));
   if (blocks.length === 0) grid.append(element("p", "empty-layout", i18n.t("emptyLayout")));
 }
 
 function queueRender(): void {
-  if (renderQueued) return;
+  if (renderQueued || disposed) return;
   renderQueued = true;
   window.requestAnimationFrame(() => {
     renderQueued = false;
@@ -196,7 +204,7 @@ function queueRender(): void {
 }
 
 function queueStateRefresh(): void {
-  if (renderQueued) return;
+  if (renderQueued || disposed) return;
   renderQueued = true;
   window.requestAnimationFrame(() => {
     void refreshState().finally(() => {
@@ -281,14 +289,37 @@ async function showOnboarding(): Promise<void> {
 }
 
 function handleStorageChange(changes: Record<string, chrome.storage.StorageChange>, areaName: string): void {
-  if (areaName !== "local") return;
-  if (changes.startPageSettings || changes.startPageRuntimeState || changes.localeOverride || changes.focusStats) {
+  if (areaName !== "local" || disposed) return;
+  if (changes.localeOverride) {
+    location.reload();
+    return;
+  }
+  if (changes.startPageSettings || changes.startPageRuntimeState || changes.focusStats) {
     if (editor.hasUnsavedChanges && changes.startPageSettings) {
       announce(i18n.t("externalSettingsChangeIgnored"));
       return;
     }
     queueStateRefresh();
   }
+}
+
+function handleResize(): void {
+  queueRender();
+}
+
+function handleBeforeUnload(event: BeforeUnloadEvent): void {
+  if (!editor.hasUnsavedChanges) return;
+  event.preventDefault();
+  event.returnValue = "";
+}
+
+function dispose(): void {
+  if (disposed) return;
+  disposed = true;
+  clearRenderCleanups();
+  chrome.storage.onChanged.removeListener(handleStorageChange);
+  window.removeEventListener("resize", handleResize);
+  window.removeEventListener("beforeunload", handleBeforeUnload);
 }
 
 async function init(): Promise<void> {
@@ -302,6 +333,10 @@ async function init(): Promise<void> {
     paletteHost,
     getRuntime: () => runtime,
     requestRender: queueRender,
+    previewBlock: (card, block, settings) => {
+      positionCard(card, block, settings);
+      updateLayoutMetrics(settings, visibleBlocks(settings));
+    },
     onSaved: (settings) => {
       savedSettings = settings;
       announce(i18n.t("layoutSaved"));
@@ -314,13 +349,9 @@ async function init(): Promise<void> {
   settingsButton.addEventListener("click", () => void chrome.runtime.openOptionsPage());
   nativeNewTabButton.addEventListener("click", () => void openNativeNewTab());
   chrome.storage.onChanged.addListener(handleStorageChange);
-  window.addEventListener("resize", queueRender);
-  window.addEventListener("beforeunload", (event) => {
-    if (!editor.hasUnsavedChanges) return;
-    event.preventDefault();
-    event.returnValue = "";
-  });
-  registerCleanup(() => chrome.storage.onChanged.removeListener(handleStorageChange));
+  window.addEventListener("resize", handleResize);
+  window.addEventListener("beforeunload", handleBeforeUnload);
+  window.addEventListener("pagehide", dispose, { once: true });
   render();
   await showOnboarding();
 }

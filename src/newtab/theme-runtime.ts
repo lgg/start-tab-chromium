@@ -4,7 +4,7 @@ function cssUrl(value: string): string {
   return `url("${value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}")`;
 }
 
-function clearEffectVariables(root: HTMLElement): void {
+function clearEffectState(root: HTMLElement, background: HTMLElement): void {
   for (const property of [
     "--effect-speed",
     "--effect-intensity",
@@ -15,9 +15,9 @@ function clearEffectVariables(root: HTMLElement): void {
     "--effect-density",
     "--effect-colors",
   ]) root.style.removeProperty(property);
-  delete root.dataset.effect;
-  delete root.dataset.effectAnimated;
-  delete root.dataset.scanlines;
+  delete background.dataset.effect;
+  delete background.dataset.effectAnimated;
+  delete background.dataset.scanlines;
 }
 
 export function applyTheme(theme: StartPageTheme, background: HTMLElement): void {
@@ -37,7 +37,7 @@ export function applyTheme(theme: StartPageTheme, background: HTMLElement): void
   root.style.setProperty("--heading-scale", String(tokens.headingScale));
   root.style.setProperty("--radius", `${tokens.borderRadius}px`);
   root.style.setProperty("--spacing", `${tokens.spacing}px`);
-  clearEffectVariables(background);
+  clearEffectState(root, background);
   background.style.backgroundImage = "";
   background.style.backgroundColor = "";
   background.style.backgroundSize = "";

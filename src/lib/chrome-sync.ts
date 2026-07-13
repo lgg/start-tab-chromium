@@ -6,13 +6,17 @@ import {
   migrateBackup,
   type BackupBundle,
 } from "./backup.js";
+import {
+  DATA_REVISION_KEY,
+  markStartTabDataChanged,
+  readStartTabDataRevision,
+} from "./data-revision.js";
 import { isRecord } from "./start-page-settings.js";
 
 const META_KEY = "startTabSyncMeta";
 const LOCAL_META_KEY = "startTabLocalSyncMeta";
 const CHUNK_PREFIX = "startTabSyncChunk";
 const DEVICE_ID_KEY = "startTabDeviceId";
-export const DATA_REVISION_KEY = "startTabDataRevision";
 const CHUNK_MAX_BYTES = 7000;
 const MAX_SYNC_CHUNKS = 12;
 
@@ -36,12 +40,13 @@ export interface SyncMeta {
   backupVersion: number;
 }
 
-export type ChromeSyncResult = "uploaded" | "restored" | "unchanged";
-
-interface DataRevision {
-  version: 1;
-  updatedAt: number;
+interface ParsedMeta {
+  meta: SyncMeta;
+  legacy: boolean;
 }
+
+export type ChromeSyncResult = "uploaded" | "restored" | "unchanged";
+export { DATA_REVISION_KEY, markStartTabDataChanged };
 
 function chunkKey(index: number): string {
   return `${CHUNK_PREFIX}${index}`;
@@ -63,12 +68,7 @@ async function checksum(value: string): Promise<string> {
 }
 
 function canonicalBackupContent(bundle: BackupBundle): string {
-  return JSON.stringify({
-    app: bundle.app,
-    version: bundle.version,
-    schema: bundle.schema,
-    storage: bundle.storage,
-  });
+  return JSON.stringify({ app: bundle.app, version: bundle.version, schema: bundle.schema, storage: bundle.storage });
 }
 
 function chunkForChromeSync(value: string): string[] {
@@ -76,18 +76,16 @@ function chunkForChromeSync(value: string): string[] {
   const chunks: string[] = [];
   let current = "";
   let currentBytes = 0;
-
-  for (const char of value) {
-    const charBytes = encoder.encode(char).byteLength;
-    if (current && currentBytes + charBytes > CHUNK_MAX_BYTES) {
+  for (const character of value) {
+    const bytes = encoder.encode(character).byteLength;
+    if (current && currentBytes + bytes > CHUNK_MAX_BYTES) {
       chunks.push(current);
       current = "";
       currentBytes = 0;
     }
-    current += char;
-    currentBytes += charBytes;
+    current += character;
+    currentBytes += bytes;
   }
-
   if (current || value.length === 0) chunks.push(current);
   return chunks;
 }
@@ -146,18 +144,23 @@ function normalizeLegacyMeta(meta: LegacySyncMeta): SyncMeta {
     deviceId: meta.deviceId,
     snapshotId: `legacy-${meta.checksum.slice(0, 16)}`,
     checksum: meta.checksum,
-    contentChecksum: meta.checksum,
+    contentChecksum: "0".repeat(64),
     chunks: meta.chunks,
     backupVersion: 3,
   };
 }
 
-function parseMeta(value: unknown): SyncMeta | null {
-  if (isSyncMeta(value)) return value;
-  return isLegacySyncMeta(value) ? normalizeLegacyMeta(value) : null;
+function parseMeta(value: unknown): ParsedMeta | null {
+  if (isSyncMeta(value)) return { meta: value, legacy: false };
+  return isLegacySyncMeta(value) ? { meta: normalizeLegacyMeta(value), legacy: true } : null;
 }
 
-async function readLocalMeta(): Promise<SyncMeta | null> {
+async function readRemoteMeta(): Promise<ParsedMeta | null> {
+  const result = await chrome.storage.sync.get(META_KEY);
+  return parseMeta(result[META_KEY]);
+}
+
+async function readLocalMeta(): Promise<ParsedMeta | null> {
   const items = await chrome.storage.local.get(LOCAL_META_KEY);
   return parseMeta(items[LOCAL_META_KEY]);
 }
@@ -166,26 +169,11 @@ async function writeLocalMeta(meta: SyncMeta): Promise<void> {
   await chrome.storage.local.set({ [LOCAL_META_KEY]: meta });
 }
 
-async function readDataRevision(bundle: BackupBundle): Promise<number> {
-  const items = await chrome.storage.local.get(DATA_REVISION_KEY);
-  const revision = items[DATA_REVISION_KEY];
-  if (isRecord(revision) && revision.version === 1 && typeof revision.updatedAt === "number" && Number.isFinite(revision.updatedAt)) {
-    return Math.max(0, revision.updatedAt);
-  }
-  return backupModifiedAt(bundle);
-}
-
-export async function markStartTabDataChanged(at = Date.now()): Promise<void> {
-  const revision: DataRevision = { version: 1, updatedAt: Math.max(0, Math.round(at)) };
-  await chrome.storage.local.set({ [DATA_REVISION_KEY]: revision });
-}
-
 export async function getChromeSyncBackupMeta(): Promise<SyncMeta | null> {
-  const metaResult = await chrome.storage.sync.get(META_KEY);
-  return parseMeta(metaResult[META_KEY]);
+  return (await readRemoteMeta())?.meta ?? null;
 }
 
-async function prepareSnapshot(bundle = await exportBackup()): Promise<{
+async function prepareSnapshot(inputBundle?: BackupBundle): Promise<{
   bundle: BackupBundle;
   json: string;
   chunks: string[];
@@ -193,6 +181,7 @@ async function prepareSnapshot(bundle = await exportBackup()): Promise<{
   contentChecksum: string;
   contentUpdatedAt: number;
 }> {
+  const bundle = inputBundle ?? await exportBackup();
   const json = JSON.stringify(bundle);
   const chunks = chunkForChromeSync(json);
   if (chunks.length > MAX_SYNC_CHUNKS) {
@@ -204,13 +193,13 @@ async function prepareSnapshot(bundle = await exportBackup()): Promise<{
     chunks,
     checksum: await checksum(json),
     contentChecksum: await checksum(canonicalBackupContent(bundle)),
-    contentUpdatedAt: await readDataRevision(bundle),
+    contentUpdatedAt: await readStartTabDataRevision(backupModifiedAt(bundle)),
   };
 }
 
 async function writeRemoteSnapshot(snapshot: Awaited<ReturnType<typeof prepareSnapshot>>): Promise<SyncMeta> {
   const existing = await chrome.storage.sync.get(META_KEY);
-  const previousChunks = parseMeta(existing[META_KEY])?.chunks ?? 0;
+  const previousChunks = parseMeta(existing[META_KEY])?.meta.chunks ?? 0;
   const meta: SyncMeta = {
     version: 3,
     updatedAt: new Date().toISOString(),
@@ -223,14 +212,9 @@ async function writeRemoteSnapshot(snapshot: Awaited<ReturnType<typeof prepareSn
     backupVersion: snapshot.bundle.version,
   };
   const payload: Record<string, unknown> = { [META_KEY]: meta };
-  for (let index = 0; index < snapshot.chunks.length; index += 1) {
-    payload[chunkKey(index)] = snapshot.chunks[index] ?? "";
-  }
+  snapshot.chunks.forEach((chunk, index) => { payload[chunkKey(index)] = chunk; });
   await chrome.storage.sync.set(payload);
-  const staleKeys = Array.from(
-    { length: Math.max(0, previousChunks - snapshot.chunks.length) },
-    (_, index) => chunkKey(index + snapshot.chunks.length),
-  );
+  const staleKeys = Array.from({ length: Math.max(0, previousChunks - snapshot.chunks.length) }, (_, index) => chunkKey(index + snapshot.chunks.length));
   if (staleKeys.length > 0) await chrome.storage.sync.remove(staleKeys);
   await writeLocalMeta(meta);
   return meta;
@@ -240,67 +224,86 @@ export async function uploadChromeSyncBackup(): Promise<void> {
   await writeRemoteSnapshot(await prepareSnapshot());
 }
 
-async function readRemoteBundle(meta: SyncMeta): Promise<BackupBundle> {
+async function readRemoteBundle(parsed: ParsedMeta): Promise<BackupBundle> {
+  const { meta } = parsed;
   const keys = Array.from({ length: meta.chunks }, (_, index) => chunkKey(index));
-  const chunkValues = await chrome.storage.sync.get(keys);
-  const chunks = keys.map((key) => chunkValues[key]);
-  if (!chunks.every((chunk): chunk is string => typeof chunk === "string")) {
-    throw new Error("Chrome sync backup is incomplete");
-  }
+  const values = await chrome.storage.sync.get(keys);
+  const chunks = keys.map((key) => values[key]);
+  if (!chunks.every((chunk): chunk is string => typeof chunk === "string")) throw new Error("Chrome sync backup is incomplete");
   const json = chunks.join("");
-  if (await checksum(json) !== meta.checksum) {
-    throw new Error("Chrome sync backup checksum mismatch");
-  }
-  let parsed: unknown;
+  if (await checksum(json) !== meta.checksum) throw new Error("Chrome sync backup checksum mismatch");
+  let value: unknown;
   try {
-    parsed = JSON.parse(json);
+    value = JSON.parse(json);
   } catch {
     throw new Error("Chrome sync backup contains invalid JSON");
   }
-  const bundle = migrateBackup(parsed);
-  if (meta.version === 3 && await checksum(canonicalBackupContent(bundle)) !== meta.contentChecksum) {
+  const bundle = migrateBackup(value);
+  if (!parsed.legacy && await checksum(canonicalBackupContent(bundle)) !== meta.contentChecksum) {
     throw new Error("Chrome sync backup content checksum mismatch");
   }
   return bundle;
 }
 
-export async function restoreChromeSyncBackup(): Promise<void> {
-  const meta = await getChromeSyncBackupMeta();
-  if (!meta) throw new Error("No Start Tab backup found in chrome.storage.sync");
-  const bundle = await readRemoteBundle(meta);
+async function restoreParsedSnapshot(parsed: ParsedMeta): Promise<void> {
+  const bundle = await readRemoteBundle(parsed);
   await importBackup(bundle);
-  await markStartTabDataChanged(meta.contentUpdatedAt);
-  await writeLocalMeta(meta);
+  await markStartTabDataChanged(parsed.meta.contentUpdatedAt);
+  if (parsed.legacy) {
+    await writeRemoteSnapshot(await prepareSnapshot());
+  } else {
+    await writeLocalMeta(parsed.meta);
+  }
+}
+
+export async function restoreChromeSyncBackup(): Promise<void> {
+  const parsed = await readRemoteMeta();
+  if (!parsed) throw new Error("No Start Tab backup found in chrome.storage.sync");
+  await restoreParsedSnapshot(parsed);
 }
 
 export async function syncChromeSyncBackup(): Promise<ChromeSyncResult> {
-  const remoteMeta = await getChromeSyncBackupMeta();
-  if (!remoteMeta) {
+  const remote = await readRemoteMeta();
+  if (!remote) {
     await uploadChromeSyncBackup();
     return "uploaded";
   }
 
   const localSnapshot = await prepareSnapshot();
-  if (localSnapshot.contentChecksum === remoteMeta.contentChecksum) {
-    await writeLocalMeta(remoteMeta);
-    return "unchanged";
-  }
-
-  const localMeta = await readLocalMeta();
-  if (!localMeta) {
-    if (remoteMeta.contentUpdatedAt > localSnapshot.contentUpdatedAt) {
-      await restoreChromeSyncBackup();
+  if (remote.legacy) {
+    const remoteBundle = await readRemoteBundle(remote);
+    const remoteChecksum = await checksum(canonicalBackupContent(remoteBundle));
+    if (remoteChecksum === localSnapshot.contentChecksum) {
+      await writeRemoteSnapshot(localSnapshot);
+      return "unchanged";
+    }
+    if (remote.meta.contentUpdatedAt > localSnapshot.contentUpdatedAt) {
+      await restoreParsedSnapshot(remote);
       return "restored";
     }
     await writeRemoteSnapshot(localSnapshot);
     return "uploaded";
   }
 
-  const localChanged = localSnapshot.contentChecksum !== localMeta.contentChecksum;
-  const remoteChanged = remoteMeta.contentChecksum !== localMeta.contentChecksum;
+  if (localSnapshot.contentChecksum === remote.meta.contentChecksum) {
+    await writeLocalMeta(remote.meta);
+    return "unchanged";
+  }
 
+  const local = await readLocalMeta();
+  if (!local || local.legacy) {
+    if (remote.meta.contentUpdatedAt > localSnapshot.contentUpdatedAt) {
+      await restoreParsedSnapshot(remote);
+      return "restored";
+    }
+    await writeRemoteSnapshot(localSnapshot);
+    return "uploaded";
+  }
+
+  const localChanged = localSnapshot.contentChecksum !== local.meta.contentChecksum;
+  const remoteChanged = remote.meta.contentChecksum !== local.meta.contentChecksum;
   if (!localChanged && remoteChanged) {
-    await restoreChromeSyncBackup();
+    await restoreParsedSnapshot(remote);
     return "restored";
   }
   if (localChanged && !remoteChanged) {
@@ -308,12 +311,11 @@ export async function syncChromeSyncBackup(): Promise<ChromeSyncResult> {
     return "uploaded";
   }
   if (!localChanged && !remoteChanged) {
-    await writeLocalMeta(remoteMeta);
+    await writeLocalMeta(remote.meta);
     return "unchanged";
   }
-
-  if (remoteMeta.contentUpdatedAt > localSnapshot.contentUpdatedAt) {
-    await restoreChromeSyncBackup();
+  if (remote.meta.contentUpdatedAt > localSnapshot.contentUpdatedAt) {
+    await restoreParsedSnapshot(remote);
     return "restored";
   }
   await writeRemoteSnapshot(localSnapshot);
