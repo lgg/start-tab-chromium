@@ -1,4 +1,5 @@
 import { normalizeBlockedSites, normalizeLastBlockedUrls, syncRules } from "./blocklist.js";
+import { markStartTabDataChanged } from "./data-revision.js";
 import { FOCUS_STATS_KEY } from "./focus-stats.js";
 import {
   LEGACY_INSTANCE_RUNTIME_KEY,
@@ -75,13 +76,8 @@ function isBackupLike(value: unknown): value is BackupLike {
     && isRecord(value.storage);
 }
 
-function defaultOnboarding(): Record<string, boolean> {
-  return { onboarded: false };
-}
-
 function normalizeOnboarding(value: unknown): Record<string, boolean> {
-  if (!isRecord(value)) return defaultOnboarding();
-  return { onboarded: value.onboarded === true };
+  return { onboarded: isRecord(value) && value.onboarded === true };
 }
 
 function normalizeLocale(value: unknown): "en" | "ru" | null {
@@ -102,8 +98,8 @@ function normalizedStorage(backup: BackupLike): Record<string, unknown> {
     [START_PAGE_SETTINGS_KEY]: settings,
     [START_PAGE_RUNTIME_KEY]: runtime,
     startPageOnboarding: normalizeOnboarding(backup.storage.startPageOnboarding),
+    [FOCUS_STATS_KEY]: backup.storage[FOCUS_STATS_KEY] ?? undefined,
   };
-  if (backup.storage[FOCUS_STATS_KEY] !== undefined) storage[FOCUS_STATS_KEY] = backup.storage[FOCUS_STATS_KEY];
   if (locale) storage.localeOverride = locale;
   return storage;
 }
@@ -114,10 +110,7 @@ function currentSchema(storage: Record<string, unknown>, exportedAt: string, sna
     version: BACKUP_VERSION,
     exportedAt,
     snapshotId,
-    schema: {
-      version: BACKUP_VERSION,
-      storageKeys: [...STORAGE_KEYS],
-    },
+    schema: { version: BACKUP_VERSION, storageKeys: [...STORAGE_KEYS] },
     storage,
   };
 }
@@ -166,6 +159,7 @@ export async function importBackup(value: unknown): Promise<BackupImportReport> 
     await chrome.storage.local.set(next);
     if (optionalRemovals.length > 0) await chrome.storage.local.remove(optionalRemovals);
     await syncRules();
+    await markStartTabDataChanged();
   } catch (error) {
     await restoreStorageSnapshot(current);
     await syncRules();
