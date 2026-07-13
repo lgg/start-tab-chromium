@@ -1,4 +1,4 @@
-export * from "./start-page-settings.ts";
+export * from "./start-page-settings.js";
 
 import {
   DEFAULT_SETTINGS,
