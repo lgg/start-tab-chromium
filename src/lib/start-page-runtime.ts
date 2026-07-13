@@ -45,76 +45,31 @@ function isClockBlock(block: BlockInstance): block is Extract<BlockInstance, { t
 export function defaultClockForBlock(block: Extract<BlockInstance, { type: ClockBlockType }>): ClockRuntimeState {
   switch (block.type) {
     case "timer":
-      return {
-        type: "timer",
-        running: false,
-        startedAt: null,
-        accumulatedMs: 0,
-        durationMs: block.config.durationSeconds * 1000,
-        targetAt: null,
-        phase: null,
-        focusSessionStartedAt: null,
-        completionToken: null,
-        lastCompletedToken: null,
-      };
+      return { type: "timer", running: false, startedAt: null, accumulatedMs: 0, durationMs: block.config.durationSeconds * 1000, targetAt: null, phase: null, focusSessionStartedAt: null, completionToken: null, lastCompletedToken: null };
     case "stopwatch":
-      return {
-        type: "stopwatch",
-        running: false,
-        startedAt: null,
-        accumulatedMs: 0,
-        durationMs: 0,
-        targetAt: null,
-        phase: null,
-        focusSessionStartedAt: null,
-        completionToken: null,
-        lastCompletedToken: null,
-      };
+      return { type: "stopwatch", running: false, startedAt: null, accumulatedMs: 0, durationMs: 0, targetAt: null, phase: null, focusSessionStartedAt: null, completionToken: null, lastCompletedToken: null };
     case "pomodoro":
-      return {
-        type: "pomodoro",
-        running: false,
-        startedAt: null,
-        accumulatedMs: 0,
-        durationMs: block.config.workSeconds * 1000,
-        targetAt: null,
-        phase: "work",
-        focusSessionStartedAt: null,
-        completionToken: null,
-        lastCompletedToken: null,
-      };
+      return { type: "pomodoro", running: false, startedAt: null, accumulatedMs: 0, durationMs: block.config.workSeconds * 1000, targetAt: null, phase: "work", focusSessionStartedAt: null, completionToken: null, lastCompletedToken: null };
   }
 }
 
 function normalizeClock(block: Extract<BlockInstance, { type: ClockBlockType }>, value: unknown): ClockRuntimeState {
   const fallback = defaultClockForBlock(block);
   if (!isRecord(value)) return fallback;
-  const phase: PomodoroPhase | null = block.type === "pomodoro" && value.phase === "break"
-    ? "break"
-    : block.type === "pomodoro"
-      ? "work"
-      : null;
+  const phase: PomodoroPhase | null = block.type === "pomodoro" && value.phase === "break" ? "break" : block.type === "pomodoro" ? "work" : null;
   const configuredDuration = block.type === "timer"
     ? block.config.durationSeconds * 1000
     : block.type === "pomodoro"
       ? (phase === "break" ? block.config.breakSeconds : block.config.workSeconds) * 1000
       : 0;
-  const durationMs = block.type === "stopwatch"
-    ? 0
-    : finiteInteger(value.durationMs, configuredDuration, 1000, MAX_CLOCK_MS);
   const startedAt = timestamp(value.startedAt);
-  const accumulatedMs = finiteInteger(
-    value.accumulatedMs ?? value.elapsedMs,
-    0,
-    0,
-    block.type === "stopwatch" ? MAX_CLOCK_MS : durationMs,
-  );
+  const storedAccumulated = value.accumulatedMs ?? value.elapsedMs;
   const running = value.running === true && startedAt !== null;
-  const targetAt = block.type === "stopwatch"
-    ? null
-    : running
-      ? timestamp(value.targetAt, startedAt + Math.max(0, durationMs - accumulatedMs))
-      : null;
+  const storedDuration = block.type === "stopwatch" ? 0 : finiteInteger(value.durationMs, configuredDuration, 1000, MAX_CLOCK_MS);
+  const hasProgress = typeof storedAccumulated === "number" && Number.isFinite(storedAccumulated) && storedAccumulated > 0;
+  const durationMs = block.type === "stopwatch" ? 0 : running || hasProgress ? storedDuration : configuredDuration;
+  const accumulatedMs = finiteInteger(storedAccumulated, 0, 0, block.type === "stopwatch" ? MAX_CLOCK_MS : durationMs);
+  const targetAt = block.type === "stopwatch" ? null : running ? timestamp(value.targetAt, startedAt + Math.max(0, durationMs - accumulatedMs)) : null;
   return {
     type: block.type,
     running,
@@ -155,24 +110,13 @@ function firstBlockOfType(settings: StartPageSettings, type: BlockInstance["type
   return settings.layout.blocks.find((block) => block.type === type) ?? null;
 }
 
-function legacyClockValue(
-  block: Extract<BlockInstance, { type: ClockBlockType }>,
-  primary: Record<string, unknown>,
-  secondary: Record<string, unknown>,
-): unknown {
+function legacyClockValue(block: Extract<BlockInstance, { type: ClockBlockType }>, primary: Record<string, unknown>, secondary: Record<string, unknown>): unknown {
   const primaryClocks = isRecord(primary.clocks) ? primary.clocks : {};
   const secondaryClocks = isRecord(secondary.clocks) ? secondary.clocks : {};
-  return primaryClocks[block.id]
-    ?? secondaryClocks[block.id]
-    ?? primaryClocks[block.type]
-    ?? secondaryClocks[block.type];
+  return primaryClocks[block.id] ?? secondaryClocks[block.id] ?? primaryClocks[block.type] ?? secondaryClocks[block.type];
 }
 
-export function normalizeRuntimeState(
-  value: unknown,
-  settings: StartPageSettings,
-  legacyInstanceValue: unknown = undefined,
-): StartPageRuntimeState {
+export function normalizeRuntimeState(value: unknown, settings: StartPageSettings, legacyInstanceValue: unknown = undefined): StartPageRuntimeState {
   const source = isRecord(value) ? value : {};
   const legacy = isRecord(legacyInstanceValue) ? legacyInstanceValue : {};
   const version = source.version === RUNTIME_SCHEMA_VERSION ? RUNTIME_SCHEMA_VERSION : 1;
@@ -189,9 +133,7 @@ export function normalizeRuntimeState(
 
   for (const block of settings.layout.blocks) {
     if (isClockBlock(block)) {
-      const candidate = version === RUNTIME_SCHEMA_VERSION
-        ? sourceClocks[block.id]
-        : legacyClockValue(block, source, legacy);
+      const candidate = version === RUNTIME_SCHEMA_VERSION ? sourceClocks[block.id] : legacyClockValue(block, source, legacy);
       clocks[block.id] = normalizeClock(block, candidate);
     }
     if (block.type === "note") {
@@ -199,31 +141,19 @@ export function normalizeRuntimeState(
       if (typeof candidate === "string") notes[block.id] = candidate.slice(0, 200_000);
     }
     if (block.type === "localTasks") {
-      const oldSharedTasks = Array.isArray(source.localTasks)
-        && firstBlockOfType(settings, "localTasks")?.id === block.id
-        ? source.localTasks
-        : undefined;
+      const oldSharedTasks = Array.isArray(source.localTasks) && firstBlockOfType(settings, "localTasks")?.id === block.id ? source.localTasks : undefined;
       tasks[block.id] = normalizeTaskList(sourceTasks[block.id] ?? legacyTasks[block.id] ?? oldSharedTasks);
     }
     if (block.type === "links" || block.type === "startPinned") {
       const candidate = sourceLinkPages[block.id]
         ?? legacyLinkPages[block.id]
         ?? (firstBlockOfType(settings, block.type)?.id === block.id ? sourceLinkPages[block.type] : undefined)
-        ?? (block.type === "links" && firstBlockOfType(settings, "links")?.id === block.id
-          ? sourceLinkPages.links
-          : undefined);
+        ?? (block.type === "links" && firstBlockOfType(settings, "links")?.id === block.id ? sourceLinkPages.links : undefined);
       linkPages[block.id] = finiteInteger(candidate, 0, 0, 10_000);
     }
   }
 
-  return {
-    version: RUNTIME_SCHEMA_VERSION,
-    updatedAt: finiteInteger(source.updatedAt, 0, 0, Number.MAX_SAFE_INTEGER),
-    clocks,
-    notes,
-    tasks,
-    linkPages,
-  };
+  return { version: RUNTIME_SCHEMA_VERSION, updatedAt: finiteInteger(source.updatedAt, 0, 0, Number.MAX_SAFE_INTEGER), clocks, notes, tasks, linkPages };
 }
 
 function jsonEqual(left: unknown, right: unknown): boolean {
@@ -231,30 +161,19 @@ function jsonEqual(left: unknown, right: unknown): boolean {
 }
 
 async function persistRuntime(state: StartPageRuntimeState): Promise<StartPageRuntimeState> {
-  const stamped: StartPageRuntimeState = {
-    ...state,
-    version: RUNTIME_SCHEMA_VERSION,
-    updatedAt: Date.now(),
-  };
+  const stamped: StartPageRuntimeState = { ...state, version: RUNTIME_SCHEMA_VERSION, updatedAt: Date.now() };
   await chrome.storage.local.set({ [START_PAGE_RUNTIME_KEY]: stamped });
   await markStartTabDataChanged(stamped.updatedAt);
   return stamped;
 }
 
-export async function getStartPageRuntimeState(
-  settings = await getStartPageSettings(),
-): Promise<StartPageRuntimeState> {
+export async function getStartPageRuntimeState(inputSettings?: StartPageSettings): Promise<StartPageRuntimeState> {
+  const settings = inputSettings ?? await getStartPageSettings();
   const items = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
-  const normalized = normalizeRuntimeState(
-    items[START_PAGE_RUNTIME_KEY],
-    settings,
-    items[LEGACY_INSTANCE_RUNTIME_KEY],
-  );
+  const normalized = normalizeRuntimeState(items[START_PAGE_RUNTIME_KEY], settings, items[LEGACY_INSTANCE_RUNTIME_KEY]);
   if (!jsonEqual(items[START_PAGE_RUNTIME_KEY], normalized)) {
     const migrated = await persistRuntime(normalized);
-    if (items[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined) {
-      await chrome.storage.local.remove(LEGACY_INSTANCE_RUNTIME_KEY);
-    }
+    if (items[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined) await chrome.storage.local.remove(LEGACY_INSTANCE_RUNTIME_KEY);
     return migrated;
   }
   return normalized;
@@ -266,16 +185,16 @@ export async function setStartPageRuntimeState(state: StartPageRuntimeState): Pr
 
 export async function updateStartPageRuntimeState(
   updater: (state: StartPageRuntimeState) => StartPageRuntimeState,
-  settings = await getStartPageSettings(),
+  inputSettings?: StartPageSettings,
 ): Promise<StartPageRuntimeState> {
+  const settings = inputSettings ?? await getStartPageSettings();
   const current = await getStartPageRuntimeState(settings);
   const next = normalizeRuntimeState(updater(structuredClone(current)), settings);
   return persistRuntime(next);
 }
 
 function clockToken(): string {
-  return globalThis.crypto?.randomUUID?.()
-    ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 export function elapsedClockMs(clock: ClockRuntimeState, now = Date.now()): number {
@@ -293,11 +212,7 @@ export function remainingClockMs(clock: ClockRuntimeState, now = Date.now()): nu
 
 export function startClockState(clock: ClockRuntimeState, now = Date.now()): ClockRuntimeState {
   if (clock.running) return clock;
-  const accumulatedMs = clock.type === "stopwatch"
-    ? Math.min(clock.accumulatedMs, MAX_CLOCK_MS)
-    : clock.accumulatedMs >= clock.durationMs
-      ? 0
-      : clock.accumulatedMs;
+  const accumulatedMs = clock.type === "stopwatch" ? Math.min(clock.accumulatedMs, MAX_CLOCK_MS) : clock.accumulatedMs >= clock.durationMs ? 0 : clock.accumulatedMs;
   const remaining = clock.type === "stopwatch" ? null : Math.max(1, clock.durationMs - accumulatedMs);
   return {
     ...clock,
@@ -306,37 +221,19 @@ export function startClockState(clock: ClockRuntimeState, now = Date.now()): Clo
     accumulatedMs,
     targetAt: remaining === null ? null : now + remaining,
     completionToken: clock.type === "stopwatch" ? null : clockToken(),
-    focusSessionStartedAt: clock.type === "pomodoro"
-      && clock.phase === "work"
-      && clock.focusSessionStartedAt === null
-      ? now
-      : clock.focusSessionStartedAt,
+    focusSessionStartedAt: clock.type === "pomodoro" && clock.phase === "work" && clock.focusSessionStartedAt === null ? now : clock.focusSessionStartedAt,
   };
 }
 
 export function pauseClockState(clock: ClockRuntimeState, now = Date.now()): ClockRuntimeState {
   if (!clock.running) return clock;
-  return {
-    ...clock,
-    running: false,
-    startedAt: null,
-    accumulatedMs: elapsedClockMs(clock, now),
-    targetAt: null,
-    completionToken: null,
-  };
+  return { ...clock, running: false, startedAt: null, accumulatedMs: elapsedClockMs(clock, now), targetAt: null, completionToken: null };
 }
 
-export function resetClockState(
-  block: Extract<BlockInstance, { type: ClockBlockType }>,
-  phase: PomodoroPhase = "work",
-): ClockRuntimeState {
+export function resetClockState(block: Extract<BlockInstance, { type: ClockBlockType }>, phase: PomodoroPhase = "work"): ClockRuntimeState {
   const fallback = defaultClockForBlock(block);
   if (block.type !== "pomodoro") return fallback;
-  return {
-    ...fallback,
-    phase,
-    durationMs: (phase === "break" ? block.config.breakSeconds : block.config.workSeconds) * 1000,
-  };
+  return { ...fallback, phase, durationMs: (phase === "break" ? block.config.breakSeconds : block.config.workSeconds) * 1000 };
 }
 
 export function clockAlarmName(instanceId: string, token: string): string {
@@ -356,19 +253,13 @@ export function parseClockAlarmName(name: string): { instanceId: string; token: 
 
 export async function clearClockAlarm(instanceId: string): Promise<void> {
   const alarms = await chrome.alarms.getAll();
-  await Promise.all(
-    alarms
-      .filter((alarm) => parseClockAlarmName(alarm.name)?.instanceId === instanceId)
-      .map((alarm) => chrome.alarms.clear(alarm.name)),
-  );
+  await Promise.all(alarms.filter((alarm) => parseClockAlarmName(alarm.name)?.instanceId === instanceId).map((alarm) => chrome.alarms.clear(alarm.name)));
 }
 
 export async function scheduleClockAlarm(instanceId: string, clock: ClockRuntimeState): Promise<void> {
   await clearClockAlarm(instanceId);
   if (!clock.running || clock.targetAt === null || !clock.completionToken) return;
-  chrome.alarms.create(clockAlarmName(instanceId, clock.completionToken), {
-    when: Math.max(Date.now() + 100, clock.targetAt),
-  });
+  chrome.alarms.create(clockAlarmName(instanceId, clock.completionToken), { when: Math.max(Date.now() + 100, clock.targetAt) });
 }
 
 export interface ClockCompletionResult {
@@ -379,54 +270,33 @@ export interface ClockCompletionResult {
   focusTimeMs: number;
 }
 
-export async function completeClockInstance(
-  instanceId: string,
-  expectedToken: string | null,
-  now = Date.now(),
-): Promise<ClockCompletionResult> {
+export async function completeClockInstance(instanceId: string, expectedToken: string | null, now = Date.now()): Promise<ClockCompletionResult> {
   const settings = await getStartPageSettings();
   const block = settings.layout.blocks.find(
-    (candidate): candidate is Extract<BlockInstance, { type: ClockBlockType }> =>
-      candidate.id === instanceId && isClockBlock(candidate),
+    (candidate): candidate is Extract<BlockInstance, { type: ClockBlockType }> => candidate.id === instanceId && isClockBlock(candidate),
   ) ?? null;
   if (!block) return { completed: false, block: null, clock: null, notify: false, focusTimeMs: 0 };
   const runtime = await getStartPageRuntimeState(settings);
   const current = runtime.clocks[instanceId] ?? defaultClockForBlock(block);
   const token = current.completionToken;
-  if (!current.running
-    || current.type === "stopwatch"
-    || current.targetAt === null
-    || current.targetAt > now + 1000) {
+  if (!current.running || current.type === "stopwatch" || current.targetAt === null || current.targetAt > now + 1000) {
     return { completed: false, block, clock: current, notify: false, focusTimeMs: 0 };
   }
-  if (expectedToken && token !== expectedToken) {
-    return { completed: false, block, clock: current, notify: false, focusTimeMs: 0 };
-  }
-  if (token && current.lastCompletedToken === token) {
-    return { completed: false, block, clock: current, notify: false, focusTimeMs: 0 };
-  }
+  if (expectedToken && token !== expectedToken) return { completed: false, block, clock: current, notify: false, focusTimeMs: 0 };
+  if (token && current.lastCompletedToken === token) return { completed: false, block, clock: current, notify: false, focusTimeMs: 0 };
 
   let next: ClockRuntimeState;
   let focusTimeMs = 0;
+  if (block.type !== "timer" && block.type !== "pomodoro") {
+    return { completed: false, block, clock: current, notify: false, focusTimeMs: 0 };
+  }
   if (block.type === "timer") {
-    next = {
-      ...current,
-      running: false,
-      startedAt: null,
-      accumulatedMs: current.durationMs,
-      targetAt: null,
-      lastCompletedToken: token,
-      completionToken: null,
-    };
+    next = { ...current, running: false, startedAt: null, accumulatedMs: current.durationMs, targetAt: null, lastCompletedToken: token, completionToken: null };
   } else {
     const completedPhase = current.phase ?? "work";
-    if (completedPhase === "work" && current.focusSessionStartedAt !== null) {
-      focusTimeMs = Math.max(0, now - current.focusSessionStartedAt);
-    }
+    if (completedPhase === "work" && current.focusSessionStartedAt !== null) focusTimeMs = Math.max(0, now - current.focusSessionStartedAt);
     const nextPhase: PomodoroPhase = completedPhase === "work" ? "break" : "work";
-    const nextDuration = (nextPhase === "work"
-      ? block.config.workSeconds
-      : block.config.breakSeconds) * 1000;
+    const nextDuration = (nextPhase === "work" ? block.config.workSeconds : block.config.breakSeconds) * 1000;
     const autoStart = block.config.autoStartNextPhase;
     next = {
       ...current,
@@ -444,11 +314,7 @@ export async function completeClockInstance(
   runtime.clocks[instanceId] = next;
   await setStartPageRuntimeState(runtime);
   await scheduleClockAlarm(instanceId, next);
-  const notify = block.type === "timer"
-    ? block.config.notifyOnComplete
-    : block.type === "pomodoro"
-      ? block.config.notifyOnComplete
-      : false;
+  const notify = block.config.notifyOnComplete;
   return { completed: true, block, clock: next, notify, focusTimeMs };
 }
 
@@ -463,9 +329,6 @@ export async function deleteInstanceRuntime(instanceId: string): Promise<void> {
   await clearClockAlarm(instanceId);
 }
 
-export function instanceRuntimeHasUserData(
-  instanceId: string,
-  runtime: StartPageRuntimeState,
-): boolean {
+export function instanceRuntimeHasUserData(instanceId: string, runtime: StartPageRuntimeState): boolean {
   return Boolean(runtime.notes[instanceId]?.trim()) || (runtime.tasks[instanceId]?.length ?? 0) > 0;
 }
