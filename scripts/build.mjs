@@ -51,11 +51,33 @@ async function copyStaticAssets() {
   await writeFile(output("manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
+const forbiddenProductionInputs = [
+  "src/lib/start-page-block-store.ts",
+  "src/lib/start-page-theme-store.ts",
+  "src/lib/start-page-settings-store.ts",
+  "src/lib/start-page-validation-v2.ts",
+  "src/newtab/block-renderers.js",
+  "src/newtab/block-renderers-v2.ts",
+  "src/newtab/block-renderers-runtime-v2.js",
+  "src/newtab/block-renderers-runtime-v2.ts",
+  "src/newtab/block-renderers-runtime-v3.ts",
+];
+
+function assertProductionGraph(metafile) {
+  const inputs = Object.keys(metafile?.inputs ?? {}).map((input) => input.replaceAll("\\", "/"));
+  for (const forbidden of forbiddenProductionInputs) {
+    if (inputs.some((input) => input.endsWith(forbidden))) {
+      throw new Error(`Obsolete source entered the production graph: ${forbidden}`);
+    }
+  }
+}
+
 const copyPlugin = {
   name: "copy-extension-static-assets",
   setup(build) {
     build.onEnd(async (result) => {
       if (result.errors.length === 0) {
+        assertProductionGraph(result.metafile);
         await copyStaticAssets();
         console.log(`Built ${blockerOnly ? "blocker-only" : "full"} extension at ${outdir}`);
       }
@@ -77,6 +99,7 @@ const options = {
   minify: !watch,
   legalComments: "none",
   logLevel: "info",
+  metafile: true,
   plugins: [copyPlugin],
 };
 
