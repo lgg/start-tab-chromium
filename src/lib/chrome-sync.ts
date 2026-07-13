@@ -173,7 +173,7 @@ export async function getChromeSyncBackupMeta(): Promise<SyncMeta | null> {
   return (await readRemoteMeta())?.meta ?? null;
 }
 
-async function prepareSnapshot(bundle = await exportBackup()): Promise<{
+async function prepareSnapshot(inputBundle?: BackupBundle): Promise<{
   bundle: BackupBundle;
   json: string;
   chunks: string[];
@@ -181,6 +181,7 @@ async function prepareSnapshot(bundle = await exportBackup()): Promise<{
   contentChecksum: string;
   contentUpdatedAt: number;
 }> {
+  const bundle = inputBundle ?? await exportBackup();
   const json = JSON.stringify(bundle);
   const chunks = chunkForChromeSync(json);
   if (chunks.length > MAX_SYNC_CHUNKS) {
