@@ -1,15 +1,17 @@
 import { normalizeBlockedSites, normalizeLastBlockedUrls, syncRules } from "./blocklist.js";
 import { markStartTabDataChanged } from "./data-revision.js";
-import { FOCUS_STATS_KEY } from "./focus-stats.js";
+import { FOCUS_STATS_KEY, normalizeFocusStats } from "./focus-stats.js";
 import {
   LEGACY_INSTANCE_RUNTIME_KEY,
   START_PAGE_RUNTIME_KEY,
   getStartPageRuntimeState,
+  isFutureRuntimeSchema,
   normalizeRuntimeState,
 } from "./start-page-runtime.js";
 import {
   START_PAGE_SETTINGS_KEY,
   getStartPageSettings,
+  isFutureStartPageSchema,
   isRecord,
   normalizeStartPageSettings,
 } from "./start-page-settings.js";
@@ -84,6 +86,15 @@ function normalizeLocale(value: unknown): "en" | "ru" | null {
   return value === "en" || value === "ru" ? value : null;
 }
 
+function assertSupportedSchemas(storage: Record<string, unknown>): void {
+  if (isFutureStartPageSchema(storage[START_PAGE_SETTINGS_KEY])) {
+    throw new Error("This backup contains Start Tab settings from a newer extension version");
+  }
+  if (isFutureRuntimeSchema(storage[START_PAGE_RUNTIME_KEY])) {
+    throw new Error("This backup contains Start Tab runtime data from a newer extension version");
+  }
+}
+
 function normalizedStorage(backup: BackupLike): Record<string, unknown> {
   const settings = normalizeStartPageSettings(backup.storage[START_PAGE_SETTINGS_KEY]);
   const runtime = normalizeRuntimeState(
@@ -98,8 +109,10 @@ function normalizedStorage(backup: BackupLike): Record<string, unknown> {
     [START_PAGE_SETTINGS_KEY]: settings,
     [START_PAGE_RUNTIME_KEY]: runtime,
     startPageOnboarding: normalizeOnboarding(backup.storage.startPageOnboarding),
-    [FOCUS_STATS_KEY]: backup.storage[FOCUS_STATS_KEY] ?? undefined,
   };
+  if (Object.prototype.hasOwnProperty.call(backup.storage, FOCUS_STATS_KEY)) {
+    storage[FOCUS_STATS_KEY] = normalizeFocusStats(backup.storage[FOCUS_STATS_KEY]);
+  }
   if (locale) storage.localeOverride = locale;
   return storage;
 }
@@ -117,6 +130,7 @@ function currentSchema(storage: Record<string, unknown>, exportedAt: string, sna
 
 export function migrateBackup(value: unknown): BackupBundle {
   if (!isBackupLike(value)) throw new Error("Invalid Start Tab backup file");
+  assertSupportedSchemas(value.storage);
   return currentSchema(
     normalizedStorage(value),
     value.exportedAt,
@@ -125,9 +139,10 @@ export function migrateBackup(value: unknown): BackupBundle {
 }
 
 export async function exportBackup(): Promise<BackupBundle> {
+  const additional = await chrome.storage.local.get([...STORAGE_KEYS]);
+  assertSupportedSchemas(additional);
   const settings = await getStartPageSettings();
   const runtime = await getStartPageRuntimeState(settings);
-  const additional = await chrome.storage.local.get([...STORAGE_KEYS]);
   return currentSchema({
     ...additional,
     [START_PAGE_SETTINGS_KEY]: settings,
