@@ -1,5 +1,4 @@
 import { getLastBlockedUrl, hostFromUrl, normalizeHost } from "../lib/blocklist.js";
-import { recordUnblockAfterCountdown } from "../lib/focus-stats.js";
 import { loadI18n, type I18n } from "../lib/i18n.js";
 import { sendMessage } from "../lib/messages.js";
 
@@ -97,10 +96,6 @@ function showStartupFailed(error: unknown): void {
   countdownTextEl.textContent = error instanceof Error ? error.message : String(error);
 }
 
-function ignoreStatsError(): void {
-  // Focus stats are secondary; they must not block the completed unblock redirect.
-}
-
 async function requestUnblock(): Promise<boolean> {
   try {
     const ack = await sendMessage({ type: "unblock", host });
@@ -126,7 +121,7 @@ async function finishUnblock(): Promise<void> {
     showUnblockFailed();
     return;
   }
-  await recordUnblockAfterCountdown(host).catch(ignoreStatsError);
+  await sendMessage({ type: "record-unblock", host }).catch(() => undefined);
   location.replace(redirectUrl);
 }
 
