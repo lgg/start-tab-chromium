@@ -50,12 +50,23 @@ if (variant === "full") {
   for (const file of ["newtab.js", "newtab.html", "newtab.css", "newtab-gate.js"]) {
     assert.equal(await exists(file), true, `Full build is missing ${file}`);
   }
+  const newtabSource = await readFile(path.join(outdir, "newtab.js"), "utf8");
+  for (const marker of ["complete-clock", "clock-action", "reset-clocks", "runtime-note", "runtime-tasks", "runtime-link-page", "delete-instance-runtime", "reset-stats"]) {
+    assert.ok(newtabSource.includes(marker), `newtab.js must delegate ${marker} to the service worker`);
+  }
+  assert.doesNotMatch(newtabSource, /notifications\.create/, "newtab.js must not create clock notifications");
 } else {
   assert.equal(manifest.chrome_url_overrides, undefined, "Blocker-only build must omit the new-tab override");
   for (const file of ["newtab.js", "newtab.html", "newtab.css", "newtab-gate.js"]) {
     assert.equal(await exists(file), false, `Blocker-only build must not contain ${file}`);
   }
 }
+
+const serviceWorkerSource = await readFile(path.join(outdir, "service-worker.js"), "utf8");
+for (const marker of ["complete-clock", "clock-action", "reset-clocks", "runtime-note", "runtime-tasks", "runtime-link-page", "delete-instance-runtime", "record-unblock", "reset-stats"]) {
+  assert.ok(serviceWorkerSource.includes(marker), `service-worker.js must own ${marker}`);
+}
+assert.match(serviceWorkerSource, /notifications\.create/, "service-worker.js must own clock notifications");
 
 for (const file of ["service-worker.js", "popup.js", "blocked.js", "options.js", ...(variant === "full" ? ["newtab.js"] : [])]) {
   const source = await readFile(path.join(outdir, file), "utf8");
