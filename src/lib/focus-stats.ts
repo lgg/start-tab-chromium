@@ -1,3 +1,4 @@
+import { sendMessage } from "./messages.js";
 import { getStartPageSettings, type StartPageSettings } from "./start-page-settings.js";
 
 export const FOCUS_STATS_KEY = "focusStats";
@@ -184,6 +185,10 @@ export async function getFocusStats(): Promise<FocusStats> {
 }
 
 export async function resetFocusStats(): Promise<void> {
+  if (typeof document !== "undefined") {
+    await sendMessage({ type: "reset-stats" });
+    return;
+  }
   await writeStats(emptyStats());
 }
 
