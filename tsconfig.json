@@ -4,7 +4,7 @@
     "module": "ES2022",
     "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["chrome", "node"],
+    "types": ["chrome"],
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
@@ -17,5 +17,5 @@
     "isolatedModules": true,
     "noEmit": true
   },
-  "include": ["src", "scripts/**/*.ts", "build.mjs"]
+  "include": ["src", "build.mjs"]
 }
