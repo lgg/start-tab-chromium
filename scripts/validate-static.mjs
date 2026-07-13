@@ -51,7 +51,7 @@ function assertCiPolicy(ci) {
   assert.doesNotMatch(ci, /actions\/cache@/, "Explicit GitHub Actions caches are not expected");
 }
 
-const [manifest, packageJson, enMessages, ruBaseMessages, ruRoadmapMessages, ci, rootBuild, canonicalBuild, newtabHtml, optionsHtml] = await Promise.all([
+const [manifest, packageJson, enMessages, ruBaseMessages, ruRoadmapMessages, ci, rootBuild, canonicalBuild, newtabHtml, optionsHtml, settingsSource, runtimeRendererSource, serviceWorkerSource] = await Promise.all([
   readJson("src/manifest.json"),
   readJson("package.json"),
   readJson("src/_locales/en/messages.json"),
@@ -62,6 +62,9 @@ const [manifest, packageJson, enMessages, ruBaseMessages, ruRoadmapMessages, ci,
   readFile(resolve(root, "scripts/build.mjs"), "utf8"),
   readFile(resolve(root, "src/newtab/newtab.html"), "utf8"),
   readFile(resolve(root, "src/options/options.html"), "utf8"),
+  readFile(resolve(root, "src/lib/start-page-settings.ts"), "utf8"),
+  readFile(resolve(root, "src/newtab/block-renderers-runtime.ts"), "utf8"),
+  readFile(resolve(root, "src/service-worker.ts"), "utf8"),
 ]);
 const ruMessages = { ...ruBaseMessages, ...ruRoadmapMessages };
 
@@ -114,6 +117,15 @@ for (const obsoletePath of [
   "src/newtab/instances.js",
   "src/options/options-helper.js",
   "src/options/background-presets.js",
+  "src/lib/start-page-block-store.ts",
+  "src/lib/start-page-theme-store.ts",
+  "src/lib/start-page-settings-store.ts",
+  "src/lib/start-page-validation-v2.ts",
+  "src/newtab/block-renderers.js",
+  "src/newtab/block-renderers-v2.ts",
+  "src/newtab/block-renderers-runtime-v2.js",
+  "src/newtab/block-renderers-runtime-v2.ts",
+  "src/newtab/block-renderers-runtime-v3.ts",
 ]) {
   assert.equal(await exists(obsoletePath), false, `Obsolete roadmap file must be removed: ${obsoletePath}`);
 }
@@ -124,6 +136,15 @@ assert.match(canonicalBuild, /if \(!blockerOnly\) entryPoints\.newtab/, "Blocker
 assert.doesNotMatch(canonicalBuild, /instances\.js|editor\.js|options-helper\.js|background-presets\.js/, "Builder must not copy legacy helpers");
 assert.doesNotMatch(newtabHtml, /newtab-onboarding|newtab-instances|newtab-editor|newtab-ip/, "New tab HTML must not load legacy helpers");
 assert.doesNotMatch(optionsHtml, /options-helper|background-presets/, "Options HTML must not load legacy helpers");
+assert.match(settingsSource, /isFutureStartPageSchema\(raw\)/, "Settings reads must protect unsupported future schemas");
+assert.match(settingsSource, /blockContentEqual/, "Block timestamps must be based on content changes");
+assert.doesNotMatch(settingsSource, /`\$\{source\.title\} copy`|`\$\{source\.name\} copy`/, "Persistence code must not hardcode an English duplicate suffix");
+assert.match(runtimeRendererSource, /type:\s*["']complete-clock["']/, "The new-tab page must delegate clock completion to the service worker");
+assert.match(runtimeRendererSource, /type:\s*["']clock-action["']/, "The new-tab page must delegate clock mutations to the service worker");
+assert.doesNotMatch(runtimeRendererSource, /completeClockInstance|chrome\.notifications\.create|recordFocusSessionCompleted/, "The new-tab page must not own clock completion side effects");
+for (const messageType of ["complete-clock", "clock-action", "reset-clocks", "runtime-note", "runtime-tasks", "runtime-link-page", "delete-instance-runtime", "record-unblock", "reset-stats"]) {
+  assert.ok(serviceWorkerSource.includes(`case "${messageType}"`) || serviceWorkerSource.includes(`type: "${messageType}"`), `Service worker must handle ${messageType}`);
+}
 
 assert.match(ci, /npm run test/);
 assert.match(ci, /npm run typecheck/);
@@ -132,12 +153,26 @@ assert.match(ci, /npm run build:blocker-only/);
 assertCiPolicy(ci);
 
 const sourceFiles = (await walk(resolve(root, "src"))).filter((file) => /\.(?:ts|js|html)$/.test(file));
+const moduleStems = new Map();
+for (const file of sourceFiles.filter((item) => /\.(?:ts|js)$/.test(item))) {
+  const stem = file.replace(/\.(?:ts|js)$/, "");
+  const siblings = moduleStems.get(stem) ?? [];
+  siblings.push(path.relative(root, file));
+  moduleStems.set(stem, siblings);
+}
+for (const siblings of moduleStems.values()) {
+  assert.equal(siblings.length, 1, `A JavaScript source file shadows a TypeScript module: ${siblings.join(", ")}`);
+}
 const literalMessageKeys = new Set();
 for (const file of sourceFiles) {
   const source = await readFile(file, "utf8");
   assert.doesNotMatch(source, /\beval\s*\(/, `${path.relative(root, file)} must not use eval`);
   assert.doesNotMatch(source, /\bnew\s+Function\s*\(/, `${path.relative(root, file)} must not construct code dynamically`);
   assert.doesNotMatch(source, /\b(?:FIXME|HACK|XXX)\b/, `${path.relative(root, file)} contains unfinished markers`);
+  if (file.startsWith(resolve(root, "src"))) {
+    assert.doesNotMatch(source, /\bdebugger\b/, `${path.relative(root, file)} contains a debugger statement`);
+    assert.doesNotMatch(source, /console\.log\s*\(/, `${path.relative(root, file)} contains debug logging`);
+  }
   for (const match of source.matchAll(/\.t\(["']([^"']+)["']/g)) literalMessageKeys.add(match[1]);
 }
 for (const key of literalMessageKeys) assert.ok(enMessages[key], `Missing English localization key used by source: ${key}`);
