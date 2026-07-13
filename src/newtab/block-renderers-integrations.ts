@@ -1,8 +1,9 @@
 import { backupFileName, exportBackup } from "../lib/backup.js";
-import { getFocusStats, resetFocusStats } from "../lib/focus-stats.js";
+import { getFocusStats } from "../lib/focus-stats.js";
 import { isGoogleIntegrationConfigured, listCalendarEvents, type GoogleCalendarEvent } from "../lib/google-integration.js";
 import type { I18n } from "../lib/i18n.js";
-import { clearClockAlarm, resetClockState } from "../lib/start-page-runtime.js";
+import { sendMessage } from "../lib/messages.js";
+import { getStartPageRuntimeState } from "../lib/start-page-runtime.js";
 import type { BlockInstance } from "../lib/start-page-settings.js";
 import { actionButton, downloadJson, element, formatDuration } from "./block-renderer-common.js";
 import type { BlockRenderContext, UrlItem } from "./block-renderer-types.js";
@@ -193,17 +194,12 @@ export function renderCommands(container: HTMLElement, context: BlockRenderConte
     actionButton(context.i18n.t("openSettings"), () => chrome.runtime.openOptionsPage()),
     actionButton(context.i18n.t("exportBackup"), async () => downloadJson(backupFileName(), await exportBackup())),
     actionButton(context.i18n.t("commandResetClocks"), async () => {
-      for (const block of context.settings.layout.blocks) {
-        if (block.type === "timer" || block.type === "stopwatch" || block.type === "pomodoro") {
-          context.runtime.clocks[block.id] = resetClockState(block);
-          await clearClockAlarm(block.id);
-        }
-      }
-      await context.setRuntime(context.runtime);
+      await sendMessage({ type: "reset-clocks" });
+      context.runtime = await getStartPageRuntimeState(context.settings);
       context.requestRender();
     }),
     actionButton(context.i18n.t("commandResetStats"), async () => {
-      await resetFocusStats();
+      await sendMessage({ type: "reset-stats" });
       context.requestRender();
     }),
   );
