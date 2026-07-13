@@ -1,3 +1,4 @@
+import { markStartTabDataChanged } from "./data-revision.js";
 import {
   RUNTIME_SCHEMA_VERSION,
   type BlockInstance,
@@ -9,6 +10,8 @@ import {
   type StartPageSettings,
 } from "./start-page-types.js";
 import { getStartPageSettings, isRecord } from "./start-page-settings.js";
+
+export type { StartPageRuntimeState } from "./start-page-types.js";
 
 export const START_PAGE_RUNTIME_KEY = "startPageRuntimeState";
 export const LEGACY_INSTANCE_RUNTIME_KEY = "startTabInstanceState";
@@ -86,7 +89,11 @@ export function defaultClockForBlock(block: Extract<BlockInstance, { type: Clock
 function normalizeClock(block: Extract<BlockInstance, { type: ClockBlockType }>, value: unknown): ClockRuntimeState {
   const fallback = defaultClockForBlock(block);
   if (!isRecord(value)) return fallback;
-  const phase: PomodoroPhase | null = block.type === "pomodoro" && value.phase === "break" ? "break" : block.type === "pomodoro" ? "work" : null;
+  const phase: PomodoroPhase | null = block.type === "pomodoro" && value.phase === "break"
+    ? "break"
+    : block.type === "pomodoro"
+      ? "work"
+      : null;
   const configuredDuration = block.type === "timer"
     ? block.config.durationSeconds * 1000
     : block.type === "pomodoro"
@@ -96,7 +103,12 @@ function normalizeClock(block: Extract<BlockInstance, { type: ClockBlockType }>,
     ? 0
     : finiteInteger(value.durationMs, configuredDuration, 1000, MAX_CLOCK_MS);
   const startedAt = timestamp(value.startedAt);
-  const accumulatedMs = finiteInteger(value.accumulatedMs ?? value.elapsedMs, 0, 0, block.type === "stopwatch" ? MAX_CLOCK_MS : durationMs);
+  const accumulatedMs = finiteInteger(
+    value.accumulatedMs ?? value.elapsedMs,
+    0,
+    0,
+    block.type === "stopwatch" ? MAX_CLOCK_MS : durationMs,
+  );
   const running = value.running === true && startedAt !== null;
   const targetAt = block.type === "stopwatch"
     ? null
@@ -187,7 +199,8 @@ export function normalizeRuntimeState(
       if (typeof candidate === "string") notes[block.id] = candidate.slice(0, 200_000);
     }
     if (block.type === "localTasks") {
-      const oldSharedTasks = Array.isArray(source.localTasks) && firstBlockOfType(settings, "localTasks")?.id === block.id
+      const oldSharedTasks = Array.isArray(source.localTasks)
+        && firstBlockOfType(settings, "localTasks")?.id === block.id
         ? source.localTasks
         : undefined;
       tasks[block.id] = normalizeTaskList(sourceTasks[block.id] ?? legacyTasks[block.id] ?? oldSharedTasks);
@@ -196,7 +209,9 @@ export function normalizeRuntimeState(
       const candidate = sourceLinkPages[block.id]
         ?? legacyLinkPages[block.id]
         ?? (firstBlockOfType(settings, block.type)?.id === block.id ? sourceLinkPages[block.type] : undefined)
-        ?? (block.type === "links" && firstBlockOfType(settings, "links")?.id === block.id ? sourceLinkPages.links : undefined);
+        ?? (block.type === "links" && firstBlockOfType(settings, "links")?.id === block.id
+          ? sourceLinkPages.links
+          : undefined);
       linkPages[block.id] = finiteInteger(candidate, 0, 0, 10_000);
     }
   }
@@ -215,26 +230,38 @@ function jsonEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-export async function getStartPageRuntimeState(settings = await getStartPageSettings()): Promise<StartPageRuntimeState> {
+async function persistRuntime(state: StartPageRuntimeState): Promise<StartPageRuntimeState> {
+  const stamped: StartPageRuntimeState = {
+    ...state,
+    version: RUNTIME_SCHEMA_VERSION,
+    updatedAt: Date.now(),
+  };
+  await chrome.storage.local.set({ [START_PAGE_RUNTIME_KEY]: stamped });
+  await markStartTabDataChanged(stamped.updatedAt);
+  return stamped;
+}
+
+export async function getStartPageRuntimeState(
+  settings = await getStartPageSettings(),
+): Promise<StartPageRuntimeState> {
   const items = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
-  const normalized = normalizeRuntimeState(items[START_PAGE_RUNTIME_KEY], settings, items[LEGACY_INSTANCE_RUNTIME_KEY]);
+  const normalized = normalizeRuntimeState(
+    items[START_PAGE_RUNTIME_KEY],
+    settings,
+    items[LEGACY_INSTANCE_RUNTIME_KEY],
+  );
   if (!jsonEqual(items[START_PAGE_RUNTIME_KEY], normalized)) {
-    const migrated = { ...normalized, updatedAt: Date.now() };
-    await chrome.storage.local.set({ [START_PAGE_RUNTIME_KEY]: migrated });
-    if (items[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined) await chrome.storage.local.remove(LEGACY_INSTANCE_RUNTIME_KEY);
+    const migrated = await persistRuntime(normalized);
+    if (items[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined) {
+      await chrome.storage.local.remove(LEGACY_INSTANCE_RUNTIME_KEY);
+    }
     return migrated;
   }
   return normalized;
 }
 
 export async function setStartPageRuntimeState(state: StartPageRuntimeState): Promise<void> {
-  await chrome.storage.local.set({
-    [START_PAGE_RUNTIME_KEY]: {
-      ...state,
-      version: RUNTIME_SCHEMA_VERSION,
-      updatedAt: Date.now(),
-    },
-  });
+  await persistRuntime(state);
 }
 
 export async function updateStartPageRuntimeState(
@@ -243,13 +270,12 @@ export async function updateStartPageRuntimeState(
 ): Promise<StartPageRuntimeState> {
   const current = await getStartPageRuntimeState(settings);
   const next = normalizeRuntimeState(updater(structuredClone(current)), settings);
-  const stamped = { ...next, updatedAt: Date.now() };
-  await chrome.storage.local.set({ [START_PAGE_RUNTIME_KEY]: stamped });
-  return stamped;
+  return persistRuntime(next);
 }
 
 function clockToken(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return globalThis.crypto?.randomUUID?.()
+    ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 export function elapsedClockMs(clock: ClockRuntimeState, now = Date.now()): number {
@@ -269,7 +295,9 @@ export function startClockState(clock: ClockRuntimeState, now = Date.now()): Clo
   if (clock.running) return clock;
   const accumulatedMs = clock.type === "stopwatch"
     ? Math.min(clock.accumulatedMs, MAX_CLOCK_MS)
-    : clock.accumulatedMs >= clock.durationMs ? 0 : clock.accumulatedMs;
+    : clock.accumulatedMs >= clock.durationMs
+      ? 0
+      : clock.accumulatedMs;
   const remaining = clock.type === "stopwatch" ? null : Math.max(1, clock.durationMs - accumulatedMs);
   return {
     ...clock,
@@ -278,7 +306,9 @@ export function startClockState(clock: ClockRuntimeState, now = Date.now()): Clo
     accumulatedMs,
     targetAt: remaining === null ? null : now + remaining,
     completionToken: clock.type === "stopwatch" ? null : clockToken(),
-    focusSessionStartedAt: clock.type === "pomodoro" && clock.phase === "work" && clock.focusSessionStartedAt === null
+    focusSessionStartedAt: clock.type === "pomodoro"
+      && clock.phase === "work"
+      && clock.focusSessionStartedAt === null
       ? now
       : clock.focusSessionStartedAt,
   };
@@ -326,15 +356,19 @@ export function parseClockAlarmName(name: string): { instanceId: string; token: 
 
 export async function clearClockAlarm(instanceId: string): Promise<void> {
   const alarms = await chrome.alarms.getAll();
-  await Promise.all(alarms
-    .filter((alarm) => parseClockAlarmName(alarm.name)?.instanceId === instanceId)
-    .map((alarm) => chrome.alarms.clear(alarm.name)));
+  await Promise.all(
+    alarms
+      .filter((alarm) => parseClockAlarmName(alarm.name)?.instanceId === instanceId)
+      .map((alarm) => chrome.alarms.clear(alarm.name)),
+  );
 }
 
 export async function scheduleClockAlarm(instanceId: string, clock: ClockRuntimeState): Promise<void> {
   await clearClockAlarm(instanceId);
   if (!clock.running || clock.targetAt === null || !clock.completionToken) return;
-  chrome.alarms.create(clockAlarmName(instanceId, clock.completionToken), { when: Math.max(Date.now() + 100, clock.targetAt) });
+  chrome.alarms.create(clockAlarmName(instanceId, clock.completionToken), {
+    when: Math.max(Date.now() + 100, clock.targetAt),
+  });
 }
 
 export interface ClockCompletionResult {
@@ -351,16 +385,26 @@ export async function completeClockInstance(
   now = Date.now(),
 ): Promise<ClockCompletionResult> {
   const settings = await getStartPageSettings();
-  const block = settings.layout.blocks.find((candidate): candidate is Extract<BlockInstance, { type: ClockBlockType }> => candidate.id === instanceId && isClockBlock(candidate)) ?? null;
+  const block = settings.layout.blocks.find(
+    (candidate): candidate is Extract<BlockInstance, { type: ClockBlockType }> =>
+      candidate.id === instanceId && isClockBlock(candidate),
+  ) ?? null;
   if (!block) return { completed: false, block: null, clock: null, notify: false, focusTimeMs: 0 };
   const runtime = await getStartPageRuntimeState(settings);
   const current = runtime.clocks[instanceId] ?? defaultClockForBlock(block);
   const token = current.completionToken;
-  if (!current.running || current.type === "stopwatch" || current.targetAt === null || current.targetAt > now + 1000) {
+  if (!current.running
+    || current.type === "stopwatch"
+    || current.targetAt === null
+    || current.targetAt > now + 1000) {
     return { completed: false, block, clock: current, notify: false, focusTimeMs: 0 };
   }
-  if (expectedToken && token !== expectedToken) return { completed: false, block, clock: current, notify: false, focusTimeMs: 0 };
-  if (token && current.lastCompletedToken === token) return { completed: false, block, clock: current, notify: false, focusTimeMs: 0 };
+  if (expectedToken && token !== expectedToken) {
+    return { completed: false, block, clock: current, notify: false, focusTimeMs: 0 };
+  }
+  if (token && current.lastCompletedToken === token) {
+    return { completed: false, block, clock: current, notify: false, focusTimeMs: 0 };
+  }
 
   let next: ClockRuntimeState;
   let focusTimeMs = 0;
@@ -380,7 +424,9 @@ export async function completeClockInstance(
       focusTimeMs = Math.max(0, now - current.focusSessionStartedAt);
     }
     const nextPhase: PomodoroPhase = completedPhase === "work" ? "break" : "work";
-    const nextDuration = (nextPhase === "work" ? block.config.workSeconds : block.config.breakSeconds) * 1000;
+    const nextDuration = (nextPhase === "work"
+      ? block.config.workSeconds
+      : block.config.breakSeconds) * 1000;
     const autoStart = block.config.autoStartNextPhase;
     next = {
       ...current,
@@ -398,7 +444,11 @@ export async function completeClockInstance(
   runtime.clocks[instanceId] = next;
   await setStartPageRuntimeState(runtime);
   await scheduleClockAlarm(instanceId, next);
-  const notify = block.type === "timer" ? block.config.notifyOnComplete : block.type === "pomodoro" ? block.config.notifyOnComplete : false;
+  const notify = block.type === "timer"
+    ? block.config.notifyOnComplete
+    : block.type === "pomodoro"
+      ? block.config.notifyOnComplete
+      : false;
   return { completed: true, block, clock: next, notify, focusTimeMs };
 }
 
@@ -413,6 +463,9 @@ export async function deleteInstanceRuntime(instanceId: string): Promise<void> {
   await clearClockAlarm(instanceId);
 }
 
-export function instanceRuntimeHasUserData(instanceId: string, runtime: StartPageRuntimeState): boolean {
+export function instanceRuntimeHasUserData(
+  instanceId: string,
+  runtime: StartPageRuntimeState,
+): boolean {
   return Boolean(runtime.notes[instanceId]?.trim()) || (runtime.tasks[instanceId]?.length ?? 0) > 0;
 }
