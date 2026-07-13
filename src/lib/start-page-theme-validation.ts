@@ -82,7 +82,7 @@ export function normalizeCustomThemes(value: unknown, issues: ValidationIssue[])
   return result;
 }
 
-export function migrateLegacyTheme(root: Record<string, unknown>, issues: ValidationIssue[]): StartPageTheme | null {
+export function migrateLegacyTheme(root: Record<string, unknown>, _issues: ValidationIssue[]): StartPageTheme | null {
   if (!isRecord(root.appearance)) return null;
   const appearance = root.appearance;
   const fallback = cloneTheme(BUILT_IN_THEMES[0]!);
