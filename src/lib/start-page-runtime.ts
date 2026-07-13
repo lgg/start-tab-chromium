@@ -116,6 +116,13 @@ function legacyClockValue(block: Extract<BlockInstance, { type: ClockBlockType }
   return primaryClocks[block.id] ?? secondaryClocks[block.id] ?? primaryClocks[block.type] ?? secondaryClocks[block.type];
 }
 
+export function isFutureRuntimeSchema(value: unknown): boolean {
+  return isRecord(value)
+    && typeof value.version === "number"
+    && Number.isInteger(value.version)
+    && value.version > RUNTIME_SCHEMA_VERSION;
+}
+
 export function normalizeRuntimeState(value: unknown, settings: StartPageSettings, legacyInstanceValue: unknown = undefined): StartPageRuntimeState {
   const source = isRecord(value) ? value : {};
   const legacy = isRecord(legacyInstanceValue) ? legacyInstanceValue : {};
@@ -160,7 +167,13 @@ function jsonEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-async function persistRuntime(state: StartPageRuntimeState): Promise<StartPageRuntimeState> {
+async function persistRuntime(state: StartPageRuntimeState, allowFutureOverwrite = false): Promise<StartPageRuntimeState> {
+  if (!allowFutureOverwrite) {
+    const items = await chrome.storage.local.get(START_PAGE_RUNTIME_KEY);
+    if (isFutureRuntimeSchema(items[START_PAGE_RUNTIME_KEY])) {
+      throw new Error("Start Tab runtime data was created by a newer extension version and cannot be modified safely");
+    }
+  }
   const stamped: StartPageRuntimeState = { ...state, version: RUNTIME_SCHEMA_VERSION, updatedAt: Date.now() };
   await chrome.storage.local.set({ [START_PAGE_RUNTIME_KEY]: stamped });
   await markStartTabDataChanged(stamped.updatedAt);
@@ -170,9 +183,11 @@ async function persistRuntime(state: StartPageRuntimeState): Promise<StartPageRu
 export async function getStartPageRuntimeState(inputSettings?: StartPageSettings): Promise<StartPageRuntimeState> {
   const settings = inputSettings ?? await getStartPageSettings();
   const items = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
-  const normalized = normalizeRuntimeState(items[START_PAGE_RUNTIME_KEY], settings, items[LEGACY_INSTANCE_RUNTIME_KEY]);
-  if (!jsonEqual(items[START_PAGE_RUNTIME_KEY], normalized)) {
-    const migrated = await persistRuntime(normalized);
+  const raw = items[START_PAGE_RUNTIME_KEY];
+  const normalized = normalizeRuntimeState(raw, settings, items[LEGACY_INSTANCE_RUNTIME_KEY]);
+  if (isFutureRuntimeSchema(raw)) return normalized;
+  if (!jsonEqual(raw, normalized)) {
+    const migrated = await persistRuntime(normalized, true);
     if (items[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined) await chrome.storage.local.remove(LEGACY_INSTANCE_RUNTIME_KEY);
     return migrated;
   }
@@ -180,7 +195,8 @@ export async function getStartPageRuntimeState(inputSettings?: StartPageSettings
 }
 
 export async function setStartPageRuntimeState(state: StartPageRuntimeState): Promise<void> {
-  await persistRuntime(state);
+  const settings = await getStartPageSettings();
+  await persistRuntime(normalizeRuntimeState(state, settings));
 }
 
 export async function updateStartPageRuntimeState(
