@@ -1,9 +1,20 @@
 import { readFile, writeFile } from "node:fs/promises";
 
-const [english, russian] = await Promise.all([
-  readFile("src/_locales/en/messages.json", "utf8").then(JSON.parse),
-  readFile("src/_locales/ru/messages.json", "utf8").then(JSON.parse),
+async function readJson(path, optional = false) {
+  try {
+    return JSON.parse(await readFile(path, "utf8"));
+  } catch (error) {
+    if (optional && error && typeof error === "object" && error.code === "ENOENT") return {};
+    throw error;
+  }
+}
+
+const [english, russianBase, russianRoadmap] = await Promise.all([
+  readJson("src/_locales/en/messages.json"),
+  readJson("src/_locales/ru/messages.json"),
+  readJson("src/_locales/ru/roadmap-messages.json", true),
 ]);
+const russian = { ...russianBase, ...russianRoadmap };
 const englishKeys = Object.keys(english).sort();
 const russianKeys = Object.keys(russian).sort();
 const report = {
