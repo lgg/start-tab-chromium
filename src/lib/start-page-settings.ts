@@ -1,11 +1,13 @@
+import { markStartTabDataChanged } from "./data-revision.js";
 import {
-  blocksFromPreset,
+  BLOCK_DESCRIPTORS,
   BUILT_IN_THEMES,
   DEFAULT_LAYOUT_BLOCKS,
   DEFAULT_SEARCH_PROVIDERS,
   DEFAULT_SETTINGS,
   LAYOUT_PRESETS,
   blockDescriptor,
+  blocksFromPreset,
   cloneBlock,
   cloneBlocks,
   cloneSettings,
@@ -39,17 +41,20 @@ import {
   type BlockInstance,
   type BlockInstanceFor,
   type BlockType,
+  type ClockRuntimeState,
   type DateTimeMode,
   type LayoutMode,
   type LayoutPreset,
   type LayoutPresetId,
   type LayoutZone,
   type LinkPageDirection,
+  type LocalTask,
   type MigrationReport,
   type SearchProvider,
   type SearchProviderId,
   type SettingsButtonVisibility,
   type StartLink,
+  type StartPageRuntimeState,
   type StartPageSettings,
   type StartPageTheme,
   type ThemeBundle,
@@ -63,9 +68,9 @@ export const START_PAGE_MIGRATION_REPORT_KEY = "startPageMigrationReport";
 
 export type LayoutBlock = BlockInstance;
 export type BackgroundEffect = AnimatedEffectId | "none" | "gradient";
-export type { SearchProviderId };
 
 export {
+  BLOCK_DESCRIPTORS,
   BUILT_IN_THEMES,
   DEFAULT_LAYOUT_BLOCKS,
   DEFAULT_SEARCH_PROVIDERS,
@@ -100,20 +105,25 @@ export {
 };
 
 export type {
+  AnimatedEffectId,
   BlockConfig,
   BlockInstance,
   BlockInstanceFor,
   BlockType,
+  ClockRuntimeState,
   DateTimeMode,
   LayoutMode,
   LayoutPreset,
   LayoutPresetId,
   LayoutZone,
   LinkPageDirection,
+  LocalTask,
   MigrationReport,
   SearchProvider,
+  SearchProviderId,
   SettingsButtonVisibility,
   StartLink,
+  StartPageRuntimeState,
   StartPageSettings,
   StartPageTheme,
   ThemeBundle,
@@ -127,21 +137,7 @@ function jsonEqual(left: unknown, right: unknown): boolean {
 }
 
 function withBlockTimestamps(previous: StartPageSettings | null, next: StartPageSettings, now: number): StartPageSettings {
-  if (!previous) {
-    return {
-      ...next,
-      updatedAt: now,
-      layout: {
-        ...next.layout,
-        blocks: next.layout.blocks.map((block) => ({
-          ...block,
-          createdAt: block.createdAt || now,
-          updatedAt: block.updatedAt || now,
-        })),
-      },
-    };
-  }
-  const previousById = new Map(previous.layout.blocks.map((block) => [block.id, block]));
+  const previousById = new Map(previous?.layout.blocks.map((block) => [block.id, block]) ?? []);
   return {
     ...next,
     updatedAt: now,
@@ -149,12 +145,9 @@ function withBlockTimestamps(previous: StartPageSettings | null, next: StartPage
       ...next.layout,
       blocks: next.layout.blocks.map((block) => {
         const prior = previousById.get(block.id);
-        if (!prior) return { ...block, createdAt: block.createdAt || now, updatedAt: now };
-        return {
-          ...block,
-          createdAt: prior.createdAt || block.createdAt || now,
-          updatedAt: jsonEqual(prior, block) ? prior.updatedAt : now,
-        };
+        const createdAt = prior?.createdAt || block.createdAt || now;
+        const updatedAt = prior && jsonEqual(prior, block) ? prior.updatedAt : block.updatedAt || now;
+        return { ...block, createdAt, updatedAt };
       }),
     },
   };
@@ -165,28 +158,31 @@ async function readRawSettings(): Promise<unknown> {
   return items[START_PAGE_SETTINGS_KEY];
 }
 
+async function persistSettings(settings: StartPageSettings, report?: MigrationReport): Promise<void> {
+  const payload: Record<string, unknown> = { [START_PAGE_SETTINGS_KEY]: settings };
+  if (report) payload[START_PAGE_MIGRATION_REPORT_KEY] = report;
+  await chrome.storage.local.set(payload);
+  await markStartTabDataChanged(settings.updatedAt || Date.now());
+}
+
 export async function getStartPageSettings(): Promise<StartPageSettings> {
   const raw = await readRawSettings();
   const { settings, report } = normalizeStartPageSettingsWithReport(raw);
-  const needsWrite = !jsonEqual(raw, settings);
-  if (!needsWrite) return settings;
-
+  if (jsonEqual(raw, settings)) return settings;
   const stamped = withBlockTimestamps(null, settings, Date.now());
-  await chrome.storage.local.set({
-    [START_PAGE_SETTINGS_KEY]: stamped,
-    [START_PAGE_MIGRATION_REPORT_KEY]: report,
-  });
+  await persistSettings(stamped, report);
   return stamped;
 }
 
 export async function getStartPageMigrationReport(): Promise<MigrationReport | null> {
   const items = await chrome.storage.local.get(START_PAGE_MIGRATION_REPORT_KEY);
   const value = items[START_PAGE_MIGRATION_REPORT_KEY];
-  if (!isRecord(value)) return null;
+  if (!isRecord(value) || typeof value.fromVersion !== "number" || typeof value.toVersion !== "number") return null;
   const issues = Array.isArray(value.issues)
-    ? value.issues.filter(isRecord).flatMap((issue) => typeof issue.path === "string" && typeof issue.reason === "string" ? [{ path: issue.path, reason: issue.reason }] : [])
+    ? value.issues.flatMap((issue) => isRecord(issue) && typeof issue.path === "string" && typeof issue.reason === "string"
+      ? [{ path: issue.path, reason: issue.reason }]
+      : [])
     : [];
-  if (typeof value.fromVersion !== "number" || typeof value.toVersion !== "number") return null;
   return {
     fromVersion: value.fromVersion,
     toVersion: value.toVersion,
@@ -200,7 +196,7 @@ export async function setStartPageSettings(value: StartPageSettings): Promise<Va
   const previous = normalizeStartPageSettings(await readRawSettings());
   const validation = validateStartPageSettings(value);
   const stamped = withBlockTimestamps(previous, validation.value, Date.now());
-  await chrome.storage.local.set({ [START_PAGE_SETTINGS_KEY]: stamped });
+  await persistSettings(stamped);
   return validation.issues;
 }
 
@@ -208,15 +204,13 @@ export async function updateStartPageSettings(
   updater: (current: StartPageSettings) => StartPageSettings,
 ): Promise<{ settings: StartPageSettings; issues: ValidationIssue[] }> {
   const current = await getStartPageSettings();
-  const candidate = updater(cloneSettings(current));
-  const issues = await setStartPageSettings(candidate);
+  const issues = await setStartPageSettings(updater(cloneSettings(current)));
   return { settings: await getStartPageSettings(), issues };
 }
 
 export async function resetStartPageSettings(): Promise<StartPageSettings> {
-  const now = Date.now();
-  const settings = withBlockTimestamps(null, cloneSettings(DEFAULT_SETTINGS), now);
-  await chrome.storage.local.set({ [START_PAGE_SETTINGS_KEY]: settings });
+  const settings = withBlockTimestamps(null, cloneSettings(DEFAULT_SETTINGS), Date.now());
+  await persistSettings(settings);
   return settings;
 }
 
@@ -224,31 +218,24 @@ export function canAddBlock(settings: StartPageSettings, type: BlockType): boole
   return !isSingletonBlockType(type) || !settings.layout.blocks.some((block) => block.type === type);
 }
 
-function nextGridPosition(settings: StartPageSettings, type: BlockType): { column: number; row: number } {
-  const descriptor = blockDescriptor(type);
-  const maxRow = settings.layout.blocks.reduce((maximum, block) => Math.max(maximum, block.row + block.height), 1);
+function nextGridPosition(settings: StartPageSettings): { column: number; row: number } {
   return {
     column: 1,
-    row: Math.max(1, maxRow + 1),
+    row: Math.max(1, settings.layout.blocks.reduce((maximum, block) => Math.max(maximum, block.row + block.height), 1) + 1),
   };
 }
 
 export async function addBlockInstance<T extends BlockType>(type: T): Promise<BlockInstanceFor<T>> {
   const current = await getStartPageSettings();
   if (!canAddBlock(current, type)) throw new Error(`Singleton block already exists: ${type}`);
-  const position = nextGridPosition(current, type);
   const block = createBlockInstance(type, {
-    ...position,
+    ...nextGridPosition(current),
     zone: current.layout.zone,
     order: current.layout.blocks.length,
   });
   await setStartPageSettings({
     ...current,
-    layout: {
-      ...current.layout,
-      profile: "custom",
-      blocks: [...current.layout.blocks, block],
-    },
+    layout: { ...current.layout, profile: "custom", blocks: [...current.layout.blocks, block] },
   });
   return block;
 }
@@ -262,8 +249,14 @@ export async function updateBlockInstance(
   if (!existing) throw new Error(`Block instance not found: ${id}`);
   const candidate = updater(cloneBlock(existing));
   if (candidate.id !== id || candidate.type !== existing.type) throw new Error("Block identity and type cannot be changed");
-  const blocks = current.layout.blocks.map((block) => block.id === id ? candidate : block);
-  await setStartPageSettings({ ...current, layout: { ...current.layout, profile: "custom", blocks } });
+  await setStartPageSettings({
+    ...current,
+    layout: {
+      ...current.layout,
+      profile: "custom",
+      blocks: current.layout.blocks.map((block) => block.id === id ? candidate : block),
+    },
+  });
   const saved = (await getStartPageSettings()).layout.blocks.find((block) => block.id === id);
   if (!saved) throw new Error(`Block instance disappeared after save: ${id}`);
   return saved;
@@ -278,6 +271,7 @@ export async function duplicateBlockInstance(id: string): Promise<BlockInstance>
   const source = current.layout.blocks.find((block) => block.id === id);
   if (!source) throw new Error(`Block instance not found: ${id}`);
   if (isSingletonBlockType(source.type)) throw new Error(`Singleton block cannot be duplicated: ${source.type}`);
+  const now = Date.now();
   const duplicate: BlockInstance = {
     ...cloneBlock(source),
     id: createBlockId(source.type),
@@ -285,21 +279,13 @@ export async function duplicateBlockInstance(id: string): Promise<BlockInstance>
     column: Math.min(current.layout.columns, source.column + 1),
     row: source.row + 1,
     order: current.layout.blocks.length,
-    free: {
-      ...source.free,
-      x: source.free.x + 24,
-      y: source.free.y + 24,
-    },
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    free: { ...source.free, x: source.free.x + 24, y: source.free.y + 24 },
+    createdAt: now,
+    updatedAt: now,
   };
   await setStartPageSettings({
     ...current,
-    layout: {
-      ...current.layout,
-      profile: "custom",
-      blocks: [...current.layout.blocks, duplicate],
-    },
+    layout: { ...current.layout, profile: "custom", blocks: [...current.layout.blocks, duplicate] },
   });
   return duplicate;
 }
@@ -323,7 +309,7 @@ export async function applyLayoutPreset(presetId: LayoutPresetId): Promise<Start
   const current = await getStartPageSettings();
   const preset = LAYOUT_PRESETS.find((item) => item.id === presetId);
   if (!preset) throw new Error(`Unknown layout preset: ${presetId}`);
-  const next: StartPageSettings = {
+  await setStartPageSettings({
     ...current,
     layout: {
       ...current.layout,
@@ -331,8 +317,7 @@ export async function applyLayoutPreset(presetId: LayoutPresetId): Promise<Start
       profile: preset.id,
       blocks: blocksFromPreset(preset, current.layout.zone),
     },
-  };
-  await setStartPageSettings(next);
+  });
   return getStartPageSettings();
 }
 
@@ -358,7 +343,7 @@ export async function setLayoutZone(zone: LayoutZone): Promise<StartPageSettings
 
 export async function createCustomTheme(name: string, sourceThemeId?: string): Promise<StartPageTheme> {
   const current = await getStartPageSettings();
-  const source = sourceThemeId ? getTheme(current, sourceThemeId) : getTheme(current);
+  const source = getTheme(current, sourceThemeId ?? current.themes.selectedThemeId);
   const now = Date.now();
   const theme: StartPageTheme = {
     ...cloneTheme(source),
@@ -370,10 +355,7 @@ export async function createCustomTheme(name: string, sourceThemeId?: string): P
   };
   await setStartPageSettings({
     ...current,
-    themes: {
-      selectedThemeId: theme.id,
-      customThemes: [...current.themes.customThemes, theme],
-    },
+    themes: { selectedThemeId: theme.id, customThemes: [...current.themes.customThemes, theme] },
   });
   return theme;
 }
@@ -383,7 +365,12 @@ export async function updateCustomTheme(theme: StartPageTheme): Promise<StartPag
   if (getBuiltInTheme(theme.id)) throw new Error("Built-in themes cannot be edited");
   const existing = current.themes.customThemes.find((item) => item.id === theme.id);
   if (!existing) throw new Error(`Custom theme not found: ${theme.id}`);
-  const normalized = normalizeTheme({ ...theme, builtIn: false, createdAt: existing.createdAt, updatedAt: Date.now() }, existing);
+  const normalized = normalizeTheme({
+    ...theme,
+    builtIn: false,
+    createdAt: existing.createdAt,
+    updatedAt: Date.now(),
+  }, existing);
   normalized.builtIn = false;
   await setStartPageSettings({
     ...current,
@@ -409,10 +396,7 @@ export async function duplicateTheme(themeId: string): Promise<StartPageTheme> {
   };
   await setStartPageSettings({
     ...current,
-    themes: {
-      selectedThemeId: duplicate.id,
-      customThemes: [...current.themes.customThemes, duplicate],
-    },
+    themes: { selectedThemeId: duplicate.id, customThemes: [...current.themes.customThemes, duplicate] },
   });
   return duplicate;
 }
@@ -422,7 +406,9 @@ export async function deleteCustomTheme(themeId: string): Promise<void> {
   if (getBuiltInTheme(themeId)) throw new Error("Built-in themes cannot be deleted");
   if (!current.themes.customThemes.some((theme) => theme.id === themeId)) return;
   const customThemes = current.themes.customThemes.filter((theme) => theme.id !== themeId);
-  const selectedThemeId = current.themes.selectedThemeId === themeId ? DEFAULT_SETTINGS.themes.selectedThemeId : current.themes.selectedThemeId;
+  const selectedThemeId = current.themes.selectedThemeId === themeId
+    ? DEFAULT_SETTINGS.themes.selectedThemeId
+    : current.themes.selectedThemeId;
   await setStartPageSettings({ ...current, themes: { selectedThemeId, customThemes } });
 }
 
@@ -450,10 +436,7 @@ export async function importCustomTheme(value: unknown): Promise<{ theme: StartP
   };
   await setStartPageSettings({
     ...current,
-    themes: {
-      selectedThemeId: theme.id,
-      customThemes: [...current.themes.customThemes, theme],
-    },
+    themes: { selectedThemeId: theme.id, customThemes: [...current.themes.customThemes, theme] },
   });
   return { theme, issues: result.issues };
 }
