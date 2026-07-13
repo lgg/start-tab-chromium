@@ -42,7 +42,7 @@ async function copyStaticAssets() {
     ]);
   }
   await Promise.all([
-    cp(source("icons"), output("icons"), { recursive: true }),
+    cp(path.join(root, "icons"), output("icons"), { recursive: true }),
     cp(source("_locales"), output("_locales"), { recursive: true }),
   ]);
 
