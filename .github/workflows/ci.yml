@@ -35,7 +35,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: locale-parity-report
-          path: locale-parity-report.json
+          path: |
+            locale-parity-report.json
+            src/_locales/en/messages.json
+            src/_locales/ru/messages.json
           retention-days: 1
       - name: Static validation
         run: npm run test
