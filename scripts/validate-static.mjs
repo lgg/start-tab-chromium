@@ -51,17 +51,19 @@ function assertCiPolicy(ci) {
   assert.doesNotMatch(ci, /actions\/cache@/, "Explicit GitHub Actions caches are not expected");
 }
 
-const [manifest, packageJson, enMessages, ruMessages, ci, rootBuild, canonicalBuild, newtabHtml, optionsHtml] = await Promise.all([
+const [manifest, packageJson, enMessages, ruBaseMessages, ruRoadmapMessages, ci, rootBuild, canonicalBuild, newtabHtml, optionsHtml] = await Promise.all([
   readJson("src/manifest.json"),
   readJson("package.json"),
   readJson("src/_locales/en/messages.json"),
   readJson("src/_locales/ru/messages.json"),
+  readJson("src/_locales/ru/roadmap-messages.json"),
   readFile(resolve(root, ".github/workflows/ci.yml"), "utf8"),
   readFile(resolve(root, "build.mjs"), "utf8"),
   readFile(resolve(root, "scripts/build.mjs"), "utf8"),
   readFile(resolve(root, "src/newtab/newtab.html"), "utf8"),
   readFile(resolve(root, "src/options/options.html"), "utf8"),
 ]);
+const ruMessages = { ...ruBaseMessages, ...ruRoadmapMessages };
 
 assert.equal(manifest.manifest_version, 3, "Manifest must remain MV3");
 assert.equal(manifest.version, packageJson.version, "Package and manifest versions must match");
@@ -73,7 +75,8 @@ for (const permission of ["storage", "alarms", "notifications", "declarativeNetR
 }
 
 assertCatalog("en", enMessages);
-assertCatalog("ru", ruMessages);
+assertCatalog("ru-base", ruBaseMessages);
+assertCatalog("ru-roadmap", ruRoadmapMessages);
 const englishKeys = sortedKeys(enMessages);
 const russianKeys = sortedKeys(ruMessages);
 const missingRussianKeys = englishKeys.filter((key) => !Object.prototype.hasOwnProperty.call(ruMessages, key));
@@ -84,6 +87,7 @@ assert.deepEqual(extraRussianKeys, [], `Russian catalog has obsolete keys: ${ext
 for (const relativePath of [
   "src/_locales/en/messages.json",
   "src/_locales/ru/messages.json",
+  "src/_locales/ru/roadmap-messages.json",
   "src/popup/popup.html",
   "src/popup/popup.css",
   "src/blocked/blocked.html",
