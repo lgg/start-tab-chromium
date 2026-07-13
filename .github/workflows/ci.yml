@@ -16,7 +16,7 @@ concurrency:
 jobs:
   typecheck-build:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,12 +39,34 @@ jobs:
             locale-parity-report.json
             src/_locales/en/messages.json
             src/_locales/ru/messages.json
+            src/_locales/ru/roadmap-messages.json
           retention-days: 1
-      - name: Static validation
-        run: npm run test
-      - name: Typecheck
-        run: npm run typecheck
-      - name: Build full extension
-        run: npm run build
-      - name: Build blocker-only extension
-        run: npm run build:blocker-only
+      - name: Complete validation suite
+        run: |
+          mkdir -p validation-logs
+          status=0
+          run_check() {
+            name="$1"
+            shift
+            echo "::group::$name"
+            if "$@" >"validation-logs/$name.log" 2>&1; then
+              echo "$name passed"
+            else
+              echo "$name failed"
+              status=1
+            fi
+            cat "validation-logs/$name.log"
+            echo "::endgroup::"
+          }
+          run_check test npm run test
+          run_check typecheck npm run typecheck
+          run_check build-full npm run build
+          run_check build-blocker-only npm run build:blocker-only
+          exit "$status"
+      - name: Upload validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-logs
+          path: validation-logs
+          retention-days: 1
