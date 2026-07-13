@@ -4,22 +4,21 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Start Tab</title>
+    <link rel="stylesheet" href="shared-ui.css" />
     <link rel="stylesheet" href="newtab.css" />
-    <link rel="stylesheet" href="newtab-instances.css" />
   </head>
   <body>
-    <div class="background" id="background"></div>
-    <main class="start-page">
-      <section class="grid" id="grid"></section>
+    <div class="background" id="background" aria-hidden="true"></div>
+    <main class="start-page" id="startPage">
+      <div class="editor-toolbar" id="editorToolbar"></div>
+      <aside class="palette" id="blockPalette" hidden></aside>
+      <section class="grid" id="grid" aria-live="off"></section>
       <div class="settings-hover-zone" aria-hidden="true"></div>
-      <button class="native-new-tab-button" id="nativeNewTab" title="Open browser new tab" aria-label="Open browser new tab">×</button>
-      <button class="settings-button" id="settings" title="Settings" aria-label="Settings">⚙</button>
+      <button class="native-new-tab-button icon-button" id="nativeNewTab" type="button"></button>
+      <button class="settings-button icon-button" id="settings" type="button">⚙</button>
+      <p class="visually-hidden" id="statusRegion" role="status" aria-live="polite"></p>
     </main>
     <script src="newtab-gate.js"></script>
     <script type="module" src="newtab.js"></script>
-    <script src="newtab-ip.js"></script>
-    <script src="newtab-editor.js"></script>
-    <script src="newtab-instances.js"></script>
-    <script type="module" src="newtab-onboarding.js"></script>
   </body>
 </html>
