@@ -102,8 +102,8 @@ function normalizedStorage(backup: BackupLike): Record<string, unknown> {
     [START_PAGE_SETTINGS_KEY]: settings,
     [START_PAGE_RUNTIME_KEY]: runtime,
     startPageOnboarding: normalizeOnboarding(backup.storage.startPageOnboarding),
-    [FOCUS_STATS_KEY]: backup.storage[FOCUS_STATS_KEY] ?? undefined,
   };
+  if (backup.storage[FOCUS_STATS_KEY] !== undefined) storage[FOCUS_STATS_KEY] = backup.storage[FOCUS_STATS_KEY];
   if (locale) storage.localeOverride = locale;
   return storage;
 }
