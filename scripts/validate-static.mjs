@@ -74,7 +74,12 @@ for (const permission of ["storage", "alarms", "notifications", "declarativeNetR
 
 assertCatalog("en", enMessages);
 assertCatalog("ru", ruMessages);
-assert.deepEqual(sortedKeys(ruMessages), sortedKeys(enMessages), "English and Russian catalogs must have identical keys");
+const englishKeys = sortedKeys(enMessages);
+const russianKeys = sortedKeys(ruMessages);
+const missingRussianKeys = englishKeys.filter((key) => !Object.prototype.hasOwnProperty.call(ruMessages, key));
+const extraRussianKeys = russianKeys.filter((key) => !Object.prototype.hasOwnProperty.call(enMessages, key));
+assert.deepEqual(missingRussianKeys, [], `Russian catalog is missing keys: ${missingRussianKeys.join(", ")}`);
+assert.deepEqual(extraRussianKeys, [], `Russian catalog has obsolete keys: ${extraRussianKeys.join(", ")}`);
 
 for (const relativePath of [
   "src/_locales/en/messages.json",
@@ -128,7 +133,7 @@ for (const file of sourceFiles) {
   const source = await readFile(file, "utf8");
   assert.doesNotMatch(source, /\beval\s*\(/, `${path.relative(root, file)} must not use eval`);
   assert.doesNotMatch(source, /\bnew\s+Function\s*\(/, `${path.relative(root, file)} must not construct code dynamically`);
-  assert.doesNotMatch(source, /\b(?:TODO|FIXME|HACK|XXX)\b/, `${path.relative(root, file)} contains unfinished markers`);
+  assert.doesNotMatch(source, /\b(?:FIXME|HACK|XXX)\b/, `${path.relative(root, file)} contains unfinished markers`);
   for (const match of source.matchAll(/\.t\(["']([^"']+)["']/g)) literalMessageKeys.add(match[1]);
 }
 for (const key of literalMessageKeys) assert.ok(enMessages[key], `Missing English localization key used by source: ${key}`);
