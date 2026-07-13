@@ -54,8 +54,7 @@ export function isBlockType(value: unknown): value is BlockType {
 }
 
 function stringValue(value: unknown, fallback: string, maxLength = 500): string {
-  if (typeof value !== "string") return fallback;
-  return value.slice(0, maxLength);
+  return typeof value === "string" ? value.slice(0, maxLength) : fallback;
 }
 
 function trimmedString(value: unknown, fallback: string, maxLength = 500): string {
@@ -107,8 +106,7 @@ function safeGradient(value: unknown, fallback: string): string {
 
 function safeCssToken(value: unknown, fallback: string, maxLength = 300): string {
   const candidate = trimmedString(value, fallback, maxLength);
-  if (!candidate || /[<>]/.test(candidate)) return fallback;
-  return candidate;
+  return candidate && !/[<>]/.test(candidate) ? candidate : fallback;
 }
 
 function stableHash(value: string): string {
@@ -138,10 +136,9 @@ function normalizeStartLinks(value: unknown, fallback: readonly StartLink[], pat
       issues.push({ path: `${path}[${index}]`, messageKey: "validationInvalidLink" });
       continue;
     }
-    const icon = trimmedString(item.icon, title.slice(0, 2).toUpperCase(), 20);
     result.push({
       id: trimmedString(item.id, stableItemId("link", index, `${title}|${url}`), 150),
-      icon,
+      icon: trimmedString(item.icon, title.slice(0, 2).toUpperCase(), 20),
       title,
       url,
     });
@@ -197,16 +194,9 @@ function normalizeTimeZone(value: unknown, fallback: string, path: string, issue
 function legacyConfigSource(type: BlockType, root: Record<string, unknown>): Record<string, unknown> {
   const source = root[type];
   if (isRecord(source)) return source;
-  switch (type) {
-    case "timer":
-    case "stopwatch":
-    case "pomodoro":
-      return isRecord(root.timers) ? root.timers : {};
-    case "startPinned":
-      return isRecord(root.startPinned) ? root.startPinned : {};
-    default:
-      return {};
-  }
+  if (type === "timer" || type === "stopwatch" || type === "pomodoro") return isRecord(root.timers) ? root.timers : {};
+  if (type === "startPinned") return isRecord(root.startPinned) ? root.startPinned : {};
+  return {};
 }
 
 export function normalizeBlockConfig<T extends BlockType>(
@@ -217,138 +207,50 @@ export function normalizeBlockConfig<T extends BlockType>(
   issues: ValidationIssue[] = [],
 ): BlockConfigFor<T> {
   const fallback = defaultBlockConfig(type);
-  const legacy = legacyConfigSource(type, legacyRoot);
-  const source = isRecord(value) ? value : legacy;
+  const source = isRecord(value) ? value : legacyConfigSource(type, legacyRoot);
   let config: BlockConfig;
-
   switch (type) {
     case "dateTime":
-      config = {
-        type,
-        mode: oneOf(source.mode, DATE_TIME_MODES, fallback.type === type ? fallback.mode : "both"),
-        dateFormat: stringValue(source.dateFormat, fallback.type === type ? fallback.dateFormat : "dddd, DD MMMM YYYY", 100),
-        timeFormat: stringValue(source.timeFormat, fallback.type === type ? fallback.timeFormat : "HH:mm", 100),
-        timeZone: normalizeTimeZone(source.timeZone, fallback.type === type ? fallback.timeZone : "", `${path}.timeZone`, issues),
-        locale: trimmedString(source.locale, fallback.type === type ? fallback.locale : "", 50),
-        timeFontSize: finiteNumber(source.timeFontSize ?? source.fontSize, fallback.type === type ? fallback.timeFontSize : 48, 12, 160),
-      };
+      config = { type, mode: oneOf(source.mode, DATE_TIME_MODES, fallback.type === type ? fallback.mode : "both"), dateFormat: stringValue(source.dateFormat, fallback.type === type ? fallback.dateFormat : "dddd, DD MMMM YYYY", 100), timeFormat: stringValue(source.timeFormat, fallback.type === type ? fallback.timeFormat : "HH:mm", 100), timeZone: normalizeTimeZone(source.timeZone, fallback.type === type ? fallback.timeZone : "", `${path}.timeZone`, issues), locale: trimmedString(source.locale, fallback.type === type ? fallback.locale : "", 50), timeFontSize: finiteNumber(source.timeFontSize ?? source.fontSize, fallback.type === type ? fallback.timeFontSize : 48, 12, 160) };
       break;
     case "ip": {
-      const endpointCandidate = stringValue(source.endpoint, fallback.type === type ? fallback.endpoint : "https://ipapi.co/json/");
-      const endpoint = safeWebUrl(endpointCandidate);
-      if (!endpoint) issues.push({ path: `${path}.endpoint`, messageKey: "validationInvalidUrl" });
-      config = { type, endpoint: endpoint ?? (fallback.type === type ? fallback.endpoint : "https://ipapi.co/json/") };
+      const candidate = safeWebUrl(stringValue(source.endpoint, fallback.type === type ? fallback.endpoint : "https://ipapi.co/json/"));
+      if (!candidate) issues.push({ path: `${path}.endpoint`, messageKey: "validationInvalidUrl" });
+      config = { type, endpoint: candidate ?? (fallback.type === type ? fallback.endpoint : "https://ipapi.co/json/") };
       break;
     }
     case "links":
-      config = {
-        type,
-        columns: finiteInteger(source.columns, fallback.type === type ? fallback.columns : 4, 1, 12),
-        rows: finiteInteger(source.rows, fallback.type === type ? fallback.rows : 2, 1, 12),
-        pageDirection: oneOf(source.pageDirection, LINK_DIRECTIONS, fallback.type === type ? fallback.pageDirection : "horizontal"),
-        fontFamily: safeCssToken(source.fontFamily, fallback.type === type ? fallback.fontFamily : "inherit", 200),
-        fontSize: finiteNumber(source.fontSize, fallback.type === type ? fallback.fontSize : 13, 8, 48),
-        iconSize: finiteNumber(source.iconSize, fallback.type === type ? fallback.iconSize : 28, 12, 128),
-        items: normalizeStartLinks(source.items, fallback.type === type ? fallback.items : [], `${path}.items`, issues),
-      };
+      config = { type, columns: finiteInteger(source.columns, fallback.type === type ? fallback.columns : 4, 1, 12), rows: finiteInteger(source.rows, fallback.type === type ? fallback.rows : 2, 1, 12), pageDirection: oneOf(source.pageDirection, LINK_DIRECTIONS, fallback.type === type ? fallback.pageDirection : "horizontal"), fontFamily: safeCssToken(source.fontFamily, fallback.type === type ? fallback.fontFamily : "inherit", 200), fontSize: finiteNumber(source.fontSize, fallback.type === type ? fallback.fontSize : 13, 8, 48), iconSize: finiteNumber(source.iconSize, fallback.type === type ? fallback.iconSize : 28, 12, 128), items: normalizeStartLinks(source.items, fallback.type === type ? fallback.items : [], `${path}.items`, issues) };
       break;
     case "search": {
       const providers = normalizeSearchProviders(source.providers, fallback.type === type ? fallback.providers : DEFAULT_SEARCH_PROVIDERS, `${path}.providers`, issues);
-      const candidate = trimmedString(source.provider, fallback.type === type ? fallback.provider : providers[0]?.id ?? "google", 100);
-      config = {
-        type,
-        provider: providers.some((provider) => provider.id === candidate) ? candidate : providers[0]?.id ?? "google",
-        providers,
-        placeholder: stringValue(source.placeholder, fallback.type === type ? fallback.placeholder : "", 160),
-      };
+      const requested = trimmedString(source.provider, fallback.type === type ? fallback.provider : providers[0]?.id ?? "google", 100);
+      config = { type, provider: providers.some((provider) => provider.id === requested) ? requested : providers[0]?.id ?? "google", providers, placeholder: stringValue(source.placeholder, fallback.type === type ? fallback.placeholder : "", 160) };
       break;
     }
     case "timer":
-      config = {
-        type,
-        durationSeconds: finiteInteger(source.durationSeconds ?? source.timerSeconds, fallback.type === type ? fallback.durationSeconds : 300, 1, 7 * 24 * 60 * 60),
-        notifyOnComplete: booleanValue(source.notifyOnComplete, fallback.type === type ? fallback.notifyOnComplete : true),
-      };
+      config = { type, durationSeconds: finiteInteger(source.durationSeconds ?? source.timerSeconds, fallback.type === type ? fallback.durationSeconds : 300, 1, 604800), notifyOnComplete: booleanValue(source.notifyOnComplete, fallback.type === type ? fallback.notifyOnComplete : true) };
       break;
-    case "stopwatch":
-      config = { type };
-      break;
+    case "stopwatch": config = { type }; break;
     case "pomodoro":
-      config = {
-        type,
-        workSeconds: finiteInteger(source.workSeconds ?? source.pomodoroWorkSeconds, fallback.type === type ? fallback.workSeconds : 1500, 60, 24 * 60 * 60),
-        breakSeconds: finiteInteger(source.breakSeconds ?? source.pomodoroBreakSeconds, fallback.type === type ? fallback.breakSeconds : 300, 30, 12 * 60 * 60),
-        notifyOnComplete: booleanValue(source.notifyOnComplete, fallback.type === type ? fallback.notifyOnComplete : true),
-        autoStartNextPhase: booleanValue(source.autoStartNextPhase, fallback.type === type ? fallback.autoStartNextPhase : false),
-      };
+      config = { type, workSeconds: finiteInteger(source.workSeconds ?? source.pomodoroWorkSeconds, fallback.type === type ? fallback.workSeconds : 1500, 60, 86400), breakSeconds: finiteInteger(source.breakSeconds ?? source.pomodoroBreakSeconds, fallback.type === type ? fallback.breakSeconds : 300, 30, 43200), notifyOnComplete: booleanValue(source.notifyOnComplete, fallback.type === type ? fallback.notifyOnComplete : true), autoStartNextPhase: booleanValue(source.autoStartNextPhase, fallback.type === type ? fallback.autoStartNextPhase : false) };
       break;
-    case "note":
-      config = {
-        type,
-        placeholder: stringValue(source.placeholder, fallback.type === type ? fallback.placeholder : "", 300),
-        confirmDeleteWithContent: booleanValue(source.confirmDeleteWithContent, fallback.type === type ? fallback.confirmDeleteWithContent : true),
-      };
-      break;
-    case "localTasks":
-      config = {
-        type,
-        placeholder: stringValue(source.placeholder, fallback.type === type ? fallback.placeholder : "", 300),
-        showCompleted: booleanValue(source.showCompleted, fallback.type === type ? fallback.showCompleted : true),
-        confirmDeleteWithContent: booleanValue(source.confirmDeleteWithContent, fallback.type === type ? fallback.confirmDeleteWithContent : true),
-      };
-      break;
-    case "googleCalendar":
-      config = {
-        type,
-        calendarId: trimmedString(source.calendarId, fallback.type === type ? fallback.calendarId : "primary", 300) || "primary",
-        accountLabel: stringValue(source.accountLabel, fallback.type === type ? fallback.accountLabel : "", 120),
-        query: stringValue(source.query, fallback.type === type ? fallback.query : "", 300),
-        maxResults: finiteInteger(source.maxResults, fallback.type === type ? fallback.maxResults : 6, 1, 25),
-      };
-      break;
+    case "note": config = { type, placeholder: stringValue(source.placeholder, fallback.type === type ? fallback.placeholder : "", 300), confirmDeleteWithContent: booleanValue(source.confirmDeleteWithContent, fallback.type === type ? fallback.confirmDeleteWithContent : true) }; break;
+    case "localTasks": config = { type, placeholder: stringValue(source.placeholder, fallback.type === type ? fallback.placeholder : "", 300), showCompleted: booleanValue(source.showCompleted, fallback.type === type ? fallback.showCompleted : true), confirmDeleteWithContent: booleanValue(source.confirmDeleteWithContent, fallback.type === type ? fallback.confirmDeleteWithContent : true) }; break;
+    case "googleCalendar": config = { type, calendarId: trimmedString(source.calendarId, fallback.type === type ? fallback.calendarId : "primary", 300) || "primary", accountLabel: stringValue(source.accountLabel, fallback.type === type ? fallback.accountLabel : "", 120), query: stringValue(source.query, fallback.type === type ? fallback.query : "", 300), maxResults: finiteInteger(source.maxResults, fallback.type === type ? fallback.maxResults : 6, 1, 25) }; break;
     case "weather": {
-      const forecastCandidate = stringValue(source.forecastEndpoint, fallback.type === type ? fallback.forecastEndpoint : "https://api.open-meteo.com/v1/forecast");
-      const geocodingCandidate = stringValue(source.geocodingEndpoint, fallback.type === type ? fallback.geocodingEndpoint : "https://geocoding-api.open-meteo.com/v1/search");
-      const forecastEndpoint = safeWebUrl(forecastCandidate);
-      const geocodingEndpoint = safeWebUrl(geocodingCandidate);
-      if (!forecastEndpoint) issues.push({ path: `${path}.forecastEndpoint`, messageKey: "validationInvalidUrl" });
-      if (!geocodingEndpoint) issues.push({ path: `${path}.geocodingEndpoint`, messageKey: "validationInvalidUrl" });
-      config = {
-        type,
-        provider: "open-meteo",
-        city: stringValue(source.city, fallback.type === type ? fallback.city : "Amsterdam", 160),
-        latitude: finiteNumber(source.latitude, fallback.type === type ? fallback.latitude : 52.3676, -90, 90),
-        longitude: finiteNumber(source.longitude, fallback.type === type ? fallback.longitude : 4.9041, -180, 180),
-        displayMode: oneOf(source.displayMode, WEATHER_MODES, fallback.type === type ? fallback.displayMode : "current"),
-        forecastEndpoint: forecastEndpoint ?? (fallback.type === type ? fallback.forecastEndpoint : "https://api.open-meteo.com/v1/forecast"),
-        geocodingEndpoint: geocodingEndpoint ?? (fallback.type === type ? fallback.geocodingEndpoint : "https://geocoding-api.open-meteo.com/v1/search"),
-      };
+      const forecast = safeWebUrl(stringValue(source.forecastEndpoint, fallback.type === type ? fallback.forecastEndpoint : "https://api.open-meteo.com/v1/forecast"));
+      const geocoding = safeWebUrl(stringValue(source.geocodingEndpoint, fallback.type === type ? fallback.geocodingEndpoint : "https://geocoding-api.open-meteo.com/v1/search"));
+      if (!forecast) issues.push({ path: `${path}.forecastEndpoint`, messageKey: "validationInvalidUrl" });
+      if (!geocoding) issues.push({ path: `${path}.geocodingEndpoint`, messageKey: "validationInvalidUrl" });
+      config = { type, provider: "open-meteo", city: stringValue(source.city, fallback.type === type ? fallback.city : "Amsterdam", 160), latitude: finiteNumber(source.latitude, fallback.type === type ? fallback.latitude : 52.3676, -90, 90), longitude: finiteNumber(source.longitude, fallback.type === type ? fallback.longitude : 4.9041, -180, 180), displayMode: oneOf(source.displayMode, WEATHER_MODES, fallback.type === type ? fallback.displayMode : "current"), forecastEndpoint: forecast ?? (fallback.type === type ? fallback.forecastEndpoint : "https://api.open-meteo.com/v1/forecast"), geocodingEndpoint: geocoding ?? (fallback.type === type ? fallback.geocodingEndpoint : "https://geocoding-api.open-meteo.com/v1/search") };
       break;
     }
-    case "commands":
-      config = { type };
-      break;
-    case "recent":
-      config = { type, maxResults: finiteInteger(source.maxResults, fallback.type === type ? fallback.maxResults : 10, 1, 50) };
-      break;
-    case "browserPinned":
-      config = { type };
-      break;
-    case "startPinned":
-      config = {
-        type,
-        columns: finiteInteger(source.columns, fallback.type === type ? fallback.columns : 3, 1, 12),
-        rows: finiteInteger(source.rows, fallback.type === type ? fallback.rows : 2, 1, 12),
-        pageDirection: oneOf(source.pageDirection, LINK_DIRECTIONS, fallback.type === type ? fallback.pageDirection : "horizontal"),
-        fontFamily: safeCssToken(source.fontFamily, fallback.type === type ? fallback.fontFamily : "inherit", 200),
-        fontSize: finiteNumber(source.fontSize, fallback.type === type ? fallback.fontSize : 13, 8, 48),
-        iconSize: finiteNumber(source.iconSize, fallback.type === type ? fallback.iconSize : 28, 12, 128),
-        items: normalizeStartLinks(source.items, fallback.type === type ? fallback.items : [], `${path}.items`, issues),
-      };
-      break;
-    case "stats":
-      config = { type };
-      break;
+    case "commands": config = { type }; break;
+    case "recent": config = { type, maxResults: finiteInteger(source.maxResults, fallback.type === type ? fallback.maxResults : 10, 1, 50) }; break;
+    case "browserPinned": config = { type }; break;
+    case "startPinned": config = { type, columns: finiteInteger(source.columns, fallback.type === type ? fallback.columns : 3, 1, 12), rows: finiteInteger(source.rows, fallback.type === type ? fallback.rows : 2, 1, 12), pageDirection: oneOf(source.pageDirection, LINK_DIRECTIONS, fallback.type === type ? fallback.pageDirection : "horizontal"), fontFamily: safeCssToken(source.fontFamily, fallback.type === type ? fallback.fontFamily : "inherit", 200), fontSize: finiteNumber(source.fontSize, fallback.type === type ? fallback.fontSize : 13, 8, 48), iconSize: finiteNumber(source.iconSize, fallback.type === type ? fallback.iconSize : 28, 12, 128), items: normalizeStartLinks(source.items, fallback.type === type ? fallback.items : [], `${path}.items`, issues) }; break;
+    case "stats": config = { type }; break;
   }
   return config as BlockConfigFor<T>;
 }
@@ -361,17 +263,7 @@ function normalizeBlockId(value: unknown, type: BlockType, seen: Set<string>): s
   return `${requested}-${suffix}`;
 }
 
-function normalizeBlock(
-  value: unknown,
-  index: number,
-  root: Record<string, unknown>,
-  columns: number,
-  zone: LayoutZone,
-  seenIds: Set<string>,
-  seenSingletons: Set<BlockType>,
-  issues: ValidationIssue[],
-  migrationIssues: MigrationIssue[],
-): BlockInstance | null {
+function normalizeBlock(value: unknown, index: number, root: Record<string, unknown>, columns: number, zone: LayoutZone, seenIds: Set<string>, seenSingletons: Set<BlockType>, issues: ValidationIssue[], migrationIssues: MigrationIssue[]): BlockInstance | null {
   if (!isRecord(value) || !isBlockType(value.type)) {
     migrationIssues.push({ path: `layout.blocks[${index}]`, reason: "Unknown or missing block type" });
     issues.push({ path: `layout.blocks[${index}]`, messageKey: "validationUnknownBlock" });
@@ -385,10 +277,11 @@ function normalizeBlock(
   }
   const descriptor = blockDescriptor(type);
   const id = normalizeBlockId(value.id, type, seenIds);
-  const width = finiteInteger(value.width, descriptor.defaultGridWidth, descriptor.minGridWidth, Math.max(descriptor.minGridWidth, columns));
+  const minimumWidth = Math.min(descriptor.minGridWidth, columns);
+  const width = finiteInteger(value.width, Math.min(descriptor.defaultGridWidth, columns), minimumWidth, columns);
   const height = finiteInteger(value.height, descriptor.defaultGridHeight, descriptor.minGridHeight, 80);
   const blockZone = oneOf(value.zone, LAYOUT_ZONES, zone);
-  const freeValue = isRecord(value.free) ? value.free : {};
+  const free = isRecord(value.free) ? value.free : {};
   const createdAt = timestampValue(value.createdAt, 0);
   const configValue = isRecord(value.config) && value.config.type === type ? value.config : legacyConfigSource(type, root);
   const block = {
@@ -402,12 +295,12 @@ function normalizeBlock(
     row: finiteInteger(value.row, index + 1, 1, 500),
     width,
     height,
-    order: finiteInteger(value.order, index, 0, 10_000),
+    order: finiteInteger(value.order, index, 0, 10000),
     free: {
-      x: finiteNumber(freeValue.x, Math.max(0, (finiteInteger(value.column, 1, 1, columns) - 1) * 92), 0, 100_000),
-      y: finiteNumber(freeValue.y, Math.max(0, (finiteInteger(value.row, index + 1, 1, 500) - 1) * 76), 0, 100_000),
-      width: finiteNumber(freeValue.width, Math.max(descriptor.minFreeWidth, width * 90), descriptor.minFreeWidth, 100_000),
-      height: finiteNumber(freeValue.height, Math.max(descriptor.minFreeHeight, height * 72), descriptor.minFreeHeight, 100_000),
+      x: finiteNumber(free.x, Math.max(0, (finiteInteger(value.column, 1, 1, columns) - 1) * 92), 0, 100000),
+      y: finiteNumber(free.y, Math.max(0, (finiteInteger(value.row, index + 1, 1, 500) - 1) * 76), 0, 100000),
+      width: finiteNumber(free.width, Math.max(descriptor.minFreeWidth, width * 90), descriptor.minFreeWidth, 100000),
+      height: finiteNumber(free.height, Math.max(descriptor.minFreeHeight, height * 72), descriptor.minFreeHeight, 100000),
     },
     config: normalizeBlockConfig(type, configValue, root, `layout.blocks[${index}].config`, issues),
     createdAt,
@@ -418,82 +311,49 @@ function normalizeBlock(
   return block;
 }
 
-function ensureSingletonAvailability(blocks: BlockInstance[], zone: LayoutZone): BlockInstance[] {
-  const next = [...blocks];
-  const existingTypes = new Set(next.map((block) => block.type));
-  for (const fallback of DEFAULT_LAYOUT_BLOCKS) {
-    if (!isSingletonBlockType(fallback.type) || existingTypes.has(fallback.type)) continue;
-    next.push({ ...cloneBlocks([fallback])[0]!, enabled: false, zone, order: next.length });
-  }
-  return next;
-}
-
-function normalizeBlocks(
-  value: unknown,
-  root: Record<string, unknown>,
-  columns: number,
-  zone: LayoutZone,
-  issues: ValidationIssue[],
-  migrationIssues: MigrationIssue[],
-): BlockInstance[] {
-  const source = Array.isArray(value) && value.length > 0 ? value : cloneBlocks(DEFAULT_LAYOUT_BLOCKS);
+function normalizeBlocks(value: unknown, root: Record<string, unknown>, columns: number, zone: LayoutZone, issues: ValidationIssue[], migrationIssues: MigrationIssue[]): BlockInstance[] {
+  const source = Array.isArray(value) ? value : cloneBlocks(DEFAULT_LAYOUT_BLOCKS);
   const seenIds = new Set<string>();
   const seenSingletons = new Set<BlockType>();
-  const blocks = source.flatMap((candidate, index) => {
+  return source.flatMap((candidate, index) => {
     const block = normalizeBlock(candidate, index, root, columns, zone, seenIds, seenSingletons, issues, migrationIssues);
     return block ? [block] : [];
-  });
-  const safeBlocks = blocks.length > 0 ? blocks : cloneBlocks(DEFAULT_LAYOUT_BLOCKS);
-  return ensureSingletonAvailability(safeBlocks, zone)
-    .map((block, order) => ({ ...block, order }))
-    .sort((left, right) => left.order - right.order);
+  }).map((block, order) => ({ ...block, order }));
 }
 
 function normalizeEffectConfig(value: unknown, fallback: AnimatedEffectConfig): AnimatedEffectConfig {
   const source = isRecord(value) ? value : {};
   const effect = oneOf(source.effect, EFFECT_IDS, fallback.effect);
+  const speed = (fallbackValue: number, max = 4): number => finiteNumber(source.speed, fallbackValue, 0.05, max);
+  const intensity = (fallbackValue: number, max = 1): number => finiteNumber(source.intensity, fallbackValue, 0, max);
   switch (effect) {
     case "animated-gradient": {
       const fallbackColors = fallback.effect === effect ? fallback.colors : ["#111827", "#312e81", "#0f766e", "#111827"];
-      const colors = Array.isArray(source.colors)
-        ? source.colors.filter((item): item is string => typeof item === "string").slice(0, 8).map((item) => safeCssToken(item, "#111827", 64))
-        : fallbackColors;
-      return { effect, speed: finiteNumber(source.speed, fallback.effect === effect ? fallback.speed : 1, 0.05, 4), intensity: finiteNumber(source.intensity, fallback.effect === effect ? fallback.intensity : 0.8, 0, 1), angle: finiteNumber(source.angle, fallback.effect === effect ? fallback.angle : 135, 0, 360), colors: colors.length >= 2 ? colors : fallbackColors };
+      const colors = Array.isArray(source.colors) ? source.colors.filter((item): item is string => typeof item === "string").slice(0, 8).map((item) => safeCssToken(item, "#111827", 64)) : fallbackColors;
+      return { effect, speed: speed(fallback.effect === effect ? fallback.speed : 1), intensity: intensity(fallback.effect === effect ? fallback.intensity : 0.8), angle: finiteNumber(source.angle, fallback.effect === effect ? fallback.angle : 135, 0, 360), colors: colors.length >= 2 ? colors : fallbackColors };
     }
-    case "aurora":
-      return { effect, speed: finiteNumber(source.speed, fallback.effect === effect ? fallback.speed : 1, 0.05, 4), intensity: finiteNumber(source.intensity, fallback.effect === effect ? fallback.intensity : 0.65, 0, 1), blur: finiteNumber(source.blur, fallback.effect === effect ? fallback.blur : 72, 0, 160) };
-    case "mesh":
-      return { effect, speed: finiteNumber(source.speed, fallback.effect === effect ? fallback.speed : 0.7, 0.05, 4), intensity: finiteNumber(source.intensity, fallback.effect === effect ? fallback.intensity : 0.75, 0, 1), scale: finiteNumber(source.scale, fallback.effect === effect ? fallback.scale : 1, 0.25, 4) };
-    case "spotlight":
-      return { effect, speed: finiteNumber(source.speed, fallback.effect === effect ? fallback.speed : 0.65, 0.05, 4), intensity: finiteNumber(source.intensity, fallback.effect === effect ? fallback.intensity : 0.72, 0, 1), size: finiteNumber(source.size, fallback.effect === effect ? fallback.size : 62, 10, 180) };
-    case "noise":
-      return { effect, intensity: finiteNumber(source.intensity, fallback.effect === effect ? fallback.intensity : 0.22, 0, 0.65), animated: booleanValue(source.animated, fallback.effect === effect ? fallback.animated : false), speed: finiteNumber(source.speed, fallback.effect === effect ? fallback.speed : 0.5, 0.05, 2) };
-    case "matrix":
-      return { effect, speed: finiteNumber(source.speed, fallback.effect === effect ? fallback.speed : 1, 0.05, 4), intensity: finiteNumber(source.intensity, fallback.effect === effect ? fallback.intensity : 0.7, 0, 1), density: finiteNumber(source.density, fallback.effect === effect ? fallback.density : 0.55, 0.1, 1) };
-    case "cyberpunk":
-      return { effect, speed: finiteNumber(source.speed, fallback.effect === effect ? fallback.speed : 1.1, 0.05, 4), intensity: finiteNumber(source.intensity, fallback.effect === effect ? fallback.intensity : 0.72, 0, 1), scanlines: booleanValue(source.scanlines, fallback.effect === effect ? fallback.scanlines : true) };
+    case "aurora": return { effect, speed: speed(fallback.effect === effect ? fallback.speed : 1), intensity: intensity(fallback.effect === effect ? fallback.intensity : 0.65), blur: finiteNumber(source.blur, fallback.effect === effect ? fallback.blur : 72, 0, 160) };
+    case "mesh": return { effect, speed: speed(fallback.effect === effect ? fallback.speed : 0.7), intensity: intensity(fallback.effect === effect ? fallback.intensity : 0.75), scale: finiteNumber(source.scale, fallback.effect === effect ? fallback.scale : 1, 0.25, 4) };
+    case "spotlight": return { effect, speed: speed(fallback.effect === effect ? fallback.speed : 0.65), intensity: intensity(fallback.effect === effect ? fallback.intensity : 0.72), size: finiteNumber(source.size, fallback.effect === effect ? fallback.size : 62, 10, 180) };
+    case "noise": return { effect, intensity: intensity(fallback.effect === effect ? fallback.intensity : 0.22, 0.65), animated: booleanValue(source.animated, fallback.effect === effect ? fallback.animated : false), speed: speed(fallback.effect === effect ? fallback.speed : 0.5, 2) };
+    case "matrix": return { effect, speed: speed(fallback.effect === effect ? fallback.speed : 1), intensity: intensity(fallback.effect === effect ? fallback.intensity : 0.7), density: finiteNumber(source.density, fallback.effect === effect ? fallback.density : 0.55, 0.1, 1) };
+    case "cyberpunk": return { effect, speed: speed(fallback.effect === effect ? fallback.speed : 1.1), intensity: intensity(fallback.effect === effect ? fallback.intensity : 0.72), scanlines: booleanValue(source.scanlines, fallback.effect === effect ? fallback.scanlines : true) };
   }
 }
 
 function normalizeBackground(value: unknown, fallback: BackgroundTile, path: string, issues: ValidationIssue[]): BackgroundTile {
   if (!isRecord(value)) return structuredClone(fallback);
   const kind = oneOf(value.kind, ["solid", "gradient", "image", "effect"] as const, fallback.kind);
-  switch (kind) {
-    case "solid":
-      return { kind, color: safeCssToken(value.color, fallback.kind === kind ? fallback.color : "#08111f", 100) };
-    case "gradient":
-      return { kind, css: safeGradient(value.css, fallback.kind === kind ? fallback.css : "linear-gradient(145deg, #08111f, #1e293b)") };
-    case "image": {
-      const url = safeWebUrl(stringValue(value.url, fallback.kind === kind ? fallback.url : ""));
-      if (!url) issues.push({ path: `${path}.url`, messageKey: "validationInvalidUrl" });
-      if (!url && fallback.kind !== kind) return structuredClone(fallback);
-      return { kind, url: url ?? (fallback.kind === kind ? fallback.url : ""), fit: oneOf(value.fit, ["cover", "contain"] as const, fallback.kind === kind ? fallback.fit : "cover"), position: safeCssToken(value.position, fallback.kind === kind ? fallback.position : "center", 100) };
-    }
-    case "effect": {
-      const fallbackConfig = fallback.kind === kind ? fallback.config : BUILT_IN_THEMES[0]!.background.kind === "effect" ? BUILT_IN_THEMES[0]!.background.config : { effect: "aurora", speed: 1, intensity: 0.65, blur: 72 };
-      return { kind, baseColor: safeCssToken(value.baseColor, fallback.kind === kind ? fallback.baseColor : "#08111f", 100), config: normalizeEffectConfig(value.config, fallbackConfig) };
-    }
+  if (kind === "solid") return { kind, color: safeCssToken(value.color, fallback.kind === kind ? fallback.color : "#08111f", 100) };
+  if (kind === "gradient") return { kind, css: safeGradient(value.css, fallback.kind === kind ? fallback.css : "linear-gradient(145deg, #08111f, #1e293b)") };
+  if (kind === "image") {
+    const url = safeWebUrl(stringValue(value.url, fallback.kind === kind ? fallback.url : ""));
+    if (!url) issues.push({ path: `${path}.url`, messageKey: "validationInvalidUrl" });
+    if (!url && fallback.kind !== kind) return structuredClone(fallback);
+    return { kind, url: url ?? (fallback.kind === kind ? fallback.url : ""), fit: oneOf(value.fit, ["cover", "contain"] as const, fallback.kind === kind ? fallback.fit : "cover"), position: safeCssToken(value.position, fallback.kind === kind ? fallback.position : "center", 100) };
   }
+  const fallbackConfig = fallback.kind === "effect" ? fallback.config : BUILT_IN_THEMES[0]!.background.kind === "effect" ? BUILT_IN_THEMES[0]!.background.config : { effect: "aurora", speed: 1, intensity: 0.65, blur: 72 };
+  return { kind: "effect", baseColor: safeCssToken(value.baseColor, fallback.kind === "effect" ? fallback.baseColor : "#08111f", 100), config: normalizeEffectConfig(value.config, fallbackConfig) };
 }
 
 export function normalizeTheme(value: unknown, fallback: StartPageTheme, path = "theme", issues: ValidationIssue[] = []): StartPageTheme {
@@ -533,17 +393,12 @@ function legacyTheme(root: Record<string, unknown>, issues: ValidationIssue[]): 
   fallback.id = "migrated-legacy-theme";
   fallback.name = "Migrated theme";
   fallback.builtIn = false;
-  const backgroundColor = safeCssToken(appearance.backgroundColor, "#08111f", 100);
-  const backgroundImage = safeWebUrl(stringValue(appearance.backgroundImage, ""));
+  const color = safeCssToken(appearance.backgroundColor, "#08111f", 100);
+  const image = safeWebUrl(stringValue(appearance.backgroundImage, ""));
   const effect = stringValue(appearance.backgroundEffect, "none");
-  if (backgroundImage) {
-    fallback.background = { kind: "image", url: backgroundImage, fit: "cover", position: "center" };
-  } else if (["gradient", "aurora", "mesh", "spotlight", "noise"].includes(effect)) {
-    const mapped = effect === "gradient" ? "animated-gradient" : effect;
-    fallback.background = normalizeBackground({ kind: "effect", baseColor: backgroundColor, config: { effect: mapped } }, fallback.background, "appearance", issues);
-  } else {
-    fallback.background = { kind: "solid", color: backgroundColor };
-  }
+  if (image) fallback.background = { kind: "image", url: image, fit: "cover", position: "center" };
+  else if (["gradient", "aurora", "mesh", "spotlight", "noise"].includes(effect)) fallback.background = normalizeBackground({ kind: "effect", baseColor: color, config: { effect: effect === "gradient" ? "animated-gradient" : effect } }, fallback.background, "appearance", issues);
+  else fallback.background = { kind: "solid", color };
   fallback.tokens.textPrimary = safeCssToken(appearance.textColor, fallback.tokens.textPrimary, 100);
   fallback.tokens.fontFamily = safeCssToken(appearance.fontFamily, fallback.tokens.fontFamily, 300);
   fallback.tokens.baseFontSize = finiteNumber(appearance.baseFontSize, fallback.tokens.baseFontSize, 10, 32);
@@ -563,10 +418,7 @@ function normalizeCustomThemes(value: unknown, issues: ValidationIssue[]): Start
     theme.builtIn = false;
     let id = theme.id;
     let suffix = 2;
-    while (seen.has(id)) {
-      id = `${theme.id}-${suffix}`;
-      suffix += 1;
-    }
+    while (seen.has(id)) id = `${theme.id}-${suffix++}`;
     theme.id = id;
     seen.add(id);
     result.push(theme);
@@ -575,16 +427,12 @@ function normalizeCustomThemes(value: unknown, issues: ValidationIssue[]): Start
 }
 
 export function normalizeStartPageSettingsWithReport(value: unknown): { settings: StartPageSettings; report: MigrationReport; validation: ValidationIssue[] } {
-  if (!isRecord(value)) {
-    return {
-      settings: cloneSettings(DEFAULT_SETTINGS),
-      report: { fromVersion: 0, toVersion: START_PAGE_SCHEMA_VERSION, migratedBlocks: DEFAULT_SETTINGS.layout.blocks.length, skippedBlocks: 0, issues: [] },
-      validation: [],
-    };
-  }
+  if (!isRecord(value)) return { settings: cloneSettings(DEFAULT_SETTINGS), report: { fromVersion: 0, toVersion: START_PAGE_SCHEMA_VERSION, migratedBlocks: DEFAULT_SETTINGS.layout.blocks.length, skippedBlocks: 0, issues: [] }, validation: [] };
   const issues: ValidationIssue[] = [];
   const migrationIssues: MigrationIssue[] = [];
-  const fromVersion = finiteInteger(value.schemaVersion, 1, 1, START_PAGE_SCHEMA_VERSION);
+  const rawVersion = typeof value.schemaVersion === "number" && Number.isInteger(value.schemaVersion) ? value.schemaVersion : 1;
+  const fromVersion = Math.max(1, rawVersion);
+  if (fromVersion > START_PAGE_SCHEMA_VERSION) migrationIssues.push({ path: "schemaVersion", reason: `Unsupported future schema version: ${fromVersion}` });
   const startTab = isRecord(value.startTab) ? value.startTab : {};
   const settingsButton = isRecord(value.settingsButton) ? value.settingsButton : {};
   const focusStats = isRecord(value.focusStats) ? value.focusStats : {};
@@ -597,48 +445,17 @@ export function normalizeStartPageSettingsWithReport(value: unknown): { settings
   const migratedLegacyTheme = fromVersion < START_PAGE_SCHEMA_VERSION ? legacyTheme(value, issues) : null;
   if (migratedLegacyTheme && !customThemes.some((theme) => theme.id === migratedLegacyTheme.id)) customThemes.push(migratedLegacyTheme);
   const requestedThemeId = trimmedString(themes.selectedThemeId, migratedLegacyTheme?.id ?? DEFAULT_SETTINGS.themes.selectedThemeId, 160);
-  const selectedThemeId = getBuiltInTheme(requestedThemeId) || customThemes.some((theme) => theme.id === requestedThemeId)
-    ? requestedThemeId
-    : DEFAULT_SETTINGS.themes.selectedThemeId;
-
+  const selectedThemeId = getBuiltInTheme(requestedThemeId) || customThemes.some((theme) => theme.id === requestedThemeId) ? requestedThemeId : DEFAULT_SETTINGS.themes.selectedThemeId;
   const settings: StartPageSettings = {
     schemaVersion: START_PAGE_SCHEMA_VERSION,
     updatedAt: timestampValue(value.updatedAt, 0),
     startTab: { enabled: booleanValue(startTab.enabled, DEFAULT_SETTINGS.startTab.enabled) },
-    settingsButton: {
-      visibility: oneOf(settingsButton.visibility, SETTINGS_VISIBILITY, DEFAULT_SETTINGS.settingsButton.visibility),
-      hoverArea: oneOf(settingsButton.hoverArea, SETTINGS_HOVER_AREAS, DEFAULT_SETTINGS.settingsButton.hoverArea),
-    },
-    focusStats: {
-      defaultMinutesPerAvoidedVisit: finiteNumber(focusStats.defaultMinutesPerAvoidedVisit, DEFAULT_SETTINGS.focusStats.defaultMinutesPerAvoidedVisit, 0, 1440),
-      avoidedVisitDedupeSeconds: finiteInteger(focusStats.avoidedVisitDedupeSeconds, DEFAULT_SETTINGS.focusStats.avoidedVisitDedupeSeconds, 1, 7 * 24 * 60 * 60),
-      domainMinutes: normalizeDomainMinutes(focusStats.domainMinutes),
-    },
-    layout: {
-      columns,
-      rowHeight: finiteNumber(layout.rowHeight, DEFAULT_SETTINGS.layout.rowHeight, 40, 240),
-      gap: finiteNumber(layout.gap, DEFAULT_SETTINGS.layout.gap, 0, 60),
-      profile: trimmedString(layout.profile, DEFAULT_SETTINGS.layout.profile, 100) || "custom",
-      mode: oneOf(layout.mode, LAYOUT_MODES, DEFAULT_SETTINGS.layout.mode),
-      zone,
-      showBlockTitles: booleanValue(layout.showBlockTitles, DEFAULT_SETTINGS.layout.showBlockTitles),
-      containedMaxWidth: finiteNumber(layout.containedMaxWidth, DEFAULT_SETTINGS.layout.containedMaxWidth, 640, 3840),
-      blocks,
-    },
+    settingsButton: { visibility: oneOf(settingsButton.visibility, SETTINGS_VISIBILITY, DEFAULT_SETTINGS.settingsButton.visibility), hoverArea: oneOf(settingsButton.hoverArea, SETTINGS_HOVER_AREAS, DEFAULT_SETTINGS.settingsButton.hoverArea) },
+    focusStats: { defaultMinutesPerAvoidedVisit: finiteNumber(focusStats.defaultMinutesPerAvoidedVisit, DEFAULT_SETTINGS.focusStats.defaultMinutesPerAvoidedVisit, 0, 1440), avoidedVisitDedupeSeconds: finiteInteger(focusStats.avoidedVisitDedupeSeconds, DEFAULT_SETTINGS.focusStats.avoidedVisitDedupeSeconds, 1, 604800), domainMinutes: normalizeDomainMinutes(focusStats.domainMinutes) },
+    layout: { columns, rowHeight: finiteNumber(layout.rowHeight, DEFAULT_SETTINGS.layout.rowHeight, 40, 240), gap: finiteNumber(layout.gap, DEFAULT_SETTINGS.layout.gap, 0, 60), profile: trimmedString(layout.profile, DEFAULT_SETTINGS.layout.profile, 100) || "custom", mode: oneOf(layout.mode, LAYOUT_MODES, DEFAULT_SETTINGS.layout.mode), zone, showBlockTitles: booleanValue(layout.showBlockTitles, DEFAULT_SETTINGS.layout.showBlockTitles), containedMaxWidth: finiteNumber(layout.containedMaxWidth, DEFAULT_SETTINGS.layout.containedMaxWidth, 640, 3840), blocks },
     themes: { selectedThemeId, customThemes },
   };
-
-  return {
-    settings,
-    report: {
-      fromVersion,
-      toVersion: START_PAGE_SCHEMA_VERSION,
-      migratedBlocks: blocks.length,
-      skippedBlocks: migrationIssues.length,
-      issues: migrationIssues,
-    },
-    validation: issues,
-  };
+  return { settings, report: { fromVersion, toVersion: START_PAGE_SCHEMA_VERSION, migratedBlocks: blocks.length, skippedBlocks: migrationIssues.length, issues: migrationIssues }, validation: issues };
 }
 
 export function normalizeStartPageSettings(value: unknown): StartPageSettings {
@@ -652,32 +469,19 @@ export function validateStartPageSettings(value: unknown): ValidationResult<Star
 
 export function normalizeThemeBundle(value: unknown): ValidationResult<ThemeBundle> {
   const issues: ValidationIssue[] = [];
-  const fallbackTheme = cloneTheme(BUILT_IN_THEMES[0]!);
-  fallbackTheme.id = "imported-theme";
-  fallbackTheme.name = "Imported theme";
-  fallbackTheme.builtIn = false;
+  const fallback = cloneTheme(BUILT_IN_THEMES[0]!);
+  fallback.id = "imported-theme";
+  fallback.name = "Imported theme";
+  fallback.builtIn = false;
   const source = isRecord(value) && value.app === "Start Tab Theme" && value.version === 1 ? value : null;
   if (!source) issues.push({ path: "theme", messageKey: "validationInvalidThemeFile" });
-  const theme = normalizeTheme(source?.theme, fallbackTheme, "theme", issues);
+  const theme = normalizeTheme(source?.theme, fallback, "theme", issues);
   theme.builtIn = false;
-  return {
-    value: {
-      app: "Start Tab Theme",
-      version: 1,
-      exportedAt: typeof source?.exportedAt === "string" ? source.exportedAt : new Date(0).toISOString(),
-      theme,
-    },
-    issues,
-  };
+  return { value: { app: "Start Tab Theme", version: 1, exportedAt: typeof source?.exportedAt === "string" ? source.exportedAt : new Date(0).toISOString(), theme }, issues };
 }
 
 export function themeBundle(theme: StartPageTheme): ThemeBundle {
-  return {
-    app: "Start Tab Theme",
-    version: 1,
-    exportedAt: new Date().toISOString(),
-    theme: { ...cloneTheme(theme), builtIn: false },
-  };
+  return { app: "Start Tab Theme", version: 1, exportedAt: new Date().toISOString(), theme: { ...cloneTheme(theme), builtIn: false } };
 }
 
 export function hasBlockUserData(block: BlockInstance, runtime: { notes?: Record<string, string>; tasks?: Record<string, unknown[]> }): boolean {
