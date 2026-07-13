@@ -333,6 +333,10 @@ async function init(): Promise<void> {
     paletteHost,
     getRuntime: () => runtime,
     requestRender: queueRender,
+    previewBlock: (card, block, settings) => {
+      positionCard(card, block, settings);
+      updateLayoutMetrics(settings, visibleBlocks(settings));
+    },
     onSaved: (settings) => {
       savedSettings = settings;
       announce(i18n.t("layoutSaved"));
