@@ -1,5 +1,6 @@
 import { markStartTabDataChanged } from "./data-revision.js";
 import { withStorageLock } from "./storage-lock.js";
+import { configureThemeSettingsPersistence } from "./start-page-settings-themes.js";
 import {
   BLOCK_DESCRIPTORS,
   BUILT_IN_THEMES,
@@ -168,41 +169,24 @@ async function readRawSettings(): Promise<unknown> {
   return items[START_PAGE_SETTINGS_KEY];
 }
 
-async function persistSettingsInTransaction(settings: StartPageSettings, report?: MigrationReport): Promise<void> {
+async function persistSettings(settings: StartPageSettings, report?: MigrationReport): Promise<void> {
   const payload: Record<string, unknown> = { [START_PAGE_SETTINGS_KEY]: settings };
   if (report) payload[START_PAGE_MIGRATION_REPORT_KEY] = report;
   await chrome.storage.local.set(payload);
   await markStartTabDataChanged(settings.updatedAt || Date.now());
 }
 
-export function createDefaultStartPageSettings(now = Date.now()): StartPageSettings {
-  return withBlockTimestamps(null, cloneSettings(DEFAULT_SETTINGS), now);
-}
-
-/** Read a normalized view without performing migration writes. */
-export async function readStartPageSettingsSnapshot(): Promise<StartPageSettings> {
-  return normalizeStartPageSettings(await readRawSettings());
-}
-
 export async function getStartPageSettings(): Promise<StartPageSettings> {
-  const raw = await readRawSettings();
-  const initial = normalizeStartPageSettingsWithReport(raw);
-  if (isFutureStartPageSchema(raw)) {
-    await chrome.storage.local.set({ [START_PAGE_MIGRATION_REPORT_KEY]: initial.report });
-    return initial.settings;
-  }
-  if (jsonEqual(raw, initial.settings)) return initial.settings;
-
   return withStorageLock("data-write", async () => {
-    const currentRaw = await readRawSettings();
-    const { settings, report } = normalizeStartPageSettingsWithReport(currentRaw);
-    if (isFutureStartPageSchema(currentRaw)) {
+    const raw = await readRawSettings();
+    const { settings, report } = normalizeStartPageSettingsWithReport(raw);
+    if (isFutureStartPageSchema(raw)) {
       await chrome.storage.local.set({ [START_PAGE_MIGRATION_REPORT_KEY]: report });
       return settings;
     }
-    if (jsonEqual(currentRaw, settings)) return settings;
+    if (jsonEqual(raw, settings)) return settings;
     const stamped = withBlockTimestamps(null, settings, Date.now());
-    await persistSettingsInTransaction(stamped, report);
+    await persistSettings(stamped, report);
     return stamped;
   });
 }
@@ -225,48 +209,38 @@ export async function getStartPageMigrationReport(): Promise<MigrationReport | n
   };
 }
 
-async function validateAndPersistSettingsInTransaction(
-  value: StartPageSettings,
-  raw: unknown,
-): Promise<{ settings: StartPageSettings; issues: ValidationIssue[] }> {
-  if (isFutureStartPageSchema(raw)) {
-    throw new Error("Start Tab settings were created by a newer extension version and cannot be modified safely");
-  }
-  const previous = normalizeStartPageSettings(raw);
-  if (previous.updatedAt > 0 && value.updatedAt !== previous.updatedAt) {
-    throw new Error("Start Tab settings changed in another extension context; reload before saving");
-  }
-  const validation = validateStartPageSettings(value);
-  const stamped = withBlockTimestamps(previous, validation.value, Math.max(Date.now(), previous.updatedAt + 1));
-  await persistSettingsInTransaction(stamped);
-  return { settings: stamped, issues: validation.issues };
-}
-
 export async function setStartPageSettings(value: StartPageSettings): Promise<ValidationIssue[]> {
   return withStorageLock("data-write", async () => {
     const raw = await readRawSettings();
-    return (await validateAndPersistSettingsInTransaction(value, raw)).issues;
+    if (isFutureStartPageSchema(raw)) {
+      throw new Error("Start Tab settings were created by a newer extension version and cannot be modified safely");
+    }
+    const previous = normalizeStartPageSettings(raw);
+    if (previous.updatedAt > 0 && value.updatedAt !== previous.updatedAt) {
+      throw new Error("Start Tab settings changed in another extension context; reload before saving");
+    }
+    const validation = validateStartPageSettings(value);
+    const stamped = withBlockTimestamps(previous, validation.value, Math.max(Date.now(), previous.updatedAt + 1));
+    await persistSettings(stamped);
+    return validation.issues;
   });
 }
 
 export async function updateStartPageSettings(
   updater: (current: StartPageSettings) => StartPageSettings,
 ): Promise<{ settings: StartPageSettings; issues: ValidationIssue[] }> {
-  return withStorageLock("data-write", async () => {
-    const raw = await readRawSettings();
-    if (isFutureStartPageSchema(raw)) {
-      throw new Error("Start Tab settings were created by a newer extension version and cannot be modified safely");
-    }
-    const current = normalizeStartPageSettings(raw);
-    return validateAndPersistSettingsInTransaction(updater(cloneSettings(current)), raw);
-  });
+  const current = await getStartPageSettings();
+  const issues = await setStartPageSettings(updater(cloneSettings(current)));
+  return { settings: await getStartPageSettings(), issues };
 }
 
 export async function resetStartPageSettings(): Promise<StartPageSettings> {
   return withStorageLock("data-write", async () => {
-    const settings = createDefaultStartPageSettings();
-    await persistSettingsInTransaction(settings);
-    await chrome.storage.local.remove(START_PAGE_MIGRATION_REPORT_KEY);
+    const raw = await readRawSettings();
+    const previous = isFutureStartPageSchema(raw) ? null : normalizeStartPageSettings(raw);
+    const now = Math.max(Date.now(), (previous?.updatedAt ?? 0) + 1);
+    const settings = withBlockTimestamps(null, cloneSettings(DEFAULT_SETTINGS), now);
+    await persistSettings(settings);
     return settings;
   });
 }
@@ -398,129 +372,10 @@ export async function setLayoutZone(zone: LayoutZone): Promise<StartPageSettings
   return getStartPageSettings();
 }
 
-export function createCustomThemeDraft(
-  settings: StartPageSettings,
-  name: string,
-  sourceThemeId = settings.themes.selectedThemeId,
-): StartPageTheme {
-  const source = getTheme(settings, sourceThemeId);
-  const now = Date.now();
-  return {
-    ...cloneTheme(source),
-    id: createThemeId(),
-    name: name.trim() || source.name,
-    builtIn: false,
-    createdAt: now,
-    updatedAt: now,
-  };
-}
 
-export async function saveNewCustomTheme(theme: StartPageTheme): Promise<StartPageTheme> {
-  const current = await getStartPageSettings();
-  const now = Date.now();
-  const fallback = cloneTheme(getTheme(current));
-  fallback.id = theme.id;
-  fallback.builtIn = false;
-  const normalized = normalizeTheme({ ...theme, builtIn: false, updatedAt: now }, fallback);
-  normalized.id = getBuiltInTheme(normalized.id) || current.themes.customThemes.some((item) => item.id === normalized.id)
-    ? createThemeId()
-    : normalized.id;
-  normalized.builtIn = false;
-  normalized.createdAt = now;
-  normalized.updatedAt = now;
-  await setStartPageSettings({
-    ...current,
-    themes: { selectedThemeId: normalized.id, customThemes: [...current.themes.customThemes, normalized] },
-  });
-  return normalized;
-}
+configureThemeSettingsPersistence({
+  get: getStartPageSettings,
+  set: setStartPageSettings,
+});
 
-export async function createCustomTheme(name: string, sourceThemeId?: string): Promise<StartPageTheme> {
-  const current = await getStartPageSettings();
-  return createCustomThemeDraft(current, name, sourceThemeId);
-}
-
-export async function updateCustomTheme(theme: StartPageTheme): Promise<StartPageTheme> {
-  const current = await getStartPageSettings();
-  if (getBuiltInTheme(theme.id)) throw new Error("Built-in themes cannot be edited");
-  const existing = current.themes.customThemes.find((item) => item.id === theme.id);
-  if (!existing) return saveNewCustomTheme(theme);
-  const normalized = normalizeTheme({
-    ...theme,
-    builtIn: false,
-    createdAt: existing.createdAt,
-    updatedAt: Date.now(),
-  }, existing);
-  normalized.builtIn = false;
-  await setStartPageSettings({
-    ...current,
-    themes: {
-      ...current.themes,
-      customThemes: current.themes.customThemes.map((item) => item.id === theme.id ? normalized : item),
-    },
-  });
-  return normalized;
-}
-
-export async function duplicateTheme(themeId: string, name?: string): Promise<StartPageTheme> {
-  const current = await getStartPageSettings();
-  const source = getTheme(current, themeId);
-  const now = Date.now();
-  const duplicate: StartPageTheme = {
-    ...cloneTheme(source),
-    id: createThemeId(),
-    name: name?.trim() || source.name,
-    builtIn: false,
-    createdAt: now,
-    updatedAt: now,
-  };
-  await setStartPageSettings({
-    ...current,
-    themes: { selectedThemeId: duplicate.id, customThemes: [...current.themes.customThemes, duplicate] },
-  });
-  return duplicate;
-}
-
-export async function deleteCustomTheme(themeId: string): Promise<void> {
-  const current = await getStartPageSettings();
-  if (getBuiltInTheme(themeId)) throw new Error("Built-in themes cannot be deleted");
-  if (!current.themes.customThemes.some((theme) => theme.id === themeId)) return;
-  const customThemes = current.themes.customThemes.filter((theme) => theme.id !== themeId);
-  const selectedThemeId = current.themes.selectedThemeId === themeId
-    ? DEFAULT_SETTINGS.themes.selectedThemeId
-    : current.themes.selectedThemeId;
-  await setStartPageSettings({ ...current, themes: { selectedThemeId, customThemes } });
-}
-
-export async function selectTheme(themeId: string): Promise<void> {
-  const current = await getStartPageSettings();
-  if (!getBuiltInTheme(themeId) && !current.themes.customThemes.some((theme) => theme.id === themeId)) {
-    throw new Error(`Theme not found: ${themeId}`);
-  }
-  await setStartPageSettings({ ...current, themes: { ...current.themes, selectedThemeId: themeId } });
-}
-
-export async function importCustomTheme(value: unknown): Promise<{ theme: StartPageTheme; issues: ValidationIssue[] }> {
-  const result = normalizeThemeBundle(value);
-  if (result.issues.some((issue) => issue.messageKey === "validationInvalidThemeFile")) {
-    throw new Error("Invalid Start Tab theme file");
-  }
-  const current = await getStartPageSettings();
-  const now = Date.now();
-  const theme: StartPageTheme = {
-    ...result.value.theme,
-    id: createThemeId(),
-    builtIn: false,
-    createdAt: now,
-    updatedAt: now,
-  };
-  await setStartPageSettings({
-    ...current,
-    themes: { selectedThemeId: theme.id, customThemes: [...current.themes.customThemes, theme] },
-  });
-  return { theme, issues: result.issues };
-}
-
-export function exportCustomTheme(theme: StartPageTheme): ThemeBundle {
-  return themeBundle(theme);
-}
+export * from "./start-page-settings-themes.js";
