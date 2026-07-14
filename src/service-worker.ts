@@ -11,6 +11,7 @@ import {
   clearAll,
   migrateLegacyStorage,
   rememberBlockedNavigation,
+  replaceBlockedSites,
   syncRules,
   unblockHost,
 } from "./lib/blocklist.js";
@@ -31,12 +32,14 @@ import {
   parseClockAlarmName,
   pauseClockState,
   resetClockState,
+  resetStartPageRuntimeState,
   scheduleClockAlarm,
   setStartPageRuntimeState,
   startClockState,
 } from "./lib/start-page-runtime.js";
 import {
   getStartPageSettings,
+  resetStartPageSettings,
   type BlockInstance,
   type ClockRuntimeState,
   type LocalTask,
@@ -90,6 +93,7 @@ type ClockBlock = Extract<BlockInstance, { type: "timer" | "stopwatch" | "pomodo
 
 let runtimeJob: Promise<void> = Promise.resolve();
 let statsJob: Promise<void> = Promise.resolve();
+let nativeTabJob: Promise<void> = Promise.resolve();
 
 function ignoreBackgroundError(): void {
   // Event listeners cannot surface async failures to callers in MV3.
@@ -151,11 +155,54 @@ chrome.runtime.onMessage.addListener(
   },
 );
 
+function runNativeTabJob(operation: () => Promise<void>): Promise<void> {
+  const next = nativeTabJob.catch(ignoreBackgroundError).then(operation);
+  nativeTabJob = next;
+  return next;
+}
+
+async function waitForNativeBypassConsumption(tabId: number): Promise<void> {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const items = await chrome.storage.local.get(NATIVE_NEW_TAB_BYPASS_KEY);
+    const value = items[NATIVE_NEW_TAB_BYPASS_KEY] as NativeNewTabBypass | undefined;
+    if (value?.tabId !== tabId) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+async function openNativeNewTab(): Promise<void> {
+  const tab = await chrome.tabs.create({ active: true, url: "about:blank" });
+  if (typeof tab.id !== "number") throw new Error("The browser did not return a tab id");
+  await chrome.storage.local.set({
+    [NATIVE_NEW_TAB_BYPASS_KEY]: { tabId: tab.id, expiresAt: Date.now() + 5000 },
+  });
+  for (const url of ["chrome://new-tab-page/", "chrome-search://local-ntp/local-ntp.html", "about:newtab"]) {
+    try {
+      await chrome.tabs.update(tab.id, { url });
+      await waitForNativeBypassConsumption(tab.id);
+      return;
+    } catch {
+      // Try the next browser-specific URL.
+    }
+  }
+  await chrome.storage.local.remove(NATIVE_NEW_TAB_BYPASS_KEY);
+  throw new Error("The browser rejected every native new-tab URL");
+}
+
+async function resetStartPage(): Promise<void> {
+  await resetStartPageSettings();
+  await resetStartPageRuntimeState();
+}
+
 async function handle(message: Message): Promise<void> {
   switch (message.type) {
     case "block": await blockHost(message.host); break;
     case "unblock": await unblockHost(message.host); break;
     case "clear": await clearAll(); break;
+    case "replace-blocked-sites": await replaceBlockedSites(message.sites); break;
+    case "open-native-new-tab": await runNativeTabJob(openNativeNewTab); break;
+    case "reset-start-page": await runRuntimeJob(resetStartPage); break;
     case "clock-action": await runRuntimeJob(() => performClockAction(message.instanceId, message.action)); break;
     case "complete-clock": await runRuntimeJob(() => finishClockCompletion(message.instanceId, message.token)); break;
     case "reset-clocks": await resetAllClocks(); break;

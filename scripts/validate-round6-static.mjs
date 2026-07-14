@@ -22,7 +22,6 @@ const [messages, blocklist, settings, runtime, sync, gate, newtab, integrations,
 for (const type of ["replace-blocked-sites", "open-native-new-tab", "reset-start-page"]) {
   assert.ok(messages.includes(type), `messages.ts must validate ${type}`);
 }
-assert.match(messages, /startTabWorkerCommand:/, "Special page-to-worker operations must avoid competing runtime.onMessage responders");
 assert.match(blocklist, /runMutation/, "Blocklist mutations must be serialized");
 assert.match(blocklist, /migrationPromise = undefined/, "Transient migration failures must remain retryable");
 assert.match(settings, /changed in another extension context/, "Settings must reject stale snapshots");
@@ -31,7 +30,7 @@ assert.match(runtime, /resetStartPageRuntimeState/, "Runtime reset must be centr
 assert.match(sync, /isPristineBackup/, "Sync must protect a pre-existing remote snapshot on a clean device");
 assert.match(sync, /Object\.keys\(value\).*sort/s, "Canonical sync JSON must sort object keys");
 assert.doesNotMatch(gate, /chrome\.tabs\.create|startTabNativeNewTabBypass/, "The early gate must not create native tabs or own bypass state directly");
-assert.match(gate, /startTabWorkerCommand:/, "The early gate must delegate native-tab creation to the worker command channel");
+assert.match(gate, /runtime\.sendMessage/, "The early gate must delegate native-tab creation to the service worker");
 assert.doesNotMatch(newtab, /nativeNewTabButton\.addEventListener/, "The main new-tab runtime must not install a duplicate native-tab click handler");
 assert.match(integrations, /cachedRequest/, "Integration renderers must cache request promises across rerenders");
 assert.match(staticRenderers, /cachedRequest/, "Static external-data renderers must cache request promises across rerenders");

@@ -1,7 +1,5 @@
 (() => {
   const SETTINGS_KEY = "startPageSettings";
-  const COMMAND_PREFIX = "startTabWorkerCommand:";
-  const RESPONSE_PREFIX = "startTabWorkerResponse:";
   const OVERLAY_ID = "startTabGateOverlay";
   const splitMarkers = ["split-view", "split_view", "splitview", "tab-picker", "tab_picker", "select-tab", "select_tab"];
   const text = (key, fallback) => chrome.i18n.getMessage(key) || fallback;
@@ -11,28 +9,8 @@
   };
 
   async function workerCommand(message) {
-    const id = crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-    const commandKey = `${COMMAND_PREFIX}${id}`;
-    const responseKey = `${RESPONSE_PREFIX}${id}`;
-    await new Promise((resolve, reject) => {
-      let done = false;
-      const finish = (error) => {
-        if (done) return;
-        done = true;
-        clearTimeout(timeout);
-        chrome.storage.onChanged.removeListener(listener);
-        void chrome.storage.local.remove([commandKey, responseKey]);
-        error ? reject(error) : resolve();
-      };
-      const listener = (changes, area) => {
-        if (area !== "local" || !changes[responseKey]) return;
-        const response = changes[responseKey].newValue;
-        finish(response?.ok ? null : new Error(response?.error || "Worker command failed"));
-      };
-      const timeout = setTimeout(() => finish(new Error("Worker command timed out")), 10_000);
-      chrome.storage.onChanged.addListener(listener);
-      void chrome.storage.local.set({ [commandKey]: { id, message } }).catch(finish);
-    });
+    const response = await chrome.runtime.sendMessage(message);
+    if (!response?.ok) throw new Error(response?.error || "Worker command failed");
   }
 
   const openNative = () => workerCommand({ type: "open-native-new-tab" });
