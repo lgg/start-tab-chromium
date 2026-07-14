@@ -1,4 +1,5 @@
 import { markStartTabDataChanged } from "./data-revision.js";
+import { withStorageLock } from "./storage-lock.js";
 import { sendMessage } from "./messages.js";
 import {
   RUNTIME_SCHEMA_VERSION,
@@ -10,7 +11,14 @@ import {
   type StartPageRuntimeState,
   type StartPageSettings,
 } from "./start-page-types.js";
-import { getStartPageSettings, isRecord } from "./start-page-settings.js";
+import {
+  START_PAGE_MIGRATION_REPORT_KEY,
+  START_PAGE_SETTINGS_KEY,
+  createDefaultStartPageSettings,
+  getStartPageSettings,
+  isRecord,
+  readStartPageSettingsSnapshot,
+} from "./start-page-settings.js";
 
 export type { StartPageRuntimeState } from "./start-page-types.js";
 
@@ -168,8 +176,9 @@ function jsonEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-async function persistRuntime(
+async function persistRuntimeInTransaction(
   state: StartPageRuntimeState,
+  settings: StartPageSettings,
   allowFutureOverwrite = false,
   expectedUpdatedAt: number | null = null,
 ): Promise<StartPageRuntimeState> {
@@ -178,9 +187,9 @@ async function persistRuntime(
   if (!allowFutureOverwrite && isFutureRuntimeSchema(raw)) {
     throw new Error("Start Tab runtime data was created by a newer extension version and cannot be modified safely");
   }
-  const currentUpdatedAt = isFutureRuntimeSchema(raw) ? 0 : normalizeRuntimeState(raw, await getStartPageSettings()).updatedAt;
+  const currentUpdatedAt = isFutureRuntimeSchema(raw) ? 0 : normalizeRuntimeState(raw, settings).updatedAt;
   if (!allowFutureOverwrite && expectedUpdatedAt !== null
-    && currentUpdatedAt > 0 && expectedUpdatedAt > 0 && currentUpdatedAt !== expectedUpdatedAt) {
+    && currentUpdatedAt > 0 && currentUpdatedAt !== expectedUpdatedAt) {
     throw new Error("Start Tab runtime changed in another extension context; reload before saving");
   }
   const stamped: StartPageRuntimeState = {
@@ -198,37 +207,97 @@ export async function getStartPageRuntimeState(inputSettings?: StartPageSettings
   const items = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
   const raw = items[START_PAGE_RUNTIME_KEY];
   const normalized = normalizeRuntimeState(raw, settings, items[LEGACY_INSTANCE_RUNTIME_KEY]);
-  if (isFutureRuntimeSchema(raw)) return normalized;
-  if (!jsonEqual(raw, normalized)) {
-    const migrated = await persistRuntime(normalized, true);
-    if (items[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined) await chrome.storage.local.remove(LEGACY_INSTANCE_RUNTIME_KEY);
+  if (isFutureRuntimeSchema(raw) || jsonEqual(raw, normalized)) return normalized;
+
+  return withStorageLock("data-write", async () => {
+    const freshSettings = await readStartPageSettingsSnapshot();
+    const freshItems = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
+    const freshRaw = freshItems[START_PAGE_RUNTIME_KEY];
+    const freshNormalized = normalizeRuntimeState(freshRaw, freshSettings, freshItems[LEGACY_INSTANCE_RUNTIME_KEY]);
+    if (isFutureRuntimeSchema(freshRaw) || jsonEqual(freshRaw, freshNormalized)) return freshNormalized;
+    const migrated = await persistRuntimeInTransaction(freshNormalized, freshSettings, true);
+    if (freshItems[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined) {
+      await chrome.storage.local.remove(LEGACY_INSTANCE_RUNTIME_KEY);
+    }
     return migrated;
-  }
-  return normalized;
+  });
 }
 
 export async function setStartPageRuntimeState(state: StartPageRuntimeState): Promise<void> {
-  const settings = await getStartPageSettings();
-  await persistRuntime(normalizeRuntimeState(state, settings), false, state.updatedAt);
+  await withStorageLock("data-write", async () => {
+    const settings = await readStartPageSettingsSnapshot();
+    await persistRuntimeInTransaction(normalizeRuntimeState(state, settings), settings, false, state.updatedAt);
+  });
+}
+
+interface RuntimeMutation<T> {
+  state: StartPageRuntimeState | null;
+  result: T;
+}
+
+async function runRuntimeMutation<T>(
+  mutator: (state: StartPageRuntimeState, settings: StartPageSettings) => RuntimeMutation<T>,
+): Promise<{ result: T; state: StartPageRuntimeState }> {
+  return withStorageLock("data-write", async () => {
+    const settings = await readStartPageSettingsSnapshot();
+    const items = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
+    const raw = items[START_PAGE_RUNTIME_KEY];
+    if (isFutureRuntimeSchema(raw)) {
+      throw new Error("Start Tab runtime data was created by a newer extension version and cannot be modified safely");
+    }
+    const current = normalizeRuntimeState(raw, settings, items[LEGACY_INSTANCE_RUNTIME_KEY]);
+    const mutation = mutator(structuredClone(current), settings);
+    if (mutation.state === null) return { result: mutation.result, state: current };
+    const next = normalizeRuntimeState(mutation.state, settings);
+    const saved = await persistRuntimeInTransaction(next, settings, false, current.updatedAt);
+    if (items[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined) {
+      await chrome.storage.local.remove(LEGACY_INSTANCE_RUNTIME_KEY);
+    }
+    return { result: mutation.result, state: saved };
+  });
+}
+
+export async function mutateStartPageRuntimeState<T>(
+  mutator: (state: StartPageRuntimeState, settings: StartPageSettings) => RuntimeMutation<T>,
+): Promise<T> {
+  return (await runRuntimeMutation(mutator)).result;
 }
 
 export async function updateStartPageRuntimeState(
-  updater: (state: StartPageRuntimeState) => StartPageRuntimeState,
-  inputSettings?: StartPageSettings,
+  updater: (state: StartPageRuntimeState, settings: StartPageSettings) => StartPageRuntimeState,
+  _inputSettings?: StartPageSettings,
 ): Promise<StartPageRuntimeState> {
-  const settings = inputSettings ?? await getStartPageSettings();
-  const current = await getStartPageRuntimeState(settings);
-  const next = normalizeRuntimeState(updater(structuredClone(current)), settings);
-  return persistRuntime(next, false, current.updatedAt);
+  return (await runRuntimeMutation((state, settings) => ({ state: updater(state, settings), result: undefined }))).state;
 }
 
-export async function resetStartPageRuntimeState(): Promise<void> {
-  await chrome.storage.local.remove([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
+async function clearClockAlarms(): Promise<void> {
   const alarms = await chrome.alarms.getAll();
   await Promise.all(alarms
     .filter((alarm) => alarm.name.startsWith(CLOCK_ALARM_PREFIX))
     .map((alarm) => chrome.alarms.clear(alarm.name)));
-  await markStartTabDataChanged();
+}
+
+export async function resetStartPageRuntimeState(): Promise<void> {
+  await withStorageLock("data-write", async () => {
+    await chrome.storage.local.remove([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
+    await markStartTabDataChanged();
+  });
+  await clearClockAlarms();
+}
+
+export async function resetStartPageData(): Promise<StartPageSettings> {
+  const settings = createDefaultStartPageSettings();
+  await withStorageLock("data-write", async () => {
+    await chrome.storage.local.set({ [START_PAGE_SETTINGS_KEY]: settings });
+    await chrome.storage.local.remove([
+      START_PAGE_MIGRATION_REPORT_KEY,
+      START_PAGE_RUNTIME_KEY,
+      LEGACY_INSTANCE_RUNTIME_KEY,
+    ]);
+    await markStartTabDataChanged(settings.updatedAt);
+  });
+  await clearClockAlarms();
+  return settings;
 }
 
 function clockToken(): string {
@@ -309,51 +378,59 @@ export interface ClockCompletionResult {
 }
 
 export async function completeClockInstance(instanceId: string, expectedToken: string | null, now = Date.now()): Promise<ClockCompletionResult> {
-  const settings = await getStartPageSettings();
-  const block = settings.layout.blocks.find(
-    (candidate): candidate is Extract<BlockInstance, { type: ClockBlockType }> => candidate.id === instanceId && isClockBlock(candidate),
-  ) ?? null;
-  if (!block) return { completed: false, block: null, clock: null, notify: false, focusTimeMs: 0 };
-  const runtime = await getStartPageRuntimeState(settings);
-  const current = runtime.clocks[instanceId] ?? defaultClockForBlock(block);
-  const token = current.completionToken;
-  if (!current.running || current.type === "stopwatch" || current.targetAt === null || current.targetAt > now + 1000) {
-    return { completed: false, block, clock: current, notify: false, focusTimeMs: 0 };
-  }
-  if (expectedToken && token !== expectedToken) return { completed: false, block, clock: current, notify: false, focusTimeMs: 0 };
-  if (token && current.lastCompletedToken === token) return { completed: false, block, clock: current, notify: false, focusTimeMs: 0 };
+  return mutateStartPageRuntimeState<ClockCompletionResult>((runtime, settings) => {
+    const block = settings.layout.blocks.find(
+      (candidate): candidate is Extract<BlockInstance, { type: ClockBlockType }> => candidate.id === instanceId && isClockBlock(candidate),
+    ) ?? null;
+    if (!block) {
+      return { state: null, result: { completed: false, block: null, clock: null, notify: false, focusTimeMs: 0 } };
+    }
+    const current = runtime.clocks[instanceId] ?? defaultClockForBlock(block);
+    const token = current.completionToken;
+    if (!current.running || current.type === "stopwatch" || current.targetAt === null || current.targetAt > now + 1000) {
+      return { state: null, result: { completed: false, block, clock: current, notify: false, focusTimeMs: 0 } };
+    }
+    if (expectedToken && token !== expectedToken) {
+      return { state: null, result: { completed: false, block, clock: current, notify: false, focusTimeMs: 0 } };
+    }
+    if (token && current.lastCompletedToken === token) {
+      return { state: null, result: { completed: false, block, clock: current, notify: false, focusTimeMs: 0 } };
+    }
 
-  let next: ClockRuntimeState;
-  let focusTimeMs = 0;
-  if (block.type !== "timer" && block.type !== "pomodoro") {
-    return { completed: false, block, clock: current, notify: false, focusTimeMs: 0 };
-  }
-  if (block.type === "timer") {
-    next = { ...current, running: false, startedAt: null, accumulatedMs: current.durationMs, targetAt: null, lastCompletedToken: token, completionToken: null };
-  } else {
-    const completedPhase = current.phase ?? "work";
-    if (completedPhase === "work" && current.focusSessionStartedAt !== null) focusTimeMs = Math.max(0, now - current.focusSessionStartedAt);
-    const nextPhase: PomodoroPhase = completedPhase === "work" ? "break" : "work";
-    const nextDuration = (nextPhase === "work" ? block.config.workSeconds : block.config.breakSeconds) * 1000;
-    const autoStart = block.config.autoStartNextPhase;
-    next = {
-      ...current,
-      running: autoStart,
-      startedAt: autoStart ? now : null,
-      accumulatedMs: 0,
-      durationMs: nextDuration,
-      targetAt: autoStart ? now + nextDuration : null,
-      phase: nextPhase,
-      focusSessionStartedAt: autoStart && nextPhase === "work" ? now : null,
-      lastCompletedToken: token,
-      completionToken: autoStart ? clockToken() : null,
+    let next: ClockRuntimeState;
+    let focusTimeMs = 0;
+    if (block.type === "timer") {
+      next = { ...current, running: false, startedAt: null, accumulatedMs: current.durationMs, targetAt: null, lastCompletedToken: token, completionToken: null };
+    } else if (block.type === "pomodoro") {
+      const completedPhase = current.phase ?? "work";
+      if (completedPhase === "work" && current.focusSessionStartedAt !== null) {
+        focusTimeMs = Math.max(0, now - current.focusSessionStartedAt);
+      }
+      const nextPhase: PomodoroPhase = completedPhase === "work" ? "break" : "work";
+      const nextDuration = (nextPhase === "work" ? block.config.workSeconds : block.config.breakSeconds) * 1000;
+      const autoStart = block.config.autoStartNextPhase;
+      next = {
+        ...current,
+        running: autoStart,
+        startedAt: autoStart ? now : null,
+        accumulatedMs: 0,
+        durationMs: nextDuration,
+        targetAt: autoStart ? now + nextDuration : null,
+        phase: nextPhase,
+        focusSessionStartedAt: autoStart && nextPhase === "work" ? now : null,
+        lastCompletedToken: token,
+        completionToken: autoStart ? clockToken() : null,
+      };
+    } else {
+      return { state: null, result: { completed: false, block, clock: current, notify: false, focusTimeMs: 0 } };
+    }
+
+    runtime.clocks[instanceId] = next;
+    return {
+      state: runtime,
+      result: { completed: true, block, clock: next, notify: block.config.notifyOnComplete, focusTimeMs },
     };
-  }
-  runtime.clocks[instanceId] = next;
-  await setStartPageRuntimeState(runtime);
-  await scheduleClockAlarm(instanceId, next);
-  const notify = block.config.notifyOnComplete;
-  return { completed: true, block, clock: next, notify, focusTimeMs };
+  });
 }
 
 export async function deleteInstanceRuntime(instanceId: string): Promise<void> {
@@ -361,13 +438,18 @@ export async function deleteInstanceRuntime(instanceId: string): Promise<void> {
     await sendMessage({ type: "delete-instance-runtime", instanceId });
     return;
   }
-  const settings = await getStartPageSettings();
-  const runtime = await getStartPageRuntimeState(settings);
-  delete runtime.clocks[instanceId];
-  delete runtime.notes[instanceId];
-  delete runtime.tasks[instanceId];
-  delete runtime.linkPages[instanceId];
-  await setStartPageRuntimeState(runtime);
+  await mutateStartPageRuntimeState((runtime) => {
+    const existed = Object.prototype.hasOwnProperty.call(runtime.clocks, instanceId)
+      || Object.prototype.hasOwnProperty.call(runtime.notes, instanceId)
+      || Object.prototype.hasOwnProperty.call(runtime.tasks, instanceId)
+      || Object.prototype.hasOwnProperty.call(runtime.linkPages, instanceId);
+    if (!existed) return { state: null, result: undefined };
+    delete runtime.clocks[instanceId];
+    delete runtime.notes[instanceId];
+    delete runtime.tasks[instanceId];
+    delete runtime.linkPages[instanceId];
+    return { state: runtime, result: undefined };
+  });
   await clearClockAlarm(instanceId);
 }
 

@@ -1,4 +1,5 @@
 import { markStartTabDataChanged } from "./data-revision.js";
+import { withStorageLock } from "./storage-lock.js";
 import {
   BLOCK_DESCRIPTORS,
   BUILT_IN_THEMES,
@@ -167,24 +168,43 @@ async function readRawSettings(): Promise<unknown> {
   return items[START_PAGE_SETTINGS_KEY];
 }
 
-async function persistSettings(settings: StartPageSettings, report?: MigrationReport): Promise<void> {
+async function persistSettingsInTransaction(settings: StartPageSettings, report?: MigrationReport): Promise<void> {
   const payload: Record<string, unknown> = { [START_PAGE_SETTINGS_KEY]: settings };
   if (report) payload[START_PAGE_MIGRATION_REPORT_KEY] = report;
   await chrome.storage.local.set(payload);
   await markStartTabDataChanged(settings.updatedAt || Date.now());
 }
 
+export function createDefaultStartPageSettings(now = Date.now()): StartPageSettings {
+  return withBlockTimestamps(null, cloneSettings(DEFAULT_SETTINGS), now);
+}
+
+/** Read a normalized view without performing migration writes. */
+export async function readStartPageSettingsSnapshot(): Promise<StartPageSettings> {
+  return normalizeStartPageSettings(await readRawSettings());
+}
+
 export async function getStartPageSettings(): Promise<StartPageSettings> {
   const raw = await readRawSettings();
-  const { settings, report } = normalizeStartPageSettingsWithReport(raw);
+  const initial = normalizeStartPageSettingsWithReport(raw);
   if (isFutureStartPageSchema(raw)) {
-    await chrome.storage.local.set({ [START_PAGE_MIGRATION_REPORT_KEY]: report });
-    return settings;
+    await chrome.storage.local.set({ [START_PAGE_MIGRATION_REPORT_KEY]: initial.report });
+    return initial.settings;
   }
-  if (jsonEqual(raw, settings)) return settings;
-  const stamped = withBlockTimestamps(null, settings, Date.now());
-  await persistSettings(stamped, report);
-  return stamped;
+  if (jsonEqual(raw, initial.settings)) return initial.settings;
+
+  return withStorageLock("data-write", async () => {
+    const currentRaw = await readRawSettings();
+    const { settings, report } = normalizeStartPageSettingsWithReport(currentRaw);
+    if (isFutureStartPageSchema(currentRaw)) {
+      await chrome.storage.local.set({ [START_PAGE_MIGRATION_REPORT_KEY]: report });
+      return settings;
+    }
+    if (jsonEqual(currentRaw, settings)) return settings;
+    const stamped = withBlockTimestamps(null, settings, Date.now());
+    await persistSettingsInTransaction(stamped, report);
+    return stamped;
+  });
 }
 
 export async function getStartPageMigrationReport(): Promise<MigrationReport | null> {
@@ -205,33 +225,50 @@ export async function getStartPageMigrationReport(): Promise<MigrationReport | n
   };
 }
 
-export async function setStartPageSettings(value: StartPageSettings): Promise<ValidationIssue[]> {
-  const raw = await readRawSettings();
+async function validateAndPersistSettingsInTransaction(
+  value: StartPageSettings,
+  raw: unknown,
+): Promise<{ settings: StartPageSettings; issues: ValidationIssue[] }> {
   if (isFutureStartPageSchema(raw)) {
     throw new Error("Start Tab settings were created by a newer extension version and cannot be modified safely");
   }
   const previous = normalizeStartPageSettings(raw);
-  if (previous.updatedAt > 0 && value.updatedAt > 0 && value.updatedAt !== previous.updatedAt) {
+  if (previous.updatedAt > 0 && value.updatedAt !== previous.updatedAt) {
     throw new Error("Start Tab settings changed in another extension context; reload before saving");
   }
   const validation = validateStartPageSettings(value);
   const stamped = withBlockTimestamps(previous, validation.value, Math.max(Date.now(), previous.updatedAt + 1));
-  await persistSettings(stamped);
-  return validation.issues;
+  await persistSettingsInTransaction(stamped);
+  return { settings: stamped, issues: validation.issues };
+}
+
+export async function setStartPageSettings(value: StartPageSettings): Promise<ValidationIssue[]> {
+  return withStorageLock("data-write", async () => {
+    const raw = await readRawSettings();
+    return (await validateAndPersistSettingsInTransaction(value, raw)).issues;
+  });
 }
 
 export async function updateStartPageSettings(
   updater: (current: StartPageSettings) => StartPageSettings,
 ): Promise<{ settings: StartPageSettings; issues: ValidationIssue[] }> {
-  const current = await getStartPageSettings();
-  const issues = await setStartPageSettings(updater(cloneSettings(current)));
-  return { settings: await getStartPageSettings(), issues };
+  return withStorageLock("data-write", async () => {
+    const raw = await readRawSettings();
+    if (isFutureStartPageSchema(raw)) {
+      throw new Error("Start Tab settings were created by a newer extension version and cannot be modified safely");
+    }
+    const current = normalizeStartPageSettings(raw);
+    return validateAndPersistSettingsInTransaction(updater(cloneSettings(current)), raw);
+  });
 }
 
 export async function resetStartPageSettings(): Promise<StartPageSettings> {
-  const settings = withBlockTimestamps(null, cloneSettings(DEFAULT_SETTINGS), Date.now());
-  await persistSettings(settings);
-  return settings;
+  return withStorageLock("data-write", async () => {
+    const settings = createDefaultStartPageSettings();
+    await persistSettingsInTransaction(settings);
+    await chrome.storage.local.remove(START_PAGE_MIGRATION_REPORT_KEY);
+    return settings;
+  });
 }
 
 export function canAddBlock(settings: StartPageSettings, type: BlockType): boolean {

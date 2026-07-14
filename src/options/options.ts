@@ -32,8 +32,8 @@ import {
   type LocalePreference,
 } from "../lib/i18n.js";
 import { editBlockInstance } from "../lib/block-settings-editor.js";
+import { sendMessage } from "../lib/messages.js";
 import {
-  clearClockAlarm,
   deleteInstanceRuntime,
   getStartPageRuntimeState,
   instanceRuntimeHasUserData,
@@ -58,7 +58,6 @@ import {
   importCustomTheme,
   isSingletonBlockType,
   removeBlockInstance,
-  resetStartPageSettings,
   selectTheme,
   setStartPageSettings,
   updateBlockInstance,
@@ -222,9 +221,7 @@ function renderHeader(): void {
   reset.addEventListener("click", () => {
     if (!window.confirm(i18n.t("resetStartPageConfirm"))) return;
     void runAction(async () => {
-      for (const block of settings.layout.blocks) await clearClockAlarm(block.id);
-      await resetStartPageSettings();
-      await chrome.storage.local.remove("startPageRuntimeState");
+      await sendMessage({ type: "reset-start-page" });
       runtime = await getStartPageRuntimeState(await getStartPageSettings());
     }, i18n.t("resetComplete"));
   });
@@ -383,7 +380,7 @@ function renderBlocks(): HTMLElement {
   }, i18n.t("instanceAdded")));
   addRow.append(addSelect, add);
   const list = element("div", "instance-list");
-  list.append(...settings.layout.blocks.sort((left, right) => left.order - right.order).map(blockActions));
+  list.append(...[...settings.layout.blocks].sort((left, right) => left.order - right.order).map(blockActions));
   item.body.append(addRow, list);
   return item.root;
 }
@@ -397,7 +394,7 @@ function themeCard(theme: StartPageTheme): HTMLElement {
   preview.style.setProperty("--preview-accent", theme.tokens.accent);
   if (theme.background.kind === "solid") preview.style.background = theme.background.color;
   if (theme.background.kind === "gradient") preview.style.background = theme.background.css;
-  if (theme.background.kind === "image") preview.style.background = `center / cover url("${theme.background.url.replaceAll("\"", "\\\"")}")`;
+  if (theme.background.kind === "image") preview.style.background = `center / cover url(${JSON.stringify(theme.background.url)})`;
   if (theme.background.kind === "effect") preview.style.background = theme.background.baseColor;
   preview.append(element("span", "theme-card__preview-card", theme.name));
   const info = element("div", "theme-card__info");

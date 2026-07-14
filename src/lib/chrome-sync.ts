@@ -22,38 +22,16 @@ const DEVICE_ID_KEY = "startTabDeviceId";
 const CHUNK_MAX_BYTES = 7000;
 const MAX_SYNC_CHUNKS = 12;
 
-interface LegacySyncMeta {
-  version: 2;
-  updatedAt: string;
-  deviceId: string;
-  checksum: string;
-  chunks: number;
-}
-
+interface LegacySyncMeta { version: 2; updatedAt: string; deviceId: string; checksum: string; chunks: number }
 export interface SyncMeta {
-  version: 3;
-  updatedAt: string;
-  contentUpdatedAt: number;
-  deviceId: string;
-  snapshotId: string;
-  checksum: string;
-  contentChecksum: string;
-  chunks: number;
-  backupVersion: number;
+  version: 3; updatedAt: string; contentUpdatedAt: number; deviceId: string; snapshotId: string;
+  checksum: string; contentChecksum: string; chunks: number; backupVersion: number;
 }
-
-interface ParsedMeta {
-  meta: SyncMeta;
-  legacy: boolean;
-}
-
+interface ParsedMeta { meta: SyncMeta; legacy: boolean }
 export type ChromeSyncResult = "uploaded" | "restored" | "unchanged";
 export { DATA_REVISION_KEY, markStartTabDataChanged };
 
-function chunkKey(index: number): string {
-  return `${CHUNK_PREFIX}${index}`;
-}
-
+function chunkKey(index: number): string { return `${CHUNK_PREFIX}${index}`; }
 async function deviceId(): Promise<string> {
   const items = await chrome.storage.local.get(DEVICE_ID_KEY);
   const existing = items[DEVICE_ID_KEY];
@@ -62,7 +40,6 @@ async function deviceId(): Promise<string> {
   await chrome.storage.local.set({ [DEVICE_ID_KEY]: created });
   return created;
 }
-
 async function checksum(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -70,7 +47,6 @@ async function checksum(value: string): Promise<string> {
 }
 
 const VOLATILE_CONTENT_KEYS = new Set(["updatedAt", "createdAt"]);
-
 function canonicalValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalValue);
   if (!isRecord(value)) return value;
@@ -79,19 +55,13 @@ function canonicalValue(value: unknown): unknown {
     .sort((left, right) => left.localeCompare(right))
     .map((key) => [key, canonicalValue(value[key])]));
 }
-
-function stableJson(value: unknown): string {
-  return JSON.stringify(canonicalValue(value));
-}
-
+function stableJson(value: unknown): string { return JSON.stringify(canonicalValue(value)); }
 function canonicalBackupContent(bundle: BackupBundle): string {
   return stableJson({ app: bundle.app, version: bundle.version, schema: bundle.schema, storage: bundle.storage });
 }
-
 function legacyCanonicalBackupContent(bundle: BackupBundle): string {
   return JSON.stringify({ app: bundle.app, version: bundle.version, schema: bundle.schema, storage: bundle.storage });
 }
-
 function isPristineBackup(bundle: BackupBundle): boolean {
   const storage = bundle.storage;
   const settings = normalizeStartPageSettings(storage.startPageSettings);
@@ -108,12 +78,10 @@ function isPristineBackup(bundle: BackupBundle): boolean {
     && stableJson(normalizeFocusStats(storage[FOCUS_STATS_KEY])) !== stableJson(normalizeFocusStats(undefined))) return false;
   return true;
 }
-
 function remoteWins(remote: SyncMeta, local: Awaited<ReturnType<typeof prepareSnapshot>>): boolean {
   if (remote.contentUpdatedAt !== local.contentUpdatedAt) return remote.contentUpdatedAt > local.contentUpdatedAt;
   return remote.contentChecksum.localeCompare(local.contentChecksum) > 0;
 }
-
 function chunkForChromeSync(value: string): string[] {
   const encoder = new TextEncoder();
   const chunks: string[] = [];
@@ -132,127 +100,58 @@ function chunkForChromeSync(value: string): string[] {
   if (current || value.length === 0) chunks.push(current);
   return chunks;
 }
-
-function isIsoTimestamp(value: unknown): value is string {
-  return typeof value === "string" && Number.isFinite(Date.parse(value));
-}
-
-function isSha256Checksum(value: unknown): value is string {
-  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
-}
-
+function isIsoTimestamp(value: unknown): value is string { return typeof value === "string" && Number.isFinite(Date.parse(value)); }
+function isSha256Checksum(value: unknown): value is string { return typeof value === "string" && /^[a-f0-9]{64}$/.test(value); }
 function isLegacySyncMeta(value: unknown): value is LegacySyncMeta {
-  return isRecord(value)
-    && value.version === 2
-    && isIsoTimestamp(value.updatedAt)
-    && typeof value.deviceId === "string"
-    && value.deviceId.length > 0
-    && isSha256Checksum(value.checksum)
-    && Number.isInteger(value.chunks)
-    && (value.chunks as number) > 0
-    && (value.chunks as number) <= MAX_SYNC_CHUNKS;
+  return isRecord(value) && value.version === 2 && isIsoTimestamp(value.updatedAt)
+    && typeof value.deviceId === "string" && value.deviceId.length > 0 && isSha256Checksum(value.checksum)
+    && Number.isInteger(value.chunks) && (value.chunks as number) > 0 && (value.chunks as number) <= MAX_SYNC_CHUNKS;
 }
-
 function isSyncMeta(value: unknown): value is SyncMeta {
-  return isRecord(value)
-    && value.version === 3
-    && isIsoTimestamp(value.updatedAt)
-    && typeof value.contentUpdatedAt === "number"
-    && Number.isFinite(value.contentUpdatedAt)
-    && value.contentUpdatedAt >= 0
-    && typeof value.deviceId === "string"
-    && value.deviceId.length > 0
-    && typeof value.snapshotId === "string"
-    && value.snapshotId.length > 0
-    && isSha256Checksum(value.checksum)
-    && isSha256Checksum(value.contentChecksum)
-    && Number.isInteger(value.chunks)
-    && (value.chunks as number) > 0
-    && (value.chunks as number) <= MAX_SYNC_CHUNKS
-    && Number.isInteger(value.backupVersion)
-    && (value.backupVersion as number) >= 1
-    && (value.backupVersion as number) <= BACKUP_VERSION;
+  return isRecord(value) && value.version === 3 && isIsoTimestamp(value.updatedAt)
+    && typeof value.contentUpdatedAt === "number" && Number.isFinite(value.contentUpdatedAt) && value.contentUpdatedAt >= 0
+    && typeof value.deviceId === "string" && value.deviceId.length > 0
+    && typeof value.snapshotId === "string" && value.snapshotId.length > 0
+    && isSha256Checksum(value.checksum) && isSha256Checksum(value.contentChecksum)
+    && Number.isInteger(value.chunks) && (value.chunks as number) > 0 && (value.chunks as number) <= MAX_SYNC_CHUNKS
+    && Number.isInteger(value.backupVersion) && (value.backupVersion as number) >= 1 && (value.backupVersion as number) <= BACKUP_VERSION;
 }
-
-function timestamp(value: string): number {
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
+function timestamp(value: string): number { const parsed = Date.parse(value); return Number.isFinite(parsed) ? parsed : 0; }
 function normalizeLegacyMeta(meta: LegacySyncMeta): SyncMeta {
-  return {
-    version: 3,
-    updatedAt: meta.updatedAt,
-    contentUpdatedAt: timestamp(meta.updatedAt),
-    deviceId: meta.deviceId,
-    snapshotId: `legacy-${meta.checksum.slice(0, 16)}`,
-    checksum: meta.checksum,
-    contentChecksum: "0".repeat(64),
-    chunks: meta.chunks,
-    backupVersion: 3,
-  };
+  return { version: 3, updatedAt: meta.updatedAt, contentUpdatedAt: timestamp(meta.updatedAt), deviceId: meta.deviceId,
+    snapshotId: `legacy-${meta.checksum.slice(0, 16)}`, checksum: meta.checksum, contentChecksum: "0".repeat(64),
+    chunks: meta.chunks, backupVersion: 3 };
 }
-
 function parseMeta(value: unknown): ParsedMeta | null {
   if (isSyncMeta(value)) return { meta: value, legacy: false };
   return isLegacySyncMeta(value) ? { meta: normalizeLegacyMeta(value), legacy: true } : null;
 }
-
 async function readRemoteMeta(): Promise<ParsedMeta | null> {
   const result = await chrome.storage.sync.get(META_KEY);
   return parseMeta(result[META_KEY]);
 }
-
 async function readLocalMeta(): Promise<ParsedMeta | null> {
   const items = await chrome.storage.local.get(LOCAL_META_KEY);
   return parseMeta(items[LOCAL_META_KEY]);
 }
-
-async function writeLocalMeta(meta: SyncMeta): Promise<void> {
-  await chrome.storage.local.set({ [LOCAL_META_KEY]: meta });
-}
-
-export async function getChromeSyncBackupMeta(): Promise<SyncMeta | null> {
-  return (await readRemoteMeta())?.meta ?? null;
-}
+async function writeLocalMeta(meta: SyncMeta): Promise<void> { await chrome.storage.local.set({ [LOCAL_META_KEY]: meta }); }
+export async function getChromeSyncBackupMeta(): Promise<SyncMeta | null> { return (await readRemoteMeta())?.meta ?? null; }
 
 async function prepareSnapshot(inputBundle?: BackupBundle): Promise<{
-  bundle: BackupBundle;
-  json: string;
-  chunks: string[];
-  checksum: string;
-  contentChecksum: string;
-  contentUpdatedAt: number;
+  bundle: BackupBundle; json: string; chunks: string[]; checksum: string; contentChecksum: string; contentUpdatedAt: number;
 }> {
   const bundle = migrateBackup(inputBundle ?? await exportBackup());
   const json = JSON.stringify(bundle);
   const chunks = chunkForChromeSync(json);
-  if (chunks.length > MAX_SYNC_CHUNKS) {
-    throw new Error("Start Tab backup is too large for browser sync. Use JSON export or Google Drive backup instead.");
-  }
-  return {
-    bundle,
-    json,
-    chunks,
-    checksum: await checksum(json),
-    contentChecksum: await checksum(canonicalBackupContent(bundle)),
-    contentUpdatedAt: await readStartTabDataRevision(backupModifiedAt(bundle)),
-  };
+  if (chunks.length > MAX_SYNC_CHUNKS) throw new Error("Start Tab backup is too large for browser sync. Use JSON export or Google Drive backup instead.");
+  return { bundle, json, chunks, checksum: await checksum(json), contentChecksum: await checksum(canonicalBackupContent(bundle)),
+    contentUpdatedAt: await readStartTabDataRevision(backupModifiedAt(bundle)) };
 }
-
 async function writeRemoteSnapshot(snapshot: Awaited<ReturnType<typeof prepareSnapshot>>): Promise<SyncMeta> {
   const existing = await chrome.storage.sync.get(null);
-  const meta: SyncMeta = {
-    version: 3,
-    updatedAt: new Date().toISOString(),
-    contentUpdatedAt: snapshot.contentUpdatedAt,
-    deviceId: await deviceId(),
-    snapshotId: snapshot.bundle.snapshotId,
-    checksum: snapshot.checksum,
-    contentChecksum: snapshot.contentChecksum,
-    chunks: snapshot.chunks.length,
-    backupVersion: snapshot.bundle.version,
-  };
+  const meta: SyncMeta = { version: 3, updatedAt: new Date().toISOString(), contentUpdatedAt: snapshot.contentUpdatedAt,
+    deviceId: await deviceId(), snapshotId: snapshot.bundle.snapshotId, checksum: snapshot.checksum,
+    contentChecksum: snapshot.contentChecksum, chunks: snapshot.chunks.length, backupVersion: snapshot.bundle.version };
   const payload: Record<string, unknown> = { [META_KEY]: meta };
   snapshot.chunks.forEach((chunk, index) => { payload[chunkKey(index)] = chunk; });
   await chrome.storage.sync.set(payload);
@@ -262,11 +161,7 @@ async function writeRemoteSnapshot(snapshot: Awaited<ReturnType<typeof prepareSn
   await writeLocalMeta(meta);
   return meta;
 }
-
-export async function uploadChromeSyncBackup(): Promise<void> {
-  await writeRemoteSnapshot(await prepareSnapshot());
-}
-
+export async function uploadChromeSyncBackup(): Promise<void> { await writeRemoteSnapshot(await prepareSnapshot()); }
 async function readRemoteBundle(parsed: ParsedMeta): Promise<BackupBundle> {
   const { meta } = parsed;
   const keys = Array.from({ length: meta.chunks }, (_, index) => chunkKey(index));
@@ -276,95 +171,51 @@ async function readRemoteBundle(parsed: ParsedMeta): Promise<BackupBundle> {
   const json = chunks.join("");
   if (await checksum(json) !== meta.checksum) throw new Error("Chrome sync backup checksum mismatch");
   let value: unknown;
-  try {
-    value = JSON.parse(json);
-  } catch {
-    throw new Error("Chrome sync backup contains invalid JSON");
-  }
+  try { value = JSON.parse(json); } catch { throw new Error("Chrome sync backup contains invalid JSON"); }
   const bundle = migrateBackup(value);
   if (!parsed.legacy) {
     const currentChecksum = await checksum(canonicalBackupContent(bundle));
     const legacyChecksum = await checksum(legacyCanonicalBackupContent(bundle));
-    if (currentChecksum !== meta.contentChecksum && legacyChecksum !== meta.contentChecksum) {
-      throw new Error("Chrome sync backup content checksum mismatch");
-    }
+    if (currentChecksum !== meta.contentChecksum && legacyChecksum !== meta.contentChecksum) throw new Error("Chrome sync backup content checksum mismatch");
   }
   return bundle;
 }
-
 async function restoreParsedSnapshot(parsed: ParsedMeta): Promise<void> {
   const bundle = await readRemoteBundle(parsed);
-  await importBackup(bundle);
-  await markStartTabDataChanged(parsed.meta.contentUpdatedAt);
-  if (parsed.legacy) {
-    await writeRemoteSnapshot(await prepareSnapshot());
-  } else {
-    await writeLocalMeta(parsed.meta);
-  }
+  await importBackup(bundle, { dataRevisionAt: parsed.meta.contentUpdatedAt });
+  if (parsed.legacy) await writeRemoteSnapshot(await prepareSnapshot());
+  else await writeLocalMeta(parsed.meta);
 }
-
 export async function restoreChromeSyncBackup(): Promise<void> {
   const parsed = await readRemoteMeta();
   if (!parsed) throw new Error("No Start Tab backup found in chrome.storage.sync");
   await restoreParsedSnapshot(parsed);
 }
-
 export async function syncChromeSyncBackup(): Promise<ChromeSyncResult> {
   const remote = await readRemoteMeta();
-  if (!remote) {
-    await uploadChromeSyncBackup();
-    return "uploaded";
-  }
-
+  if (!remote) { await uploadChromeSyncBackup(); return "uploaded"; }
   const localSnapshot = await prepareSnapshot();
   if (remote.legacy) {
     const remoteBundle = await readRemoteBundle(remote);
     const remoteChecksum = await checksum(canonicalBackupContent(remoteBundle));
-    if (remoteChecksum === localSnapshot.contentChecksum) {
-      await writeRemoteSnapshot(localSnapshot);
-      return "unchanged";
-    }
+    if (remoteChecksum === localSnapshot.contentChecksum) { await writeRemoteSnapshot(localSnapshot); return "unchanged"; }
     if (isPristineBackup(localSnapshot.bundle) || remote.meta.contentUpdatedAt > localSnapshot.contentUpdatedAt) {
-      await restoreParsedSnapshot(remote);
-      return "restored";
+      await restoreParsedSnapshot(remote); return "restored";
     }
-    await writeRemoteSnapshot(localSnapshot);
-    return "uploaded";
+    await writeRemoteSnapshot(localSnapshot); return "uploaded";
   }
-
-  if (localSnapshot.contentChecksum === remote.meta.contentChecksum) {
-    await writeLocalMeta(remote.meta);
-    return "unchanged";
-  }
-
+  if (localSnapshot.contentChecksum === remote.meta.contentChecksum) { await writeLocalMeta(remote.meta); return "unchanged"; }
   const local = await readLocalMeta();
   if (!local || local.legacy) {
-    if (isPristineBackup(localSnapshot.bundle) || remoteWins(remote.meta, localSnapshot)) {
-      await restoreParsedSnapshot(remote);
-      return "restored";
-    }
-    await writeRemoteSnapshot(localSnapshot);
-    return "uploaded";
+    if (isPristineBackup(localSnapshot.bundle) || remoteWins(remote.meta, localSnapshot)) { await restoreParsedSnapshot(remote); return "restored"; }
+    await writeRemoteSnapshot(localSnapshot); return "uploaded";
   }
-
   const localChanged = localSnapshot.contentChecksum !== local.meta.contentChecksum;
   const remoteChanged = remote.meta.contentChecksum !== local.meta.contentChecksum;
-  if (!localChanged && remoteChanged) {
-    await restoreParsedSnapshot(remote);
-    return "restored";
-  }
-  if (localChanged && !remoteChanged) {
-    await writeRemoteSnapshot(localSnapshot);
-    return "uploaded";
-  }
-  if (!localChanged && !remoteChanged) {
-    await writeLocalMeta(remote.meta);
-    return "unchanged";
-  }
-  if (remoteWins(remote.meta, localSnapshot)) {
-    await restoreParsedSnapshot(remote);
-    return "restored";
-  }
+  if (!localChanged && remoteChanged) { await restoreParsedSnapshot(remote); return "restored"; }
+  if (localChanged && !remoteChanged) { await writeRemoteSnapshot(localSnapshot); return "uploaded"; }
+  if (!localChanged && !remoteChanged) { await writeLocalMeta(remote.meta); return "unchanged"; }
+  if (remoteWins(remote.meta, localSnapshot)) { await restoreParsedSnapshot(remote); return "restored"; }
   await writeRemoteSnapshot(localSnapshot);
   return "uploaded";
 }

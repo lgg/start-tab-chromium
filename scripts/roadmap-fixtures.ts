@@ -357,8 +357,8 @@ assert.equal(isMessage({ type: "clock-action", instanceId: "timer-main", action:
 assert.equal(isMessage({ type: "complete-clock", instanceId: "timer-main", token: "token" }), true);
 assert.equal(isMessage({ type: "reset-clocks" }), true);
 assert.equal(isMessage({ type: "reset-stats" }), true);
-assert.equal(isMessage({ type: "runtime-note", instanceId: "note-main", value: "draft" }), true);
-assert.equal(isMessage({ type: "runtime-link-page", instanceId: "links-main", page: 2 }), true);
+assert.equal(isMessage({ type: "runtime-note", instanceId: "note-main", value: "draft", expectedValue: "" }), true);
+assert.equal(isMessage({ type: "runtime-link-page", instanceId: "links-main", page: 2, expectedPage: 0 }), true);
 assert.equal(isMessage({ type: "delete-instance-runtime", instanceId: "note-main" }), true);
 assert.equal(isMessage({ type: "complete-clock", instanceId: "", token: "token" }), false);
 

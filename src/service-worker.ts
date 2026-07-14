@@ -32,19 +32,17 @@ import {
   parseClockAlarmName,
   pauseClockState,
   resetClockState,
-  resetStartPageRuntimeState,
+  resetStartPageData,
   scheduleClockAlarm,
-  setStartPageRuntimeState,
   startClockState,
+  mutateStartPageRuntimeState,
+  updateStartPageRuntimeState,
 } from "./lib/start-page-runtime.js";
 import {
   getStartPageSettings,
-  resetStartPageSettings,
   type BlockInstance,
   type ClockRuntimeState,
   type LocalTask,
-  type StartPageRuntimeState,
-  type StartPageSettings,
 } from "./lib/start-page-settings.js";
 
 const START_TAB_PAGE = "newtab.html";
@@ -155,7 +153,6 @@ chrome.runtime.onMessage.addListener(
   },
 );
 
-
 function runNativeTabJob(operation: () => Promise<void>): Promise<void> {
   const next = nativeTabJob.catch(ignoreBackgroundError).then(operation);
   nativeTabJob = next;
@@ -191,11 +188,6 @@ async function openNativeNewTab(): Promise<void> {
   throw new Error("The browser rejected every native new-tab URL");
 }
 
-async function resetStartPage(): Promise<void> {
-  await resetStartPageSettings();
-  await resetStartPageRuntimeState();
-}
-
 async function handle(message: Message): Promise<void> {
   switch (message.type) {
     case "block": await blockHost(message.host); break;
@@ -203,88 +195,95 @@ async function handle(message: Message): Promise<void> {
     case "clear": await clearAll(); break;
     case "replace-blocked-sites": await replaceBlockedSites(message.sites); break;
     case "open-native-new-tab": await runNativeTabJob(openNativeNewTab); break;
-    case "reset-start-page": await runRuntimeJob(resetStartPage); break;
+    case "reset-start-page": await runRuntimeJob(async () => { await resetStartPageData(); }); break;
     case "clock-action": await runRuntimeJob(() => performClockAction(message.instanceId, message.action)); break;
     case "complete-clock": await runRuntimeJob(() => finishClockCompletion(message.instanceId, message.token)); break;
     case "reset-clocks": await resetAllClocks(); break;
-    case "runtime-note": await runRuntimeJob(() => updateRuntimeNote(message.instanceId, message.value)); break;
-    case "runtime-tasks": await runRuntimeJob(() => updateRuntimeTasks(message.instanceId, message.tasks)); break;
-    case "runtime-link-page": await runRuntimeJob(() => updateRuntimeLinkPage(message.instanceId, message.page)); break;
+    case "runtime-note": await runRuntimeJob(() => updateRuntimeNote(message.instanceId, message.value, message.expectedValue)); break;
+    case "runtime-tasks": await runRuntimeJob(() => updateRuntimeTasks(message.instanceId, message.tasks, message.expectedTasks)); break;
+    case "runtime-link-page": await runRuntimeJob(() => updateRuntimeLinkPage(message.instanceId, message.page, message.expectedPage)); break;
     case "delete-instance-runtime": await runRuntimeJob(() => deleteInstanceRuntime(message.instanceId)); break;
     case "record-unblock": await runStatsJob(() => recordUnblockAfterCountdown(message.host)); break;
     case "reset-stats": await runStatsJob(resetFocusStats); break;
   }
 }
 
-async function clockContext(instanceId: string): Promise<{
-  settings: StartPageSettings;
-  runtime: StartPageRuntimeState;
-  block: ClockBlock | null;
-  clock: ClockRuntimeState | null;
-}> {
-  const settings = await getStartPageSettings();
-  const block = settings.layout.blocks.find(
-    (candidate): candidate is ClockBlock => candidate.id === instanceId && isClockBlock(candidate),
-  ) ?? null;
-  const runtime = await getStartPageRuntimeState(settings);
-  const clock = block ? runtime.clocks[instanceId] ?? defaultClockForBlock(block) : null;
-  return { settings, runtime, block, clock };
+function sameTasks(left: readonly LocalTask[], right: readonly LocalTask[]): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
-async function updateRuntimeNote(instanceId: string, value: string): Promise<void> {
-  const settings = await getStartPageSettings();
-  if (!settings.layout.blocks.some((block) => block.id === instanceId && block.type === "note")) return;
-  const runtime = await getStartPageRuntimeState(settings);
-  runtime.notes[instanceId] = value.slice(0, 200_000);
-  await setStartPageRuntimeState(runtime);
+async function updateRuntimeNote(instanceId: string, value: string, expectedValue: string): Promise<void> {
+  await updateStartPageRuntimeState((runtime) => {
+    const current = runtime.notes[instanceId] ?? "";
+    if (current !== expectedValue) {
+      throw new Error("Start Tab note changed in another extension context; latest data was kept");
+    }
+    runtime.notes[instanceId] = value.slice(0, 200_000);
+    return runtime;
+  });
 }
 
-async function updateRuntimeTasks(instanceId: string, tasks: LocalTask[]): Promise<void> {
-  const settings = await getStartPageSettings();
-  if (!settings.layout.blocks.some((block) => block.id === instanceId && block.type === "localTasks")) return;
-  const runtime = await getStartPageRuntimeState(settings);
-  runtime.tasks[instanceId] = structuredClone(tasks);
-  await setStartPageRuntimeState(runtime);
+async function updateRuntimeTasks(instanceId: string, tasks: LocalTask[], expectedTasks: LocalTask[]): Promise<void> {
+  await updateStartPageRuntimeState((runtime) => {
+    const current = runtime.tasks[instanceId] ?? [];
+    if (!sameTasks(current, expectedTasks)) {
+      throw new Error("Start Tab tasks changed in another extension context; latest data was kept");
+    }
+    runtime.tasks[instanceId] = structuredClone(tasks);
+    return runtime;
+  });
 }
 
-async function updateRuntimeLinkPage(instanceId: string, page: number): Promise<void> {
-  const settings = await getStartPageSettings();
-  if (!settings.layout.blocks.some((block) => block.id === instanceId && (block.type === "links" || block.type === "startPinned"))) return;
-  const runtime = await getStartPageRuntimeState(settings);
-  runtime.linkPages[instanceId] = Math.min(10_000, Math.max(0, Math.round(page)));
-  await setStartPageRuntimeState(runtime);
+async function updateRuntimeLinkPage(instanceId: string, page: number, expectedPage: number): Promise<void> {
+  await updateStartPageRuntimeState((runtime) => {
+    const current = runtime.linkPages[instanceId] ?? 0;
+    if (current !== expectedPage) {
+      throw new Error("Start Tab link page changed in another extension context; latest data was kept");
+    }
+    runtime.linkPages[instanceId] = Math.min(10_000, Math.max(0, Math.round(page)));
+    return runtime;
+  });
 }
 
 async function performClockAction(instanceId: string, action: ClockAction): Promise<void> {
-  const { runtime, block, clock } = await clockContext(instanceId);
-  if (!block || !clock) return;
-
   const now = Date.now();
-  let next: ClockRuntimeState;
-  let interruptedMs = 0;
-  let startedWork = false;
+  const outcome = await mutateStartPageRuntimeState<{
+    next: ClockRuntimeState;
+    interruptedMs: number;
+    startedWork: boolean;
+  } | null>((runtime, settings) => {
+    const block = settings.layout.blocks.find(
+      (candidate): candidate is ClockBlock => candidate.id === instanceId && isClockBlock(candidate),
+    ) ?? null;
+    if (!block) return { state: null, result: null };
+    const clock = runtime.clocks[instanceId] ?? defaultClockForBlock(block);
+    let next: ClockRuntimeState;
+    let interruptedMs = 0;
+    let startedWork = false;
 
-  if (action === "reset") {
-    if (block.type === "pomodoro" && clock.running && clock.phase === "work" && clock.focusSessionStartedAt !== null) {
-      interruptedMs = Math.max(0, now - clock.focusSessionStartedAt);
+    if (action === "reset") {
+      if (block.type === "pomodoro" && clock.running && clock.phase === "work" && clock.focusSessionStartedAt !== null) {
+        interruptedMs = Math.max(0, now - clock.focusSessionStartedAt);
+      }
+      next = resetClockState(block);
+    } else if (clock.running) {
+      if (block.type === "pomodoro" && clock.phase === "work" && clock.focusSessionStartedAt !== null) {
+        interruptedMs = Math.max(0, now - clock.focusSessionStartedAt);
+      }
+      next = pauseClockState(clock, now);
+      if (next.type === "pomodoro") next.focusSessionStartedAt = null;
+    } else {
+      startedWork = block.type === "pomodoro" && (clock.phase ?? "work") === "work";
+      next = startClockState(clock, now);
     }
-    next = resetClockState(block);
-  } else if (clock.running) {
-    if (block.type === "pomodoro" && clock.phase === "work" && clock.focusSessionStartedAt !== null) {
-      interruptedMs = Math.max(0, now - clock.focusSessionStartedAt);
-    }
-    next = pauseClockState(clock, now);
-    if (next.type === "pomodoro") next.focusSessionStartedAt = null;
-  } else {
-    startedWork = block.type === "pomodoro" && (clock.phase ?? "work") === "work";
-    next = startClockState(clock, now);
-  }
 
-  runtime.clocks[instanceId] = next;
-  await setStartPageRuntimeState(runtime);
-  await scheduleClockAlarm(instanceId, next);
-  if (startedWork) await runStatsJob(recordFocusSessionStarted);
-  if (interruptedMs > 0) await runStatsJob(() => recordFocusSessionInterrupted(interruptedMs));
+    runtime.clocks[instanceId] = next;
+    return { state: runtime, result: { next, interruptedMs, startedWork } };
+  });
+  if (!outcome) return;
+  await scheduleClockAlarm(instanceId, outcome.next);
+  if (outcome.startedWork) await runStatsJob(recordFocusSessionStarted);
+  if (outcome.interruptedMs > 0) await runStatsJob(() => recordFocusSessionInterrupted(outcome.interruptedMs));
 }
 
 async function resetAllClocks(): Promise<void> {

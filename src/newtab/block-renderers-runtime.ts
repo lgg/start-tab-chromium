@@ -88,25 +88,61 @@ export function renderNote(
   context: BlockRenderContext,
 ): void {
   const textarea = element("textarea", "note");
-  textarea.value = context.runtime.notes[block.id] ?? "";
+  let persistedValue = context.runtime.notes[block.id] ?? "";
+  textarea.value = persistedValue;
   textarea.placeholder = block.config.placeholder || context.i18n.t("notePlaceholder");
   textarea.setAttribute("aria-label", block.title);
   let saveTimer = 0;
+  let saveJob: Promise<void> = Promise.resolve();
+
+  const queueSave = (value: string): Promise<void> => {
+    const nextValue = value.slice(0, 200_000);
+    saveJob = saveJob.catch(() => undefined).then(async () => {
+      await context.setRuntime({
+        kind: "note",
+        instanceId: block.id,
+        value: nextValue,
+        expectedValue: persistedValue,
+      });
+      persistedValue = nextValue;
+    });
+    return saveJob;
+  };
+
   textarea.addEventListener("input", () => {
     window.clearTimeout(saveTimer);
     context.runtime.notes[block.id] = textarea.value;
     saveTimer = window.setTimeout(() => {
       saveTimer = 0;
-      void context.setRuntime({ kind: "note", instanceId: block.id, value: textarea.value });
+      void queueSave(textarea.value).catch(() => undefined);
     }, 180);
   });
   context.registerCleanup(() => {
     const pending = saveTimer !== 0;
     window.clearTimeout(saveTimer);
     saveTimer = 0;
-    if (pending) void context.setRuntime({ kind: "note", instanceId: block.id, value: textarea.value });
+    if (pending) void queueSave(textarea.value).catch(() => undefined);
   });
   container.append(textarea);
+}
+
+function cloneTasks(tasks: readonly LocalTask[]): LocalTask[] {
+  return tasks.map((task) => ({ ...task }));
+}
+
+async function saveTasks(
+  block: Extract<BlockInstance, { type: "localTasks" }>,
+  context: BlockRenderContext,
+  nextTasks: LocalTask[],
+): Promise<void> {
+  const expectedTasks = cloneTasks(context.runtime.tasks[block.id] ?? []);
+  context.runtime.tasks[block.id] = cloneTasks(nextTasks);
+  await context.setRuntime({
+    kind: "tasks",
+    instanceId: block.id,
+    tasks: cloneTasks(nextTasks),
+    expectedTasks,
+  });
 }
 
 function taskRow(
@@ -122,16 +158,18 @@ function taskRow(
   checkbox.setAttribute("aria-label", context.i18n.t("toggleTask", { title: task.title }));
   const title = element("span", task.done ? "task__title task__title--done" : "task__title", task.title);
   const remove = actionButton("×", async () => {
-    context.runtime.tasks[block.id] = (context.runtime.tasks[block.id] ?? []).filter((candidate) => candidate.id !== task.id);
-    await context.setRuntime({ kind: "tasks", instanceId: block.id, tasks: context.runtime.tasks[block.id] ?? [] });
+    const nextTasks = (context.runtime.tasks[block.id] ?? []).filter((candidate) => candidate.id !== task.id);
+    await saveTasks(block, context, nextTasks);
     redraw();
   }, "icon-button");
   remove.title = context.i18n.t("removeTask");
   remove.setAttribute("aria-label", context.i18n.t("removeTask"));
   checkbox.addEventListener("change", () => {
-    task.done = checkbox.checked;
-    task.updatedAt = Date.now();
-    void context.setRuntime({ kind: "tasks", instanceId: block.id, tasks: context.runtime.tasks[block.id] ?? [] }).then(redraw);
+    const now = Date.now();
+    const nextTasks = (context.runtime.tasks[block.id] ?? []).map((candidate) => candidate.id === task.id
+      ? { ...candidate, done: checkbox.checked, updatedAt: now }
+      : { ...candidate });
+    void saveTasks(block, context, nextTasks).then(redraw).catch(() => undefined);
   });
   row.append(checkbox, title, remove);
   return row;
@@ -167,9 +205,9 @@ export function renderLocalTasks(
       createdAt: now,
       updatedAt: now,
     };
-    context.runtime.tasks[block.id] = [...(context.runtime.tasks[block.id] ?? []), task];
+    const nextTasks = [...(context.runtime.tasks[block.id] ?? []).map((item) => ({ ...item })), task];
     input.value = "";
-    void context.setRuntime({ kind: "tasks", instanceId: block.id, tasks: context.runtime.tasks[block.id] ?? [] }).then(redraw);
+    void saveTasks(block, context, nextTasks).then(redraw).catch(() => undefined);
   });
   container.append(form, list);
   redraw();

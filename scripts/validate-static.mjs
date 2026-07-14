@@ -51,12 +51,14 @@ function assertCiPolicy(ci) {
   assert.doesNotMatch(ci, /actions\/cache@/, "Explicit GitHub Actions caches are not expected");
 }
 
-const [manifest, packageJson, enMessages, ruBaseMessages, ruRoadmapMessages, ci, rootBuild, canonicalBuild, newtabHtml, optionsHtml, settingsSource, runtimeRendererSource, serviceWorkerSource] = await Promise.all([
+const [manifest, packageJson, enMessages, enRound7Messages, ruBaseMessages, ruRoadmapMessages, ruRound7Messages, ci, rootBuild, canonicalBuild, newtabHtml, optionsHtml, settingsSource, runtimeRendererSource, serviceWorkerSource] = await Promise.all([
   readJson("src/manifest.json"),
   readJson("package.json"),
   readJson("src/_locales/en/messages.json"),
+  readJson("src/_locales/en/round7-messages.json"),
   readJson("src/_locales/ru/messages.json"),
   readJson("src/_locales/ru/roadmap-messages.json"),
+  readJson("src/_locales/ru/round7-messages.json"),
   readFile(resolve(root, ".github/workflows/ci.yml"), "utf8"),
   readFile(resolve(root, "build.mjs"), "utf8"),
   readFile(resolve(root, "scripts/build.mjs"), "utf8"),
@@ -66,7 +68,8 @@ const [manifest, packageJson, enMessages, ruBaseMessages, ruRoadmapMessages, ci,
   readFile(resolve(root, "src/newtab/block-renderers-runtime.ts"), "utf8"),
   readFile(resolve(root, "src/service-worker.ts"), "utf8"),
 ]);
-const ruMessages = { ...ruBaseMessages, ...ruRoadmapMessages };
+const effectiveEnMessages = { ...enMessages, ...enRound7Messages };
+const ruMessages = { ...ruBaseMessages, ...ruRoadmapMessages, ...ruRound7Messages };
 
 assert.equal(manifest.manifest_version, 3, "Manifest must remain MV3");
 assert.equal(manifest.version, packageJson.version, "Package and manifest versions must match");
@@ -79,18 +82,22 @@ for (const permission of ["storage", "alarms", "notifications", "declarativeNetR
 
 assertCatalog("en", enMessages);
 assertCatalog("ru-base", ruBaseMessages);
+assertCatalog("en-round7", enRound7Messages);
 assertCatalog("ru-roadmap", ruRoadmapMessages);
-const englishKeys = sortedKeys(enMessages);
+assertCatalog("ru-round7", ruRound7Messages);
+const englishKeys = sortedKeys(effectiveEnMessages);
 const russianKeys = sortedKeys(ruMessages);
 const missingRussianKeys = englishKeys.filter((key) => !Object.prototype.hasOwnProperty.call(ruMessages, key));
-const extraRussianKeys = russianKeys.filter((key) => !Object.prototype.hasOwnProperty.call(enMessages, key));
+const extraRussianKeys = russianKeys.filter((key) => !Object.prototype.hasOwnProperty.call(effectiveEnMessages, key));
 assert.deepEqual(missingRussianKeys, [], `Russian catalog is missing keys: ${missingRussianKeys.join(", ")}`);
 assert.deepEqual(extraRussianKeys, [], `Russian catalog has obsolete keys: ${extraRussianKeys.join(", ")}`);
 
 for (const relativePath of [
   "src/_locales/en/messages.json",
+  "src/_locales/en/round7-messages.json",
   "src/_locales/ru/messages.json",
   "src/_locales/ru/roadmap-messages.json",
+  "src/_locales/ru/round7-messages.json",
   "src/popup/popup.html",
   "src/popup/popup.css",
   "src/blocked/blocked.html",
@@ -175,7 +182,7 @@ for (const file of sourceFiles) {
   }
   for (const match of source.matchAll(/\.t\(["']([^"']+)["']/g)) literalMessageKeys.add(match[1]);
 }
-for (const key of literalMessageKeys) assert.ok(enMessages[key], `Missing English localization key used by source: ${key}`);
+for (const key of literalMessageKeys) assert.ok(effectiveEnMessages[key], `Missing English localization key used by source: ${key}`);
 
 const temporary = await mkdtemp(path.join(tmpdir(), "start-tab-fixtures-"));
 try {

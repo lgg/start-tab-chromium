@@ -198,18 +198,15 @@ export function renderLinkCollection(
   let page = Math.min(context.runtime.linkPages[block.id] ?? 0, totalPages - 1);
   const list = element("div", `links links--${config.pageDirection}`);
   const pager = element("div", "pager");
-  const previous = actionButton(context.i18n.t("previousPage"), async () => {
-    page = (page - 1 + totalPages) % totalPages;
+  const changePage = async (nextPage: number): Promise<void> => {
+    const expectedPage = context.runtime.linkPages[block.id] ?? 0;
+    page = nextPage;
     context.runtime.linkPages[block.id] = page;
-    await context.setRuntime({ kind: "linkPage", instanceId: block.id, page });
+    await context.setRuntime({ kind: "linkPage", instanceId: block.id, page, expectedPage });
     draw();
-  }, "button button--secondary");
-  const next = actionButton(context.i18n.t("nextPage"), async () => {
-    page = (page + 1) % totalPages;
-    context.runtime.linkPages[block.id] = page;
-    await context.setRuntime({ kind: "linkPage", instanceId: block.id, page });
-    draw();
-  }, "button button--secondary");
+  };
+  const previous = actionButton(context.i18n.t("previousPage"), () => changePage((page - 1 + totalPages) % totalPages), "button button--secondary");
+  const next = actionButton(context.i18n.t("nextPage"), () => changePage((page + 1) % totalPages), "button button--secondary");
   const label = element("span", "pager__label");
   const draw = (): void => {
     list.replaceChildren(...pageItems(config.items, page, perPage).map(linkTile));

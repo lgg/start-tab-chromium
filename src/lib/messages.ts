@@ -14,9 +14,9 @@ export type Message =
   | { type: "clock-action"; instanceId: string; action: ClockAction }
   | { type: "complete-clock"; instanceId: string; token: string }
   | { type: "reset-clocks" }
-  | { type: "runtime-note"; instanceId: string; value: string }
-  | { type: "runtime-tasks"; instanceId: string; tasks: LocalTask[] }
-  | { type: "runtime-link-page"; instanceId: string; page: number }
+  | { type: "runtime-note"; instanceId: string; value: string; expectedValue: string }
+  | { type: "runtime-tasks"; instanceId: string; tasks: LocalTask[]; expectedTasks: LocalTask[] }
+  | { type: "runtime-link-page"; instanceId: string; page: number; expectedPage: number }
   | { type: "delete-instance-runtime"; instanceId: string }
   | { type: "record-unblock"; host: string }
   | { type: "reset-stats" };
@@ -65,13 +65,18 @@ export function isMessage(value: unknown): value is Message {
     case "complete-clock":
       return isSafeIdentifier(value.instanceId) && isSafeIdentifier(value.token);
     case "runtime-note":
-      return isSafeIdentifier(value.instanceId) && typeof value.value === "string" && value.value.length <= 200_000;
+      return isSafeIdentifier(value.instanceId)
+        && typeof value.value === "string" && value.value.length <= 200_000
+        && typeof value.expectedValue === "string" && value.expectedValue.length <= 200_000;
     case "runtime-tasks":
-      return isSafeIdentifier(value.instanceId) && Array.isArray(value.tasks)
-        && value.tasks.length <= 10_000 && value.tasks.every(isLocalTask);
+      return isSafeIdentifier(value.instanceId)
+        && Array.isArray(value.tasks) && value.tasks.length <= 10_000 && value.tasks.every(isLocalTask)
+        && Array.isArray(value.expectedTasks) && value.expectedTasks.length <= 10_000 && value.expectedTasks.every(isLocalTask);
     case "runtime-link-page":
       return isSafeIdentifier(value.instanceId) && typeof value.page === "number"
-        && Number.isInteger(value.page) && value.page >= 0 && value.page <= 10_000;
+        && Number.isInteger(value.page) && value.page >= 0 && value.page <= 10_000
+        && typeof value.expectedPage === "number" && Number.isInteger(value.expectedPage)
+        && value.expectedPage >= 0 && value.expectedPage <= 10_000;
     case "delete-instance-runtime":
       return isSafeIdentifier(value.instanceId);
     default:

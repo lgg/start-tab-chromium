@@ -48,6 +48,17 @@ async function copyStaticAssets() {
 
   const manifest = JSON.parse(await readFile(source("manifest.json"), "utf8"));
   if (blockerOnly) delete manifest.chrome_url_overrides;
+  const googleOAuthClientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() ?? "";
+  const validGoogleOAuthClientId = /^[a-zA-Z0-9._-]+\.apps\.googleusercontent\.com$/.test(googleOAuthClientId);
+  if (googleOAuthClientId && !validGoogleOAuthClientId) {
+    throw new Error("GOOGLE_OAUTH_CLIENT_ID must be a Chrome OAuth client ending in .apps.googleusercontent.com");
+  }
+  if (validGoogleOAuthClientId) {
+    manifest.oauth2 = { ...manifest.oauth2, client_id: googleOAuthClientId };
+  } else {
+    delete manifest.oauth2;
+    manifest.permissions = (manifest.permissions ?? []).filter((permission) => permission !== "identity");
+  }
   await writeFile(output("manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 

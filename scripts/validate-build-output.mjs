@@ -23,6 +23,15 @@ const manifest = JSON.parse(await readFile(path.join(outdir, "manifest.json"), "
 assert.equal(manifest.manifest_version, 3, "Build manifest must remain Manifest V3");
 assert.equal(manifest.version, "3.0.0", "Build manifest version must match release version");
 assert.equal(manifest.background?.service_worker, "service-worker.js", "Service worker output must be wired");
+const configuredGoogleClientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() ?? "";
+if (configuredGoogleClientId) {
+  assert.match(configuredGoogleClientId, /^[a-zA-Z0-9._-]+\.apps\.googleusercontent\.com$/, "Configured Google OAuth client ID must use the expected Chrome client format");
+  assert.equal(manifest.oauth2?.client_id, configuredGoogleClientId, "Configured Google OAuth client ID must reach the build manifest");
+  assert.ok(manifest.permissions?.includes("identity"), "Google-enabled builds require the identity permission");
+} else {
+  assert.equal(manifest.oauth2, undefined, "Default deployable builds must not contain a placeholder OAuth client ID");
+  assert.equal(manifest.permissions?.includes("identity"), false, "Google-disabled builds must omit the identity permission");
+}
 
 for (const file of [
   "service-worker.js",
