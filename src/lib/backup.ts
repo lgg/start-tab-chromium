@@ -1,16 +1,15 @@
-import { normalizeBlockedSites, normalizeLastBlockedUrls, syncRules } from "./blocklist.js";
+import { normalizeBlockedSites, normalizeLastBlockedUrls, syncRulesInCurrentTransaction } from "./blocklist.js";
 import { markStartTabDataChanged } from "./data-revision.js";
+import { withStorageLock } from "./storage-lock.js";
 import { FOCUS_STATS_KEY, normalizeFocusStats } from "./focus-stats.js";
 import {
   LEGACY_INSTANCE_RUNTIME_KEY,
   START_PAGE_RUNTIME_KEY,
-  getStartPageRuntimeState,
   isFutureRuntimeSchema,
   normalizeRuntimeState,
 } from "./start-page-runtime.js";
 import {
   START_PAGE_SETTINGS_KEY,
-  getStartPageSettings,
   isFutureStartPageSchema,
   isRecord,
   normalizeStartPageSettings,
@@ -29,6 +28,9 @@ const STORAGE_KEYS = [
   FOCUS_STATS_KEY,
 ] as const;
 
+const SNAPSHOT_KEYS = [...STORAGE_KEYS, LEGACY_INSTANCE_RUNTIME_KEY] as const;
+const ROLLBACK_KEYS = [...SNAPSHOT_KEYS, PRE_IMPORT_BACKUP_KEY] as const;
+
 export type BackupStorageKey = (typeof STORAGE_KEYS)[number];
 
 export interface BackupBundle {
@@ -41,6 +43,10 @@ export interface BackupBundle {
     storageKeys: string[];
   };
   storage: Record<string, unknown>;
+}
+
+export interface BackupImportOptions {
+  dataRevisionAt?: number;
 }
 
 export interface BackupImportReport {
@@ -95,23 +101,23 @@ function assertSupportedSchemas(storage: Record<string, unknown>): void {
   }
 }
 
-function normalizedStorage(backup: BackupLike): Record<string, unknown> {
-  const settings = normalizeStartPageSettings(backup.storage[START_PAGE_SETTINGS_KEY]);
+function normalizedStorage(source: Record<string, unknown>): Record<string, unknown> {
+  const settings = normalizeStartPageSettings(source[START_PAGE_SETTINGS_KEY]);
   const runtime = normalizeRuntimeState(
-    backup.storage[START_PAGE_RUNTIME_KEY],
+    source[START_PAGE_RUNTIME_KEY],
     settings,
-    backup.storage[LEGACY_INSTANCE_RUNTIME_KEY],
+    source[LEGACY_INSTANCE_RUNTIME_KEY],
   );
-  const locale = normalizeLocale(backup.storage.localeOverride);
+  const locale = normalizeLocale(source.localeOverride);
   const storage: Record<string, unknown> = {
-    blockedSites: normalizeBlockedSites(backup.storage.blockedSites),
-    lastBlockedUrls: normalizeLastBlockedUrls(backup.storage.lastBlockedUrls),
+    blockedSites: normalizeBlockedSites(source.blockedSites),
+    lastBlockedUrls: normalizeLastBlockedUrls(source.lastBlockedUrls),
     [START_PAGE_SETTINGS_KEY]: settings,
     [START_PAGE_RUNTIME_KEY]: runtime,
-    startPageOnboarding: normalizeOnboarding(backup.storage.startPageOnboarding),
+    startPageOnboarding: normalizeOnboarding(source.startPageOnboarding),
   };
-  if (Object.prototype.hasOwnProperty.call(backup.storage, FOCUS_STATS_KEY)) {
-    storage[FOCUS_STATS_KEY] = normalizeFocusStats(backup.storage[FOCUS_STATS_KEY]);
+  if (Object.prototype.hasOwnProperty.call(source, FOCUS_STATS_KEY)) {
+    storage[FOCUS_STATS_KEY] = normalizeFocusStats(source[FOCUS_STATS_KEY]);
   }
   if (locale) storage.localeOverride = locale;
   return storage;
@@ -132,61 +138,64 @@ export function migrateBackup(value: unknown): BackupBundle {
   if (!isBackupLike(value)) throw new Error("Invalid Start Tab backup file");
   assertSupportedSchemas(value.storage);
   return currentSchema(
-    normalizedStorage(value),
+    normalizedStorage(value.storage),
     value.exportedAt,
     typeof value.snapshotId === "string" && value.snapshotId ? value.snapshotId : backupId(),
   );
 }
 
 export async function exportBackup(): Promise<BackupBundle> {
-  const additional = await chrome.storage.local.get([...STORAGE_KEYS]);
-  assertSupportedSchemas(additional);
-  const settings = await getStartPageSettings();
-  const runtime = await getStartPageRuntimeState(settings);
-  return currentSchema({
-    ...additional,
-    [START_PAGE_SETTINGS_KEY]: settings,
-    [START_PAGE_RUNTIME_KEY]: runtime,
-  }, new Date().toISOString(), backupId());
+  return withStorageLock("data-write", async () => {
+    const snapshot = await chrome.storage.local.get([...SNAPSHOT_KEYS]);
+    assertSupportedSchemas(snapshot);
+    return currentSchema(normalizedStorage(snapshot), new Date().toISOString(), backupId());
+  });
 }
 
-function keysAbsentFrom(storage: Record<string, unknown>): string[] {
-  return STORAGE_KEYS.filter((key) => !Object.prototype.hasOwnProperty.call(storage, key));
+function keysAbsentFrom(storage: Record<string, unknown>, keys: readonly string[] = STORAGE_KEYS): string[] {
+  return keys.filter((key) => !Object.prototype.hasOwnProperty.call(storage, key));
 }
 
 async function restoreStorageSnapshot(snapshot: Record<string, unknown>): Promise<void> {
-  const absent = keysAbsentFrom(snapshot);
-  if (absent.length > 0) await chrome.storage.local.remove(absent);
+  const absent = keysAbsentFrom(snapshot, ROLLBACK_KEYS);
   await chrome.storage.local.set(snapshot);
+  if (absent.length > 0) await chrome.storage.local.remove(absent);
 }
 
-export async function importBackup(value: unknown): Promise<BackupImportReport> {
+export async function importBackup(value: unknown, options: BackupImportOptions = {}): Promise<BackupImportReport> {
   if (!isBackupLike(value)) throw new Error("Invalid Start Tab backup file");
   const migrated = migrateBackup(value);
-  const current = await chrome.storage.local.get([...STORAGE_KEYS]);
-  const next = { ...migrated.storage };
-  const optionalRemovals = keysAbsentFrom(next);
-  await chrome.storage.local.set({
-    [PRE_IMPORT_BACKUP_KEY]: currentSchema(current, new Date().toISOString(), backupId()),
+
+  return withStorageLock("data-write", async () => {
+    const current = await chrome.storage.local.get([...ROLLBACK_KEYS]);
+    assertSupportedSchemas(current);
+    const next = { ...migrated.storage };
+    const removals = keysAbsentFrom(next, SNAPSHOT_KEYS);
+    const recovery = currentSchema(normalizedStorage(current), new Date().toISOString(), backupId());
+    await chrome.storage.local.set({ [PRE_IMPORT_BACKUP_KEY]: recovery });
+
+    try {
+      await chrome.storage.local.set(next);
+      if (removals.length > 0) await chrome.storage.local.remove(removals);
+      await syncRulesInCurrentTransaction();
+      await markStartTabDataChanged(options.dataRevisionAt);
+    } catch (error) {
+      try {
+        await restoreStorageSnapshot(current);
+        await syncRulesInCurrentTransaction();
+      } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], "Backup import failed and rollback was incomplete");
+      }
+      throw error;
+    }
+
+    return {
+      sourceVersion: value.version,
+      targetVersion: BACKUP_VERSION,
+      migrated: value.version !== BACKUP_VERSION,
+      importedKeys: Object.keys(next),
+    };
   });
-
-  try {
-    await chrome.storage.local.set(next);
-    if (optionalRemovals.length > 0) await chrome.storage.local.remove(optionalRemovals);
-    await syncRules();
-    await markStartTabDataChanged();
-  } catch (error) {
-    await restoreStorageSnapshot(current);
-    await syncRules();
-    throw error;
-  }
-
-  return {
-    sourceVersion: value.version,
-    targetVersion: BACKUP_VERSION,
-    migrated: value.version !== BACKUP_VERSION,
-    importedKeys: Object.keys(next),
-  };
 }
 
 export async function restorePreImportBackup(): Promise<void> {

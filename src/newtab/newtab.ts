@@ -1,6 +1,7 @@
 import { markStartTabDataChanged } from "../lib/data-revision.js";
 import { loadI18n, type I18n } from "../lib/i18n.js";
 import { sendMessage } from "../lib/messages.js";
+import { withStorageLock } from "../lib/storage-lock.js";
 import {
   getStartPageRuntimeState,
   type StartPageRuntimeState,
@@ -61,6 +62,7 @@ let editor: LayoutEditor;
 let renderCleanups: Array<() => void> = [];
 let renderQueued = false;
 let disposed = false;
+let runtimeMutationJob: Promise<void> = Promise.resolve();
 
 function clearRenderCleanups(): void {
   for (const cleanup of renderCleanups.splice(0)) cleanup();
@@ -183,16 +185,43 @@ function render(): void {
     settings,
     runtime,
     setRuntime: async (mutation) => {
-      switch (mutation.kind) {
-        case "note":
-          await sendMessage({ type: "runtime-note", instanceId: mutation.instanceId, value: mutation.value });
-          break;
-        case "tasks":
-          await sendMessage({ type: "runtime-tasks", instanceId: mutation.instanceId, tasks: mutation.tasks });
-          break;
-        case "linkPage":
-          await sendMessage({ type: "runtime-link-page", instanceId: mutation.instanceId, page: mutation.page });
-          break;
+      const operation = async (): Promise<void> => {
+        switch (mutation.kind) {
+          case "note":
+            await sendMessage({
+              type: "runtime-note",
+              instanceId: mutation.instanceId,
+              value: mutation.value,
+              expectedValue: mutation.expectedValue,
+            });
+            break;
+          case "tasks":
+            await sendMessage({
+              type: "runtime-tasks",
+              instanceId: mutation.instanceId,
+              tasks: mutation.tasks,
+              expectedTasks: mutation.expectedTasks,
+            });
+            break;
+          case "linkPage":
+            await sendMessage({
+              type: "runtime-link-page",
+              instanceId: mutation.instanceId,
+              page: mutation.page,
+              expectedPage: mutation.expectedPage,
+            });
+            break;
+        }
+      };
+      const next = runtimeMutationJob.catch(() => undefined).then(operation);
+      runtimeMutationJob = next;
+      try {
+        await next;
+      } catch (error) {
+        await refreshState();
+        announce(i18n.t("runtimeMutationConflict"));
+        queueRender();
+        throw error;
       }
     },
     requestRender: () => queueStateRefresh(),
@@ -250,8 +279,10 @@ async function finishOnboarding(presetId: LayoutPresetId | null): Promise<void> 
       runtime = await getStartPageRuntimeState(savedSettings);
     }
   }
-  await chrome.storage.local.set({ [ONBOARDING_KEY]: { onboarded: true } });
-  await markStartTabDataChanged();
+  await withStorageLock("data-write", async () => {
+    await chrome.storage.local.set({ [ONBOARDING_KEY]: { onboarded: true } });
+    await markStartTabDataChanged();
+  });
   document.getElementById("onboarding")?.remove();
   queueRender();
 }

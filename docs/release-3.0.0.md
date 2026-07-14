@@ -100,19 +100,34 @@ npm run build:blocker-only
 
 ### Full
 
-- Output: `dist/`
+- Output: `build/`
 - Contains `newtab.html`, `newtab.js`, shared Start Tab assets, and `chrome_url_overrides.newtab`.
 
 ### Blocker-only
 
-- Output: `dist-blocker-only/`
+- Output: `build-blocker-only/`
 - Does not bundle the new-tab entry point.
 - Generated manifest does not contain `chrome_url_overrides`.
 - Popup, blocked page, Options, service worker, blocklist, backup, and statistics remain available.
 
 ## OAuth
 
-Calendar and Google Drive require a real Chrome-extension OAuth client ID in `src/manifest.json`. Placeholder or missing IDs leave integration actions disabled and do not initiate authorization.
+The default build is deployable without Google integration: the builder removes the placeholder `oauth2` block and the unused `identity` permission. Calendar and Google Drive remain visibly unavailable and do not initiate authorization.
+
+To create a Google-enabled build, pass a real Chrome-extension OAuth client ID at build time:
+
+```bash
+GOOGLE_OAUTH_CLIENT_ID=your-client.apps.googleusercontent.com npm run build
+```
+
+On PowerShell:
+
+```powershell
+$env:GOOGLE_OAUTH_CLIENT_ID = "your-client.apps.googleusercontent.com"
+npm run build
+```
+
+The build fails for a malformed non-empty ID. Do not edit the generated manifest by hand.
 
 ## Known external constraints
 

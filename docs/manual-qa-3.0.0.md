@@ -120,7 +120,7 @@ Also verify:
 
 ## Google Calendar and weather
 
-- [ ] With placeholder OAuth configuration, confirm Calendar and Drive actions fail gracefully or remain disabled without opening authorization.
+- [ ] Build without `GOOGLE_OAUTH_CLIENT_ID`; confirm the generated manifest omits `oauth2` and `identity`, while Calendar and Drive remain disabled without opening authorization.
 - [ ] With a real OAuth client, test separate Calendar blocks with different calendar IDs and filters.
 - [ ] Sign out or revoke authorization and confirm localized error handling.
 - [ ] Test Weather blocks for two cities.
@@ -172,7 +172,7 @@ With a real OAuth client and account:
 - [ ] Restore it into a clean profile.
 - [ ] Restore an older supported backup and confirm migration.
 - [ ] Revoke OAuth and confirm a clear error.
-- [ ] Confirm no OAuth flow starts with the placeholder client ID.
+- [ ] Confirm no OAuth flow starts in a default build that has no `oauth2` manifest block.
 
 ## Accessibility
 

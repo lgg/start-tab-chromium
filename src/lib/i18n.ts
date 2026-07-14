@@ -1,4 +1,5 @@
 import { markStartTabDataChanged } from "./data-revision.js";
+import { withStorageLock } from "./storage-lock.js";
 
 export const SUPPORTED_LOCALES = ["en", "ru"] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
@@ -31,13 +32,11 @@ export async function getLocalePreference(): Promise<LocalePreference> {
 }
 
 export async function setLocalePreference(preference: LocalePreference): Promise<void> {
-  if (preference === "auto") {
-    await chrome.storage.local.remove(LOCALE_OVERRIDE_KEY);
+  await withStorageLock("data-write", async () => {
+    if (preference === "auto") await chrome.storage.local.remove(LOCALE_OVERRIDE_KEY);
+    else await chrome.storage.local.set({ [LOCALE_OVERRIDE_KEY]: preference });
     await markStartTabDataChanged();
-    return;
-  }
-  await chrome.storage.local.set({ [LOCALE_OVERRIDE_KEY]: preference });
-  await markStartTabDataChanged();
+  });
 }
 
 function browserLanguages(): string[] {
@@ -66,8 +65,9 @@ async function fetchCatalog(path: string, required: boolean): Promise<LocaleCata
 
 async function loadCatalog(locale: SupportedLocale): Promise<LocaleCatalog> {
   const base = await fetchCatalog(`_locales/${locale}/messages.json`, true);
-  const overlay = await fetchCatalog(`_locales/${locale}/roadmap-messages.json`, false);
-  return { ...base, ...overlay };
+  const roadmap = await fetchCatalog(`_locales/${locale}/roadmap-messages.json`, false);
+  const round7 = await fetchCatalog(`_locales/${locale}/round7-messages.json`, false);
+  return { ...base, ...roadmap, ...round7 };
 }
 
 async function mergeCatalogs(locale: SupportedLocale, defaultCatalog: LocaleCatalog): Promise<{ locale: SupportedLocale; catalog: LocaleCatalog }> {
