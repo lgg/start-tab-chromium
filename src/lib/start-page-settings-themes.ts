@@ -16,7 +16,24 @@ import type {
   ThemeBundle,
   ValidationIssue,
 } from "./start-page-types.js";
-import { getStartPageSettings, setStartPageSettings } from "./start-page-settings.js";
+
+interface ThemeSettingsPersistence {
+  get(): Promise<StartPageSettings>;
+  set(value: StartPageSettings): Promise<ValidationIssue[]>;
+}
+
+let persistence: ThemeSettingsPersistence | null = null;
+
+/** Configure persistence without creating a circular module dependency. */
+export function configureThemeSettingsPersistence(value: ThemeSettingsPersistence): void {
+  persistence = value;
+}
+
+function themePersistence(): ThemeSettingsPersistence {
+  if (!persistence) throw new Error("Theme settings persistence is not configured");
+  return persistence;
+}
+
 export function createCustomThemeDraft(
   settings: StartPageSettings,
   name: string,
@@ -35,7 +52,7 @@ export function createCustomThemeDraft(
 }
 
 export async function saveNewCustomTheme(theme: StartPageTheme): Promise<StartPageTheme> {
-  const current = await getStartPageSettings();
+  const current = await themePersistence().get();
   const now = Date.now();
   const fallback = cloneTheme(getTheme(current));
   fallback.id = theme.id;
@@ -47,7 +64,7 @@ export async function saveNewCustomTheme(theme: StartPageTheme): Promise<StartPa
   normalized.builtIn = false;
   normalized.createdAt = now;
   normalized.updatedAt = now;
-  await setStartPageSettings({
+  await themePersistence().set({
     ...current,
     themes: { selectedThemeId: normalized.id, customThemes: [...current.themes.customThemes, normalized] },
   });
@@ -55,12 +72,12 @@ export async function saveNewCustomTheme(theme: StartPageTheme): Promise<StartPa
 }
 
 export async function createCustomTheme(name: string, sourceThemeId?: string): Promise<StartPageTheme> {
-  const current = await getStartPageSettings();
+  const current = await themePersistence().get();
   return createCustomThemeDraft(current, name, sourceThemeId);
 }
 
 export async function updateCustomTheme(theme: StartPageTheme): Promise<StartPageTheme> {
-  const current = await getStartPageSettings();
+  const current = await themePersistence().get();
   if (getBuiltInTheme(theme.id)) throw new Error("Built-in themes cannot be edited");
   const existing = current.themes.customThemes.find((item) => item.id === theme.id);
   if (!existing) return saveNewCustomTheme(theme);
@@ -71,7 +88,7 @@ export async function updateCustomTheme(theme: StartPageTheme): Promise<StartPag
     updatedAt: Date.now(),
   }, existing);
   normalized.builtIn = false;
-  await setStartPageSettings({
+  await themePersistence().set({
     ...current,
     themes: {
       ...current.themes,
@@ -82,7 +99,7 @@ export async function updateCustomTheme(theme: StartPageTheme): Promise<StartPag
 }
 
 export async function duplicateTheme(themeId: string, name?: string): Promise<StartPageTheme> {
-  const current = await getStartPageSettings();
+  const current = await themePersistence().get();
   const source = getTheme(current, themeId);
   const now = Date.now();
   const duplicate: StartPageTheme = {
@@ -93,7 +110,7 @@ export async function duplicateTheme(themeId: string, name?: string): Promise<St
     createdAt: now,
     updatedAt: now,
   };
-  await setStartPageSettings({
+  await themePersistence().set({
     ...current,
     themes: { selectedThemeId: duplicate.id, customThemes: [...current.themes.customThemes, duplicate] },
   });
@@ -101,22 +118,22 @@ export async function duplicateTheme(themeId: string, name?: string): Promise<St
 }
 
 export async function deleteCustomTheme(themeId: string): Promise<void> {
-  const current = await getStartPageSettings();
+  const current = await themePersistence().get();
   if (getBuiltInTheme(themeId)) throw new Error("Built-in themes cannot be deleted");
   if (!current.themes.customThemes.some((theme) => theme.id === themeId)) return;
   const customThemes = current.themes.customThemes.filter((theme) => theme.id !== themeId);
   const selectedThemeId = current.themes.selectedThemeId === themeId
     ? DEFAULT_SETTINGS.themes.selectedThemeId
     : current.themes.selectedThemeId;
-  await setStartPageSettings({ ...current, themes: { selectedThemeId, customThemes } });
+  await themePersistence().set({ ...current, themes: { selectedThemeId, customThemes } });
 }
 
 export async function selectTheme(themeId: string): Promise<void> {
-  const current = await getStartPageSettings();
+  const current = await themePersistence().get();
   if (!getBuiltInTheme(themeId) && !current.themes.customThemes.some((theme) => theme.id === themeId)) {
     throw new Error(`Theme not found: ${themeId}`);
   }
-  await setStartPageSettings({ ...current, themes: { ...current.themes, selectedThemeId: themeId } });
+  await themePersistence().set({ ...current, themes: { ...current.themes, selectedThemeId: themeId } });
 }
 
 export async function importCustomTheme(value: unknown): Promise<{ theme: StartPageTheme; issues: ValidationIssue[] }> {
@@ -124,7 +141,7 @@ export async function importCustomTheme(value: unknown): Promise<{ theme: StartP
   if (result.issues.some((issue) => issue.messageKey === "validationInvalidThemeFile")) {
     throw new Error("Invalid Start Tab theme file");
   }
-  const current = await getStartPageSettings();
+  const current = await themePersistence().get();
   const now = Date.now();
   const theme: StartPageTheme = {
     ...result.value.theme,
@@ -133,7 +150,7 @@ export async function importCustomTheme(value: unknown): Promise<{ theme: StartP
     createdAt: now,
     updatedAt: now,
   };
-  await setStartPageSettings({
+  await themePersistence().set({
     ...current,
     themes: { selectedThemeId: theme.id, customThemes: [...current.themes.customThemes, theme] },
   });
