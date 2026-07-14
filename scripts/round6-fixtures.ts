@@ -97,7 +97,6 @@ const [{ markStartTabDataChanged, readStartTabDataRevision }, defaults, settings
   import("../src/lib/messages.js"),
 ]);
 
-// Revisions must strictly increase even when the wall clock does not.
 const originalNow = Date.now;
 Date.now = () => 1_000;
 await markStartTabDataChanged();
@@ -107,7 +106,6 @@ const secondRevision = await readStartTabDataRevision();
 assert.ok(secondRevision > firstRevision, "Data revisions must increase within the same millisecond");
 Date.now = originalNow;
 
-// Settings writes must reject a stale snapshot rather than silently overwriting another context.
 const initialSettings = await settingsApi.getStartPageSettings();
 const staleSettings = settingsApi.cloneSettings(initialSettings);
 const changedSettings = settingsApi.cloneSettings(initialSettings);
@@ -115,7 +113,6 @@ changedSettings.layout.gap += 1;
 await settingsApi.setStartPageSettings(changedSettings);
 await assert.rejects(() => settingsApi.setStartPageSettings(staleSettings), /changed in another extension context/);
 
-// Runtime writes must provide the same lost-update protection.
 const currentSettings = await settingsApi.getStartPageSettings();
 const initialRuntime = await runtimeApi.getStartPageRuntimeState(currentSettings);
 const staleRuntime = structuredClone(initialRuntime);
@@ -125,18 +122,19 @@ await runtimeApi.setStartPageRuntimeState(changedRuntime);
 staleRuntime.notes.fixture = "stale";
 await assert.rejects(() => runtimeApi.setStartPageRuntimeState(staleRuntime), /changed in another extension context/);
 
-// A transient migration read failure must not poison all future blocklist reads.
 localState.blocked = ["https://example.com/path"];
 failNextLocalGet = true;
 await assert.rejects(() => blocklistApi.migrateLegacyStorage(), /transient/);
 await blocklistApi.migrateLegacyStorage();
 assert.deepEqual(await blocklistApi.getBlockedSites(), ["example.com"]);
 
-// Upload a real remote snapshot, then simulate a brand-new pristine device. Remote data must win.
 const remoteSettings = settingsApi.cloneSettings(await settingsApi.getStartPageSettings());
 remoteSettings.layout.gap = 31;
 await settingsApi.setStartPageSettings(remoteSettings);
+syncState.startTabSyncMeta = { invalid: true };
+syncState.startTabSyncChunk9 = "orphan";
 await syncApi.uploadChromeSyncBackup();
+assert.equal(Object.prototype.hasOwnProperty.call(syncState, "startTabSyncChunk9"), false, "Orphaned sync chunks must be removed even when prior metadata is corrupt");
 const remoteMeta = structuredClone(syncState.startTabSyncMeta);
 assert.ok(remoteMeta, "Remote sync metadata must be written");
 for (const key of Object.keys(localState)) delete localState[key];
@@ -144,13 +142,11 @@ const result = await syncApi.syncChromeSyncBackup();
 assert.equal(result, "restored", "A pristine device must restore existing remote data");
 assert.equal((await settingsApi.getStartPageSettings()).layout.gap, 31);
 
-// New worker-owned operations must be validated explicitly.
 assert.equal(messagesApi.isMessage({ type: "replace-blocked-sites", sites: ["example.com"] }), true);
 assert.equal(messagesApi.isMessage({ type: "open-native-new-tab" }), true);
 assert.equal(messagesApi.isMessage({ type: "reset-start-page" }), true);
 assert.equal(messagesApi.isMessage({ type: "replace-blocked-sites", sites: [42] }), false);
 
-// A complete runtime reset clears both runtime generations and durable clock alarms.
 localState.startPageRuntimeState = runtimeApi.normalizeRuntimeState(undefined, await settingsApi.getStartPageSettings());
 localState.startTabInstanceState = { legacy: true };
 alarmNames.add(`${runtimeApi.CLOCK_ALARM_PREFIX}timer:token`);
@@ -159,7 +155,6 @@ assert.equal(Object.prototype.hasOwnProperty.call(localState, "startPageRuntimeS
 assert.equal(Object.prototype.hasOwnProperty.call(localState, "startTabInstanceState"), false);
 assert.equal(alarmNames.size, 0);
 
-// Defaults remain valid after all migration and reset paths.
 assert.equal(settingsApi.normalizeStartPageSettings(defaults.DEFAULT_SETTINGS).schemaVersion, settingsApi.START_PAGE_SCHEMA_VERSION);
 
 console.log("Round 6 fixtures passed");

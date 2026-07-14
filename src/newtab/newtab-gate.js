@@ -1,6 +1,7 @@
 (() => {
   const SETTINGS_KEY = "startPageSettings";
   const OVERLAY_ID = "startTabGateOverlay";
+  const DIAGNOSTICS_KEY = "startTabLastNativeNewTabContext";
   const splitMarkers = ["split-view", "split_view", "splitview", "tab-picker", "tab_picker", "select-tab", "select_tab"];
   const text = (key, fallback) => chrome.i18n.getMessage(key) || fallback;
   const ignore = () => undefined;
@@ -58,7 +59,13 @@
   async function splitContext() {
     const current = await chrome.tabs.getCurrent().catch(() => null);
     const marked = [location.href, document.referrer, window.name].some((value) => splitMarkers.some((marker) => String(value).toLowerCase().includes(marker)));
-    return marked || (typeof current?.openerTabId === "number" && location.pathname.endsWith("/newtab.html"));
+    const openerNewTab = typeof current?.openerTabId === "number" && location.pathname.endsWith("/newtab.html");
+    if (marked || openerNewTab) {
+      await chrome.storage.local.set({
+        [DIAGNOSTICS_KEY]: { checkedAt: new Date().toISOString(), href: location.href, referrer: document.referrer, windowName: window.name, openerTabId: current?.openerTabId ?? null, tabId: current?.id ?? null },
+      }).catch(ignore);
+    }
+    return marked || openerNewTab;
   }
 
   async function apply() {

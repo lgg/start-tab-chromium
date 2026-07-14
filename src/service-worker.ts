@@ -155,33 +155,34 @@ chrome.runtime.onMessage.addListener(
   },
 );
 
+
 function runNativeTabJob(operation: () => Promise<void>): Promise<void> {
   const next = nativeTabJob.catch(ignoreBackgroundError).then(operation);
   nativeTabJob = next;
   return next;
 }
 
-async function waitForNativeBypassConsumption(tabId: number): Promise<void> {
+async function waitForNativeBypassConsumption(tabId: number): Promise<boolean> {
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
     const items = await chrome.storage.local.get(NATIVE_NEW_TAB_BYPASS_KEY);
     const value = items[NATIVE_NEW_TAB_BYPASS_KEY] as NativeNewTabBypass | undefined;
-    if (value?.tabId !== tabId) return;
+    if (value?.tabId !== tabId) return true;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
+  return false;
 }
 
 async function openNativeNewTab(): Promise<void> {
   const tab = await chrome.tabs.create({ active: true, url: "about:blank" });
   if (typeof tab.id !== "number") throw new Error("The browser did not return a tab id");
-  await chrome.storage.local.set({
-    [NATIVE_NEW_TAB_BYPASS_KEY]: { tabId: tab.id, expiresAt: Date.now() + 5000 },
-  });
   for (const url of ["chrome://new-tab-page/", "chrome-search://local-ntp/local-ntp.html", "about:newtab"]) {
     try {
+      await chrome.storage.local.set({
+        [NATIVE_NEW_TAB_BYPASS_KEY]: { tabId: tab.id, expiresAt: Date.now() + 5000 },
+      });
       await chrome.tabs.update(tab.id, { url });
-      await waitForNativeBypassConsumption(tab.id);
-      return;
+      if (await waitForNativeBypassConsumption(tab.id)) return;
     } catch {
       // Try the next browser-specific URL.
     }

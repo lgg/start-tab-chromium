@@ -7,12 +7,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (relative) => readFile(path.join(root, relative), "utf8");
-const [messages, blocklist, settings, runtime, sync, gate, newtab, integrations, staticRenderers] = await Promise.all([
+const [messages, blocklist, settings, runtime, sync, serviceWorker, gate, newtab, integrations, staticRenderers] = await Promise.all([
   read("src/lib/messages.ts"),
   read("src/lib/blocklist.ts"),
   read("src/lib/start-page-settings.ts"),
   read("src/lib/start-page-runtime.ts"),
   read("src/lib/chrome-sync.ts"),
+  read("src/service-worker.ts"),
   read("src/newtab/newtab-gate.js"),
   read("src/newtab/newtab.ts"),
   read("src/newtab/block-renderers-integrations.ts"),
@@ -29,6 +30,11 @@ assert.match(runtime, /changed in another extension context/, "Runtime must reje
 assert.match(runtime, /resetStartPageRuntimeState/, "Runtime reset must be centralized");
 assert.match(sync, /isPristineBackup/, "Sync must protect a pre-existing remote snapshot on a clean device");
 assert.match(sync, /Object\.keys\(value\).*sort/s, "Canonical sync JSON must sort object keys");
+assert.match(sync, /startsWith\(CHUNK_PREFIX\)/, "Sync uploads must clean orphaned chunks even when old metadata is corrupt");
+for (const type of ["replace-blocked-sites", "open-native-new-tab", "reset-start-page"]) {
+  assert.ok(serviceWorker.includes(`case "${type}"`), `service-worker.ts must handle ${type}`);
+}
+assert.match(serviceWorker, /return true;/, "The runtime message listener must keep MV3 asynchronous responses alive");
 assert.doesNotMatch(gate, /chrome\.tabs\.create|startTabNativeNewTabBypass/, "The early gate must not create native tabs or own bypass state directly");
 assert.match(gate, /runtime\.sendMessage/, "The early gate must delegate native-tab creation to the service worker");
 assert.doesNotMatch(newtab, /nativeNewTabButton\.addEventListener/, "The main new-tab runtime must not install a duplicate native-tab click handler");

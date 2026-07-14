@@ -241,8 +241,7 @@ async function prepareSnapshot(inputBundle?: BackupBundle): Promise<{
 }
 
 async function writeRemoteSnapshot(snapshot: Awaited<ReturnType<typeof prepareSnapshot>>): Promise<SyncMeta> {
-  const existing = await chrome.storage.sync.get(META_KEY);
-  const previousChunks = parseMeta(existing[META_KEY])?.meta.chunks ?? 0;
+  const existing = await chrome.storage.sync.get(null);
   const meta: SyncMeta = {
     version: 3,
     updatedAt: new Date().toISOString(),
@@ -257,7 +256,8 @@ async function writeRemoteSnapshot(snapshot: Awaited<ReturnType<typeof prepareSn
   const payload: Record<string, unknown> = { [META_KEY]: meta };
   snapshot.chunks.forEach((chunk, index) => { payload[chunkKey(index)] = chunk; });
   await chrome.storage.sync.set(payload);
-  const staleKeys = Array.from({ length: Math.max(0, previousChunks - snapshot.chunks.length) }, (_, index) => chunkKey(index + snapshot.chunks.length));
+  const activeChunkKeys = new Set(snapshot.chunks.map((_, index) => chunkKey(index)));
+  const staleKeys = Object.keys(existing).filter((key) => key.startsWith(CHUNK_PREFIX) && !activeChunkKeys.has(key));
   if (staleKeys.length > 0) await chrome.storage.sync.remove(staleKeys);
   await writeLocalMeta(meta);
   return meta;
