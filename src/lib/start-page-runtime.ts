@@ -168,14 +168,26 @@ function jsonEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-async function persistRuntime(state: StartPageRuntimeState, allowFutureOverwrite = false): Promise<StartPageRuntimeState> {
-  if (!allowFutureOverwrite) {
-    const items = await chrome.storage.local.get(START_PAGE_RUNTIME_KEY);
-    if (isFutureRuntimeSchema(items[START_PAGE_RUNTIME_KEY])) {
-      throw new Error("Start Tab runtime data was created by a newer extension version and cannot be modified safely");
-    }
+async function persistRuntime(
+  state: StartPageRuntimeState,
+  allowFutureOverwrite = false,
+  expectedUpdatedAt: number | null = null,
+): Promise<StartPageRuntimeState> {
+  const items = await chrome.storage.local.get(START_PAGE_RUNTIME_KEY);
+  const raw = items[START_PAGE_RUNTIME_KEY];
+  if (!allowFutureOverwrite && isFutureRuntimeSchema(raw)) {
+    throw new Error("Start Tab runtime data was created by a newer extension version and cannot be modified safely");
   }
-  const stamped: StartPageRuntimeState = { ...state, version: RUNTIME_SCHEMA_VERSION, updatedAt: Date.now() };
+  const currentUpdatedAt = isFutureRuntimeSchema(raw) ? 0 : normalizeRuntimeState(raw, await getStartPageSettings()).updatedAt;
+  if (!allowFutureOverwrite && expectedUpdatedAt !== null
+    && currentUpdatedAt > 0 && expectedUpdatedAt > 0 && currentUpdatedAt !== expectedUpdatedAt) {
+    throw new Error("Start Tab runtime changed in another extension context; reload before saving");
+  }
+  const stamped: StartPageRuntimeState = {
+    ...state,
+    version: RUNTIME_SCHEMA_VERSION,
+    updatedAt: Math.max(Date.now(), currentUpdatedAt + 1),
+  };
   await chrome.storage.local.set({ [START_PAGE_RUNTIME_KEY]: stamped });
   await markStartTabDataChanged(stamped.updatedAt);
   return stamped;
@@ -197,7 +209,7 @@ export async function getStartPageRuntimeState(inputSettings?: StartPageSettings
 
 export async function setStartPageRuntimeState(state: StartPageRuntimeState): Promise<void> {
   const settings = await getStartPageSettings();
-  await persistRuntime(normalizeRuntimeState(state, settings));
+  await persistRuntime(normalizeRuntimeState(state, settings), false, state.updatedAt);
 }
 
 export async function updateStartPageRuntimeState(
@@ -207,7 +219,16 @@ export async function updateStartPageRuntimeState(
   const settings = inputSettings ?? await getStartPageSettings();
   const current = await getStartPageRuntimeState(settings);
   const next = normalizeRuntimeState(updater(structuredClone(current)), settings);
-  return persistRuntime(next);
+  return persistRuntime(next, false, current.updatedAt);
+}
+
+export async function resetStartPageRuntimeState(): Promise<void> {
+  await chrome.storage.local.remove([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
+  const alarms = await chrome.alarms.getAll();
+  await Promise.all(alarms
+    .filter((alarm) => alarm.name.startsWith(CLOCK_ALARM_PREFIX))
+    .map((alarm) => chrome.alarms.clear(alarm.name)));
+  await markStartTabDataChanged();
 }
 
 function clockToken(): string {

@@ -1,350 +1,104 @@
 (() => {
   const SETTINGS_KEY = "startPageSettings";
+  const COMMAND_PREFIX = "startTabWorkerCommand:";
+  const RESPONSE_PREFIX = "startTabWorkerResponse:";
   const OVERLAY_ID = "startTabGateOverlay";
-  const STYLE_ID = "startTabGateStyle";
-  const DIAGNOSTICS_KEY = "startTabLastNativeNewTabContext";
-  const NATIVE_NEW_TAB_BYPASS_KEY = "startTabNativeNewTabBypass";
-  const NATIVE_NEW_TAB_URLS = [
-    "chrome://new-tab-page/",
-    "chrome-search://local-ntp/local-ntp.html",
-    "about:newtab",
-  ];
-  const SPLIT_VIEW_MARKERS = [
-    "split-view",
-    "split_view",
-    "splitview",
-    "split",
-    "side-by-side",
-    "sidebyside",
-    "side_panel",
-    "side-panel",
-    "tab-picker",
-    "tab_picker",
-    "tabpicker",
-    "select-tab",
-    "select_tab",
-    "selecttab",
-    "picker",
-    "pane",
-  ];
-  const FALLBACK_MESSAGES = {
-    startTabDisabledTitle: "Start Tab is disabled",
-    startTabDisabledText: "The extension is still active for blocking, backups, and other settings. Re-enable Start Tab content in extension settings.",
-    openSettings: "Open settings",
-    openNativeNewTab: "Open browser new tab",
-    splitViewTitle: "Choose a tab for Split View",
-    splitViewText: "Start Tab detected a browser split-view tab picker context. Select an open tab below, or open the browser new tab if this was detected incorrectly.",
-    noTabsAvailable: "No open tabs are available in this window.",
+  const splitMarkers = ["split-view", "split_view", "splitview", "tab-picker", "tab_picker", "select-tab", "select_tab"];
+  const text = (key, fallback) => chrome.i18n.getMessage(key) || fallback;
+  const ignore = () => undefined;
+  const run = (action) => {
+    try { void Promise.resolve(action()).catch(ignore); } catch { ignore(); }
   };
 
-  function isEnabled(settings) {
-    return settings?.startTab?.enabled !== false;
-  }
-
-  function t(key) {
-    return chrome.i18n.getMessage(key) || FALLBACK_MESSAGES[key] || key;
-  }
-
-  function ignoreGateError() {
-    // The gate is optional UI; failed browser APIs should not break Start Tab.
-  }
-
-  function runGateAction(handler) {
-    try {
-      void Promise.resolve(handler()).catch(ignoreGateError);
-    } catch {
-      ignoreGateError();
-    }
-  }
-
-  function hasSplitViewMarker(value) {
-    const normalized = String(value || "").toLowerCase();
-    return SPLIT_VIEW_MARKERS.some((marker) => normalized.includes(marker));
-  }
-
-  function userAgentBrands() {
-    const brands = navigator.userAgentData?.brands || [];
-    return brands.map((brand) => brand.brand).join(" ");
-  }
-
-  function isCometLikeBrowser() {
-    const haystack = `${navigator.userAgent} ${userAgentBrands()}`.toLowerCase();
-    return haystack.includes("comet") || haystack.includes("perplexity");
-  }
-
-  async function currentTab() {
-    try {
-      return await chrome.tabs.getCurrent();
-    } catch {
-      return null;
-    }
-  }
-
-  async function isLikelySplitViewContext() {
-    const tab = await currentTab();
-    const explicitMarker = [location.href, document.referrer, window.name].some(hasSplitViewMarker);
-    const openerNewTab = typeof tab?.openerTabId === "number" && location.pathname.endsWith("/newtab.html");
-    const cometLike = isCometLikeBrowser();
-
-    if (explicitMarker || openerNewTab) {
-      try {
-        await chrome.storage.local.set({
-          [DIAGNOSTICS_KEY]: {
-            checkedAt: new Date().toISOString(),
-            href: location.href,
-            referrer: document.referrer,
-            windowName: window.name,
-            openerTabId: tab?.openerTabId ?? null,
-            tabId: tab?.id ?? null,
-            userAgent: navigator.userAgent,
-            userAgentBrands: userAgentBrands(),
-            explicitMarker,
-            openerNewTab,
-            cometLike,
-          },
-        });
-      } catch {
-        ignoreGateError();
-      }
-    }
-
-    return explicitMarker || openerNewTab;
-  }
-
-  async function openNativeNewTab() {
-    const tab = await currentTab();
-    if (tab?.id === undefined) return;
-
-    await chrome.storage.local.set({
-      [NATIVE_NEW_TAB_BYPASS_KEY]: {
-        tabId: tab.id,
-        expiresAt: Date.now() + 5000,
-      },
+  async function workerCommand(message) {
+    const id = crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+    const commandKey = `${COMMAND_PREFIX}${id}`;
+    const responseKey = `${RESPONSE_PREFIX}${id}`;
+    await new Promise((resolve, reject) => {
+      let done = false;
+      const finish = (error) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timeout);
+        chrome.storage.onChanged.removeListener(listener);
+        void chrome.storage.local.remove([commandKey, responseKey]);
+        error ? reject(error) : resolve();
+      };
+      const listener = (changes, area) => {
+        if (area !== "local" || !changes[responseKey]) return;
+        const response = changes[responseKey].newValue;
+        finish(response?.ok ? null : new Error(response?.error || "Worker command failed"));
+      };
+      const timeout = setTimeout(() => finish(new Error("Worker command timed out")), 10_000);
+      chrome.storage.onChanged.addListener(listener);
+      void chrome.storage.local.set({ [commandKey]: { id, message } }).catch(finish);
     });
-
-    for (const url of NATIVE_NEW_TAB_URLS) {
-      try {
-        await chrome.tabs.update(tab.id, { url });
-        return;
-      } catch {
-        // Try the next browser-specific native new tab URL.
-      }
-    }
-
-    await chrome.storage.local.remove(NATIVE_NEW_TAB_BYPASS_KEY);
   }
 
-  function installNativeNewTabButton() {
-    const button = document.getElementById("nativeNewTab");
-    if (!button) return;
-    button.title = t("openNativeNewTab");
-    button.setAttribute("aria-label", t("openNativeNewTab"));
-    button.addEventListener("click", () => runGateAction(openNativeNewTab));
-  }
-
-  function ensureStyle() {
-    if (document.getElementById(STYLE_ID)) return;
-    const style = document.createElement("style");
-    style.id = STYLE_ID;
-    style.textContent = `
-      .start-tab-gate-overlay {
-        position: fixed;
-        inset: 0;
-        z-index: 30;
-        display: grid;
-        place-items: center;
-        padding: 24px;
-        background: rgb(2 6 23 / 0.88);
-        color: var(--text-color, #f8fafc);
-        font-family: var(--font-family, system-ui, sans-serif);
-        backdrop-filter: blur(16px);
-      }
-      .start-tab-gate-panel {
-        width: min(680px, 100%);
-        max-height: min(720px, calc(100vh - 48px));
-        overflow: auto;
-        border: 1px solid rgb(255 255 255 / 0.14);
-        border-radius: 12px;
-        background: rgb(15 23 42 / 0.94);
-        box-shadow: 0 24px 80px rgb(0 0 0 / 0.35);
-        padding: 24px;
-      }
-      .start-tab-gate-panel h1 {
-        margin: 0 0 8px;
-        font-size: 1.3rem;
-      }
-      .start-tab-gate-panel p {
-        margin: 0 0 18px;
-        color: rgb(248 250 252 / 0.68);
-      }
-      .start-tab-gate-actions,
-      .start-tab-gate-tabs {
-        display: grid;
-        gap: 10px;
-      }
-      .start-tab-gate-actions {
-        grid-template-columns: repeat(auto-fit, minmax(140px, max-content));
-        margin-top: 16px;
-      }
-      .start-tab-gate-tabs button,
-      .start-tab-gate-actions button {
-        border: 1px solid rgb(255 255 255 / 0.14);
-        border-radius: 8px;
-        background: rgb(2 6 23 / 0.72);
-        color: inherit;
-        cursor: pointer;
-        font: inherit;
-        font-weight: 700;
-        padding: 10px 12px;
-        text-align: left;
-      }
-      .start-tab-gate-actions button {
-        background: #93c5fd;
-        color: #07111f;
-        text-align: center;
-      }
-      .start-tab-gate-actions button.start-tab-gate-secondary {
-        background: rgb(2 6 23 / 0.72);
-        color: inherit;
-      }
-      .start-tab-gate-tabs button:hover,
-      .start-tab-gate-actions button:hover {
-        filter: brightness(1.12);
-      }
-      .start-tab-gate-tab-title {
-        display: block;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .start-tab-gate-tab-url {
-        display: block;
-        overflow: hidden;
-        color: rgb(248 250 252 / 0.58);
-        font-size: 0.82rem;
-        font-weight: 500;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-    `;
-    document.head.append(style);
-  }
+  const openNative = () => workerCommand({ type: "open-native-new-tab" });
 
   function removeOverlay() {
     document.getElementById(OVERLAY_ID)?.remove();
-    document.getElementById(STYLE_ID)?.remove();
   }
 
-  function panel(titleText, bodyText) {
-    ensureStyle();
-    document.getElementById(OVERLAY_ID)?.remove();
-
+  function showOverlay(title, description, tabs = []) {
+    removeOverlay();
     const overlay = document.createElement("div");
     overlay.id = OVERLAY_ID;
-    overlay.className = "start-tab-gate-overlay";
-
-    const content = document.createElement("section");
-    content.className = "start-tab-gate-panel";
-
-    const title = document.createElement("h1");
-    title.textContent = titleText;
-
-    const text = document.createElement("p");
-    text.textContent = bodyText;
-
-    content.append(title, text);
-    overlay.append(content);
-    document.body.append(overlay);
-    return content;
-  }
-
-  function actionButton(label, handler, className = "") {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = label;
-    if (className) button.className = className;
-    button.addEventListener("click", () => runGateAction(handler));
-    return button;
-  }
-
-  function renderDisabledOverlay() {
-    const content = panel(t("startTabDisabledTitle"), t("startTabDisabledText"));
-    const actions = document.createElement("div");
-    actions.className = "start-tab-gate-actions";
-    actions.append(actionButton(t("openSettings"), () => chrome.runtime.openOptionsPage()));
-    content.append(actions);
-  }
-
-  function isSelectableTab(tab, currentId) {
-    if (tab.id === currentId || !tab.url) return false;
-    if (tab.url.startsWith("chrome-extension://")) return false;
-    if (tab.url.startsWith("chrome://")) return false;
-    return true;
-  }
-
-  async function renderSplitViewOverlay() {
-    const current = await currentTab();
-    const content = panel(t("splitViewTitle"), t("splitViewText"));
-    const list = document.createElement("div");
-    list.className = "start-tab-gate-tabs";
-
-    const tabs = await chrome.tabs.query({ currentWindow: true });
-    const selectable = tabs.filter((tab) => isSelectableTab(tab, current?.id));
-
-    if (selectable.length === 0) {
-      const empty = document.createElement("p");
-      empty.textContent = t("noTabsAvailable");
-      list.append(empty);
-    }
-
-    for (const tab of selectable) {
+    overlay.style.cssText = "position:fixed;inset:0;z-index:30;display:grid;place-items:center;padding:24px;background:#020617e8;color:#f8fafc;font:16px system-ui";
+    const panel = document.createElement("section");
+    panel.style.cssText = "width:min(680px,100%);max-height:calc(100vh - 48px);overflow:auto;border:1px solid #ffffff24;border-radius:12px;background:#0f172af5;padding:24px";
+    const heading = document.createElement("h1");
+    heading.textContent = title;
+    const body = document.createElement("p");
+    body.textContent = description;
+    panel.append(heading, body);
+    for (const tab of tabs) {
       const button = document.createElement("button");
       button.type = "button";
-      const title = document.createElement("span");
-      title.className = "start-tab-gate-tab-title";
-      title.textContent = tab.title || tab.url || "Untitled";
-      const url = document.createElement("span");
-      url.className = "start-tab-gate-tab-url";
-      url.textContent = tab.url || "";
-      button.append(title, url);
-      button.addEventListener("click", () => {
-        if (current?.id !== undefined && tab.url) void chrome.tabs.update(current.id, { url: tab.url }).catch(ignoreGateError);
-      });
-      list.append(button);
+      button.textContent = tab.title || tab.url || "Untitled";
+      button.style.cssText = "display:block;width:100%;margin:8px 0;padding:10px;text-align:left";
+      button.addEventListener("click", () => run(async () => {
+        const current = await chrome.tabs.getCurrent();
+        if (current?.id !== undefined && tab.url) await chrome.tabs.update(current.id, { url: tab.url });
+      }));
+      panel.append(button);
     }
-
-    const actions = document.createElement("div");
-    actions.className = "start-tab-gate-actions";
-    actions.append(
-      actionButton(t("openNativeNewTab"), openNativeNewTab, "start-tab-gate-secondary"),
-      actionButton(t("openSettings"), () => chrome.runtime.openOptionsPage()),
-    );
-    content.append(list, actions);
+    const native = document.createElement("button");
+    native.type = "button";
+    native.textContent = text("openNativeNewTab", "Open browser new tab");
+    native.addEventListener("click", () => run(openNative));
+    const settings = document.createElement("button");
+    settings.type = "button";
+    settings.textContent = text("openSettings", "Open settings");
+    settings.addEventListener("click", () => run(() => chrome.runtime.openOptionsPage()));
+    panel.append(native, settings);
+    overlay.append(panel);
+    document.body.append(overlay);
   }
 
-  async function applyGate() {
-    if (await isLikelySplitViewContext()) {
-      await renderSplitViewOverlay();
+  async function splitContext() {
+    const current = await chrome.tabs.getCurrent().catch(() => null);
+    const marked = [location.href, document.referrer, window.name].some((value) => splitMarkers.some((marker) => String(value).toLowerCase().includes(marker)));
+    return marked || (typeof current?.openerTabId === "number" && location.pathname.endsWith("/newtab.html"));
+  }
+
+  async function apply() {
+    if (await splitContext()) {
+      const current = await chrome.tabs.getCurrent().catch(() => null);
+      const tabs = (await chrome.tabs.query({ currentWindow: true })).filter((tab) => tab.id !== current?.id && tab.url && !tab.url.startsWith("chrome://") && !tab.url.startsWith("chrome-extension://"));
+      showOverlay(text("splitViewTitle", "Choose a tab for Split View"), text("splitViewText", "Select an open tab below."), tabs);
       return;
     }
-
     const items = await chrome.storage.local.get(SETTINGS_KEY);
-    if (isEnabled(items[SETTINGS_KEY])) {
-      removeOverlay();
-      return;
-    }
-    renderDisabledOverlay();
+    if (items[SETTINGS_KEY]?.startTab?.enabled !== false) removeOverlay();
+    else showOverlay(text("startTabDisabledTitle", "Start Tab is disabled"), text("startTabDisabledText", "Re-enable Start Tab in extension settings."));
   }
 
-  chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== "local" || !changes[SETTINGS_KEY]) return;
-    if (isEnabled(changes[SETTINGS_KEY].newValue)) {
-      removeOverlay();
-      return;
-    }
-    renderDisabledOverlay();
+  const nativeButton = document.getElementById("nativeNewTab");
+  if (nativeButton) nativeButton.addEventListener("click", () => run(openNative));
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && changes[SETTINGS_KEY]) void apply().catch(ignore);
   });
-
-  installNativeNewTabButton();
-  void applyGate().catch(ignoreGateError);
+  void apply().catch(ignore);
 })();

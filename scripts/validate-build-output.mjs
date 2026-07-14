@@ -55,6 +55,9 @@ if (variant === "full") {
     assert.ok(newtabSource.includes(marker), `newtab.js must delegate ${marker} to the service worker`);
   }
   assert.doesNotMatch(newtabSource, /notifications\.create/, "newtab.js must not create clock notifications");
+  const gateSource = await readFile(path.join(outdir, "newtab-gate.js"), "utf8");
+  assert.ok(gateSource.includes("open-native-new-tab"), "newtab-gate.js must delegate native-tab creation");
+  assert.doesNotMatch(gateSource, /startTabNativeNewTabBypass|chrome:\/\/new-tab-page|chrome-search:\/\/local-ntp/, "newtab-gate.js must not mutate bypass state or navigate tabs directly");
 } else {
   assert.equal(manifest.chrome_url_overrides, undefined, "Blocker-only build must omit the new-tab override");
   for (const file of ["newtab.js", "newtab.html", "newtab.css", "newtab-gate.js"]) {
@@ -63,7 +66,7 @@ if (variant === "full") {
 }
 
 const serviceWorkerSource = await readFile(path.join(outdir, "service-worker.js"), "utf8");
-for (const marker of ["complete-clock", "clock-action", "reset-clocks", "runtime-note", "runtime-tasks", "runtime-link-page", "delete-instance-runtime", "record-unblock", "reset-stats"]) {
+for (const marker of ["complete-clock", "clock-action", "reset-clocks", "runtime-note", "runtime-tasks", "runtime-link-page", "delete-instance-runtime", "record-unblock", "reset-stats", "replace-blocked-sites", "open-native-new-tab", "reset-start-page"]) {
   assert.ok(serviceWorkerSource.includes(marker), `service-worker.js must own ${marker}`);
 }
 assert.match(serviceWorkerSource, /notifications\.create/, "service-worker.js must own clock notifications");

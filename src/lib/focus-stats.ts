@@ -1,3 +1,4 @@
+import { markStartTabDataChanged } from "./data-revision.js";
 import { sendMessage } from "./messages.js";
 import { getStartPageSettings, type StartPageSettings } from "./start-page-settings.js";
 
@@ -163,6 +164,7 @@ async function readStats(): Promise<FocusStats> {
 
 async function writeStats(stats: FocusStats): Promise<void> {
   await chrome.storage.local.set({ [FOCUS_STATS_KEY]: stats });
+  await markStartTabDataChanged();
 }
 
 function addToCounts(counts: CountSet, patch: Partial<CountSet>): void {

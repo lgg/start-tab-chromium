@@ -11,7 +11,9 @@ import {
   markStartTabDataChanged,
   readStartTabDataRevision,
 } from "./data-revision.js";
-import { isRecord } from "./start-page-settings.js";
+import { FOCUS_STATS_KEY, normalizeFocusStats } from "./focus-stats.js";
+import { normalizeRuntimeState } from "./start-page-runtime.js";
+import { DEFAULT_SETTINGS, isRecord, normalizeStartPageSettings } from "./start-page-settings.js";
 
 const META_KEY = "startTabSyncMeta";
 const LOCAL_META_KEY = "startTabLocalSyncMeta";
@@ -67,8 +69,49 @@ async function checksum(value: string): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+const VOLATILE_CONTENT_KEYS = new Set(["updatedAt", "createdAt"]);
+
+function canonicalValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.keys(value)
+    .filter((key) => !VOLATILE_CONTENT_KEYS.has(key))
+    .sort((left, right) => left.localeCompare(right))
+    .map((key) => [key, canonicalValue(value[key])]));
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(canonicalValue(value));
+}
+
 function canonicalBackupContent(bundle: BackupBundle): string {
+  return stableJson({ app: bundle.app, version: bundle.version, schema: bundle.schema, storage: bundle.storage });
+}
+
+function legacyCanonicalBackupContent(bundle: BackupBundle): string {
   return JSON.stringify({ app: bundle.app, version: bundle.version, schema: bundle.schema, storage: bundle.storage });
+}
+
+function isPristineBackup(bundle: BackupBundle): boolean {
+  const storage = bundle.storage;
+  const settings = normalizeStartPageSettings(storage.startPageSettings);
+  const defaults = normalizeStartPageSettings(DEFAULT_SETTINGS);
+  if (stableJson(settings) !== stableJson(defaults)) return false;
+  const runtime = normalizeRuntimeState(storage.startPageRuntimeState, settings);
+  const defaultRuntime = normalizeRuntimeState(undefined, defaults);
+  if (stableJson(runtime) !== stableJson(defaultRuntime)) return false;
+  if (Array.isArray(storage.blockedSites) && storage.blockedSites.length > 0) return false;
+  if (isRecord(storage.lastBlockedUrls) && Object.keys(storage.lastBlockedUrls).length > 0) return false;
+  if (isRecord(storage.startPageOnboarding) && storage.startPageOnboarding.onboarded === true) return false;
+  if (storage.localeOverride === "en" || storage.localeOverride === "ru") return false;
+  if (Object.prototype.hasOwnProperty.call(storage, FOCUS_STATS_KEY)
+    && stableJson(normalizeFocusStats(storage[FOCUS_STATS_KEY])) !== stableJson(normalizeFocusStats(undefined))) return false;
+  return true;
+}
+
+function remoteWins(remote: SyncMeta, local: Awaited<ReturnType<typeof prepareSnapshot>>): boolean {
+  if (remote.contentUpdatedAt !== local.contentUpdatedAt) return remote.contentUpdatedAt > local.contentUpdatedAt;
+  return remote.contentChecksum.localeCompare(local.contentChecksum) > 0;
 }
 
 function chunkForChromeSync(value: string): string[] {
@@ -181,7 +224,7 @@ async function prepareSnapshot(inputBundle?: BackupBundle): Promise<{
   contentChecksum: string;
   contentUpdatedAt: number;
 }> {
-  const bundle = inputBundle ?? await exportBackup();
+  const bundle = migrateBackup(inputBundle ?? await exportBackup());
   const json = JSON.stringify(bundle);
   const chunks = chunkForChromeSync(json);
   if (chunks.length > MAX_SYNC_CHUNKS) {
@@ -239,8 +282,12 @@ async function readRemoteBundle(parsed: ParsedMeta): Promise<BackupBundle> {
     throw new Error("Chrome sync backup contains invalid JSON");
   }
   const bundle = migrateBackup(value);
-  if (!parsed.legacy && await checksum(canonicalBackupContent(bundle)) !== meta.contentChecksum) {
-    throw new Error("Chrome sync backup content checksum mismatch");
+  if (!parsed.legacy) {
+    const currentChecksum = await checksum(canonicalBackupContent(bundle));
+    const legacyChecksum = await checksum(legacyCanonicalBackupContent(bundle));
+    if (currentChecksum !== meta.contentChecksum && legacyChecksum !== meta.contentChecksum) {
+      throw new Error("Chrome sync backup content checksum mismatch");
+    }
   }
   return bundle;
 }
@@ -277,7 +324,7 @@ export async function syncChromeSyncBackup(): Promise<ChromeSyncResult> {
       await writeRemoteSnapshot(localSnapshot);
       return "unchanged";
     }
-    if (remote.meta.contentUpdatedAt > localSnapshot.contentUpdatedAt) {
+    if (isPristineBackup(localSnapshot.bundle) || remote.meta.contentUpdatedAt > localSnapshot.contentUpdatedAt) {
       await restoreParsedSnapshot(remote);
       return "restored";
     }
@@ -292,7 +339,7 @@ export async function syncChromeSyncBackup(): Promise<ChromeSyncResult> {
 
   const local = await readLocalMeta();
   if (!local || local.legacy) {
-    if (remote.meta.contentUpdatedAt > localSnapshot.contentUpdatedAt) {
+    if (isPristineBackup(localSnapshot.bundle) || remoteWins(remote.meta, localSnapshot)) {
       await restoreParsedSnapshot(remote);
       return "restored";
     }
@@ -314,7 +361,7 @@ export async function syncChromeSyncBackup(): Promise<ChromeSyncResult> {
     await writeLocalMeta(remote.meta);
     return "unchanged";
   }
-  if (remote.meta.contentUpdatedAt > localSnapshot.contentUpdatedAt) {
+  if (remoteWins(remote.meta, localSnapshot)) {
     await restoreParsedSnapshot(remote);
     return "restored";
   }

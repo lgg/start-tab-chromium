@@ -12,7 +12,7 @@
     "build:blocker-only": "node build.mjs --without-newtab --outdir=build-blocker-only && node scripts/validate-build-output.mjs build-blocker-only blocker-only",
     "watch": "node build.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/validate-static.mjs",
+    "test": "node scripts/validate-static.mjs && node scripts/validate-round6-static.mjs",
     "clean": "rm -rf build build-blocker-only"
   },
   "devDependencies": {

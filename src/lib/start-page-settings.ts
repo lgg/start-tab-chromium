@@ -211,8 +211,11 @@ export async function setStartPageSettings(value: StartPageSettings): Promise<Va
     throw new Error("Start Tab settings were created by a newer extension version and cannot be modified safely");
   }
   const previous = normalizeStartPageSettings(raw);
+  if (previous.updatedAt > 0 && value.updatedAt > 0 && value.updatedAt !== previous.updatedAt) {
+    throw new Error("Start Tab settings changed in another extension context; reload before saving");
+  }
   const validation = validateStartPageSettings(value);
-  const stamped = withBlockTimestamps(previous, validation.value, Date.now());
+  const stamped = withBlockTimestamps(previous, validation.value, Math.max(Date.now(), previous.updatedAt + 1));
   await persistSettings(stamped);
   return validation.issues;
 }

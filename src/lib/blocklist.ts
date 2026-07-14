@@ -8,10 +8,24 @@
  * extension's blocked.html page.
  */
 
+import { markStartTabDataChanged } from "./data-revision.js";
+import { sendMessage } from "./messages.js";
+
 const STORAGE_KEY = "blockedSites";
 const LEGACY_STORAGE_KEY = "blocked";
 const LAST_BLOCKED_URLS_KEY = "lastBlockedUrls";
 let migrationPromise: Promise<void> | undefined;
+let mutationJob: Promise<void> = Promise.resolve();
+
+function runMutation(operation: () => Promise<void>): Promise<void> {
+  const next = mutationJob.catch(() => undefined).then(operation);
+  mutationJob = next;
+  return next;
+}
+
+function isPageContext(): boolean {
+  return typeof document !== "undefined";
+}
 
 /** Page (inside the extension) that a blocked navigation is redirected to. */
 export const BLOCKED_PAGE = "blocked.html";
@@ -121,7 +135,10 @@ export async function migrateLegacyStorage(): Promise<void> {
 
     await setBlockedSites([...current, ...legacy]);
     await chrome.storage.local.remove(LEGACY_STORAGE_KEY);
-  })();
+  })().catch((error) => {
+    migrationPromise = undefined;
+    throw error;
+  });
 
   await migrationPromise;
 }
@@ -133,13 +150,20 @@ async function getLastBlockedUrls(): Promise<Record<string, string>> {
 
 async function setBlockedSites(sites: string[]): Promise<void> {
   await chrome.storage.local.set({ [STORAGE_KEY]: normalizeBlockedSites(sites) });
+  await markStartTabDataChanged();
 }
 
 export async function replaceBlockedSites(sites: string[]): Promise<string[]> {
   const normalized = normalizeBlockedSites(sites);
-  await chrome.storage.local.set({ [STORAGE_KEY]: normalized });
-  await chrome.storage.local.remove(LAST_BLOCKED_URLS_KEY);
-  await syncRules();
+  if (isPageContext()) {
+    await sendMessage({ type: "replace-blocked-sites", sites: normalized });
+    return normalized;
+  }
+  await runMutation(async () => {
+    await setBlockedSites(normalized);
+    await chrome.storage.local.remove(LAST_BLOCKED_URLS_KEY);
+    await syncRules();
+  });
   return normalized;
 }
 
@@ -218,26 +242,44 @@ export async function syncRules(): Promise<void> {
 /** Add a host to the blocklist (idempotent) and refresh the rules. */
 export async function blockHost(host: string): Promise<void> {
   const normalized = requireHost(host);
-  const sites = await getBlockedSites();
-  if (!sites.includes(normalized)) {
-    sites.push(normalized);
-    await setBlockedSites(sites);
+  if (isPageContext()) {
+    await sendMessage({ type: "block", host: normalized });
+    return;
   }
-  await syncRules();
+  await runMutation(async () => {
+    const sites = await getBlockedSites();
+    if (!sites.includes(normalized)) {
+      sites.push(normalized);
+      await setBlockedSites(sites);
+    }
+    await syncRules();
+  });
 }
 
 /** Remove a host from the blocklist and refresh the rules. */
 export async function unblockHost(host: string): Promise<void> {
   const normalized = requireHost(host);
-  const sites = (await getBlockedSites()).filter((s) => s !== normalized);
-  await setBlockedSites(sites);
-  await clearLastBlockedUrl(normalized);
-  await syncRules();
+  if (isPageContext()) {
+    await sendMessage({ type: "unblock", host: normalized });
+    return;
+  }
+  await runMutation(async () => {
+    const sites = (await getBlockedSites()).filter((s) => s !== normalized);
+    await setBlockedSites(sites);
+    await clearLastBlockedUrl(normalized);
+    await syncRules();
+  });
 }
 
 /** Clear the entire blocklist. */
 export async function clearAll(): Promise<void> {
-  await setBlockedSites([]);
-  await chrome.storage.local.remove(LAST_BLOCKED_URLS_KEY);
-  await syncRules();
+  if (isPageContext()) {
+    await sendMessage({ type: "clear" });
+    return;
+  }
+  await runMutation(async () => {
+    await setBlockedSites([]);
+    await chrome.storage.local.remove(LAST_BLOCKED_URLS_KEY);
+    await syncRules();
+  });
 }
