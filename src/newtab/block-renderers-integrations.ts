@@ -15,6 +15,28 @@ interface WeatherDay {
   code: number;
 }
 
+interface CacheEntry {
+  expiresAt: number;
+  promise: Promise<unknown>;
+}
+
+const requestCache = new Map<string, CacheEntry>();
+
+function cachedRequest<T>(key: string, ttlMs: number, loader: () => Promise<T>): Promise<T> {
+  const existing = requestCache.get(key);
+  if (existing && existing.expiresAt > Date.now()) return existing.promise as Promise<T>;
+  const promise = loader();
+  requestCache.set(key, { expiresAt: Date.now() + ttlMs, promise });
+  void promise.catch(() => {
+    if (requestCache.get(key)?.promise === promise) requestCache.delete(key);
+  });
+  return promise;
+}
+
+function attached(node: Node): boolean {
+  return node.isConnected;
+}
+
 interface WeatherResult {
   currentTemperature: number | null;
   currentCode: number | null;
@@ -40,7 +62,9 @@ export function renderGoogleCalendar(
     status.textContent = context.i18n.t("googleCalendarNotConfigured");
     return;
   }
-  void listCalendarEvents(block.config.calendarId, block.config.maxResults).then((events) => {
+  const cacheKey = `calendar:${block.config.calendarId}:${block.config.maxResults}`;
+  void cachedRequest(cacheKey, 60_000, () => listCalendarEvents(block.config.calendarId, block.config.maxResults)).then((events) => {
+    if (!attached(status)) return;
     const query = block.config.query.trim().toLocaleLowerCase();
     const filtered = query ? events.filter((event) => event.title.toLocaleLowerCase().includes(query)) : events;
     const list = element("div", "calendar-list");
@@ -49,7 +73,7 @@ export function renderGoogleCalendar(
     if (filtered.length === 0) list.append(element("p", "empty-state", context.i18n.t("emptyList")));
     status.replaceWith(list);
   }).catch(() => {
-    status.textContent = context.i18n.t("googleCalendarUnavailable");
+    if (attached(status)) status.textContent = context.i18n.t("googleCalendarUnavailable");
   });
 }
 
@@ -121,7 +145,9 @@ export function renderWeather(
 ): void {
   const status = element("p", "empty-state", context.i18n.t("weatherLoading"));
   container.append(status);
-  void fetchWeather(block).then((weather) => {
+  const cacheKey = `weather:${JSON.stringify(block.config)}`;
+  void cachedRequest(cacheKey, 10 * 60_000, () => fetchWeather(block)).then((weather) => {
+    if (!attached(status)) return;
     const content = element("div", "weather");
     if (block.config.city) content.append(element("p", "block-meta", block.config.city));
     if (block.config.displayMode === "current") {
@@ -139,7 +165,7 @@ export function renderWeather(
     }
     status.replaceWith(content);
   }).catch(() => {
-    status.textContent = context.i18n.t("weatherUnavailable");
+    if (attached(status)) status.textContent = context.i18n.t("weatherUnavailable");
   });
 }
 
@@ -175,16 +201,20 @@ export function renderRecent(
 ): void {
   const status = element("p", "empty-state", context.i18n.t("recentLoading"));
   container.append(status);
-  void recentHistory(block.config.maxResults).then((items) => status.replaceWith(urlList(items, context.i18n))).catch(() => {
-    status.textContent = context.i18n.t("recentUnavailable");
+  void cachedRequest(`recent:${block.config.maxResults}`, 30_000, () => recentHistory(block.config.maxResults)).then((items) => {
+    if (attached(status)) status.replaceWith(urlList(items, context.i18n));
+  }).catch(() => {
+    if (attached(status)) status.textContent = context.i18n.t("recentUnavailable");
   });
 }
 
 export function renderBrowserPinned(container: HTMLElement, context: BlockRenderContext): void {
   const status = element("p", "empty-state", context.i18n.t("browserPinnedLoading"));
   container.append(status);
-  void browserPinnedTabs().then((items) => status.replaceWith(urlList(items, context.i18n))).catch(() => {
-    status.textContent = context.i18n.t("browserPinnedUnavailable");
+  void cachedRequest("browser-pinned", 15_000, browserPinnedTabs).then((items) => {
+    if (attached(status)) status.replaceWith(urlList(items, context.i18n));
+  }).catch(() => {
+    if (attached(status)) status.textContent = context.i18n.t("browserPinnedUnavailable");
   });
 }
 
@@ -210,6 +240,7 @@ export function renderStats(container: HTMLElement, context: BlockRenderContext)
   const status = element("p", "empty-state", context.i18n.t("statsPlaceholder"));
   container.append(status);
   void getFocusStats().then((stats) => {
+    if (!attached(status)) return;
     const list = element("div", "stats-list");
     const rows = [
       context.i18n.t("statsBlockHits", { value: stats.totals.blockHits }),
@@ -223,6 +254,6 @@ export function renderStats(container: HTMLElement, context: BlockRenderContext)
     list.append(...rows.map((row) => element("div", "stats-list__item", row)));
     status.replaceWith(list);
   }).catch(() => {
-    status.textContent = context.i18n.t("somethingWentWrong");
+    if (attached(status)) status.textContent = context.i18n.t("somethingWentWrong");
   });
 }

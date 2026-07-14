@@ -8,6 +8,9 @@ export type Message =
   | { type: "block"; host: string }
   | { type: "unblock"; host: string }
   | { type: "clear" }
+  | { type: "replace-blocked-sites"; sites: string[] }
+  | { type: "open-native-new-tab" }
+  | { type: "reset-start-page" }
   | { type: "clock-action"; instanceId: string; action: ClockAction }
   | { type: "complete-clock"; instanceId: string; token: string }
   | { type: "reset-clocks" }
@@ -18,10 +21,7 @@ export type Message =
   | { type: "record-unblock"; host: string }
   | { type: "reset-stats" };
 
-export interface Ack {
-  ok: boolean;
-  error?: string;
-}
+export interface Ack { ok: boolean; error?: string }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -45,16 +45,21 @@ function isLocalTask(value: unknown): value is LocalTask {
 
 export function isMessage(value: unknown): value is Message {
   if (!isRecord(value) || typeof value.type !== "string") return false;
-
   switch (value.type) {
     case "block":
     case "unblock":
     case "record-unblock":
       return typeof value.host === "string" && value.host.length <= 2048;
     case "clear":
+    case "open-native-new-tab":
+    case "reset-start-page":
     case "reset-clocks":
     case "reset-stats":
       return true;
+    case "replace-blocked-sites":
+      return Array.isArray(value.sites)
+        && value.sites.length <= 10_000
+        && value.sites.every((site) => typeof site === "string" && site.length <= 2048);
     case "clock-action":
       return isSafeIdentifier(value.instanceId) && (value.action === "toggle" || value.action === "reset");
     case "complete-clock":
@@ -62,16 +67,11 @@ export function isMessage(value: unknown): value is Message {
     case "runtime-note":
       return isSafeIdentifier(value.instanceId) && typeof value.value === "string" && value.value.length <= 200_000;
     case "runtime-tasks":
-      return isSafeIdentifier(value.instanceId)
-        && Array.isArray(value.tasks)
-        && value.tasks.length <= 10_000
-        && value.tasks.every(isLocalTask);
+      return isSafeIdentifier(value.instanceId) && Array.isArray(value.tasks)
+        && value.tasks.length <= 10_000 && value.tasks.every(isLocalTask);
     case "runtime-link-page":
-      return isSafeIdentifier(value.instanceId)
-        && typeof value.page === "number"
-        && Number.isInteger(value.page)
-        && value.page >= 0
-        && value.page <= 10_000;
+      return isSafeIdentifier(value.instanceId) && typeof value.page === "number"
+        && Number.isInteger(value.page) && value.page >= 0 && value.page <= 10_000;
     case "delete-instance-runtime":
       return isSafeIdentifier(value.instanceId);
     default:

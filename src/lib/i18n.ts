@@ -1,3 +1,5 @@
+import { markStartTabDataChanged } from "./data-revision.js";
+
 export const SUPPORTED_LOCALES = ["en", "ru"] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 export type LocalePreference = SupportedLocale | "auto";
@@ -31,9 +33,11 @@ export async function getLocalePreference(): Promise<LocalePreference> {
 export async function setLocalePreference(preference: LocalePreference): Promise<void> {
   if (preference === "auto") {
     await chrome.storage.local.remove(LOCALE_OVERRIDE_KEY);
+    await markStartTabDataChanged();
     return;
   }
   await chrome.storage.local.set({ [LOCALE_OVERRIDE_KEY]: preference });
+  await markStartTabDataChanged();
 }
 
 function browserLanguages(): string[] {

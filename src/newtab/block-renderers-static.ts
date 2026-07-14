@@ -8,8 +8,38 @@ interface IpResult {
   country: string;
 }
 
+interface CacheEntry {
+  expiresAt: number;
+  promise: Promise<unknown>;
+}
+
+const requestCache = new Map<string, CacheEntry>();
+
+function cachedRequest<T>(key: string, ttlMs: number, loader: () => Promise<T>): Promise<T> {
+  const existing = requestCache.get(key);
+  if (existing && existing.expiresAt > Date.now()) return existing.promise as Promise<T>;
+  const promise = loader();
+  requestCache.set(key, { expiresAt: Date.now() + ttlMs, promise });
+  void promise.catch(() => {
+    if (requestCache.get(key)?.promise === promise) requestCache.delete(key);
+  });
+  return promise;
+}
+
+function safeLocale(requested: string, fallback: string): string {
+  for (const candidate of [requested.trim(), fallback, "en"]) {
+    if (!candidate) continue;
+    try {
+      return Intl.getCanonicalLocales(candidate)[0] ?? "en";
+    } catch {
+      // Try the next locale candidate.
+    }
+  }
+  return "en";
+}
+
 function localeFor(block: Extract<BlockInstance, { type: "dateTime" }>, i18n: I18n): string {
-  return block.config.locale.trim() || i18n.locale;
+  return safeLocale(block.config.locale, i18n.locale);
 }
 
 function dateParts(date: Date, timeZone: string, locale: string): Record<string, string> {
@@ -128,13 +158,14 @@ export function renderIp(
 ): void {
   const detail = element("div", "ip__detail", context.i18n.t("ipLoading"));
   container.append(detail);
-  void fetchIp(block.config.endpoint).then((result) => {
+  void cachedRequest(`ip:${block.config.endpoint}`, 5 * 60_000, () => fetchIp(block.config.endpoint)).then((result) => {
+    if (!detail.isConnected) return;
     detail.textContent = context.i18n.t("ipResult", {
       ip: result.ip || context.i18n.t("ipUnknown"),
       country: result.country || context.i18n.t("ipUnknownCountry"),
     });
   }).catch(() => {
-    detail.textContent = context.i18n.t("ipUnavailable");
+    if (detail.isConnected) detail.textContent = context.i18n.t("ipUnavailable");
   });
 }
 

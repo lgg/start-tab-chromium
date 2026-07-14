@@ -1,3 +1,4 @@
+import { markStartTabDataChanged } from "../lib/data-revision.js";
 import { loadI18n, type I18n } from "../lib/i18n.js";
 import { sendMessage } from "../lib/messages.js";
 import {
@@ -20,7 +21,6 @@ import { LayoutEditor } from "./layout-editor.js";
 import { applyTheme } from "./theme-runtime.js";
 
 const ONBOARDING_KEY = "startPageOnboarding";
-const NATIVE_NEW_TAB_BYPASS_KEY = "startTabNativeNewTabBypass";
 
 function requireElement<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -230,22 +230,6 @@ async function refreshState(): Promise<void> {
   runtime = await getStartPageRuntimeState(editor.settings);
 }
 
-async function openNativeNewTab(): Promise<void> {
-  const tab = await chrome.tabs.create({ active: true, url: "about:blank" });
-  if (typeof tab.id !== "number") return;
-  await chrome.storage.local.set({
-    [NATIVE_NEW_TAB_BYPASS_KEY]: {
-      tabId: tab.id,
-      expiresAt: Date.now() + 5000,
-    },
-  });
-  try {
-    await chrome.tabs.update(tab.id, { url: "chrome://newtab/" });
-  } catch {
-    await chrome.tabs.update(tab.id, { url: "about:newtab" });
-  }
-}
-
 async function onboardingState(): Promise<boolean> {
   const items = await chrome.storage.local.get(ONBOARDING_KEY);
   const value = items[ONBOARDING_KEY];
@@ -267,6 +251,7 @@ async function finishOnboarding(presetId: LayoutPresetId | null): Promise<void> 
     }
   }
   await chrome.storage.local.set({ [ONBOARDING_KEY]: { onboarded: true } });
+  await markStartTabDataChanged();
   document.getElementById("onboarding")?.remove();
   queueRender();
 }
@@ -355,7 +340,6 @@ async function init(): Promise<void> {
     },
   });
   settingsButton.addEventListener("click", () => void chrome.runtime.openOptionsPage());
-  nativeNewTabButton.addEventListener("click", () => void openNativeNewTab());
   chrome.storage.onChanged.addListener(handleStorageChange);
   window.addEventListener("resize", handleResize);
   window.addEventListener("beforeunload", handleBeforeUnload);
