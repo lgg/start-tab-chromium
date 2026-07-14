@@ -1,93 +1,111 @@
-# Deep Audit Round 7 — deploy readiness and cross-context data safety
+# Deep Audit Round 7
 
-Status: implementation complete; pending GitHub branch/PR merge at the time this record was written.
+Status: completed locally; merge tracked by the associated GitHub pull request
 
-Base: `master` at `a1b33acd2c06fd89147e2a9bce64f3545d5b630e`.
+Base audited: `master` at `a1b33acd2c06fd89147e2a9bce64f3545d5b630e`
+
+Audit branch: `codex/deep-audit-round-7-deploy-ready-20260714`
 
 ## Scope
 
-This pass re-audited the complete production surface rather than trusting previous audit reports: settings and runtime persistence, layout and block instances, service-worker ownership, clocks and alarms, blocklist/DNR consistency, backup/import rollback, Browser Sync, Google integration packaging, new-tab and Options mutation paths, localization, Manifest V3 output, full and blocker-only builds, and repository branch/PR completeness.
+This pass re-audited the real merged production tree after PRs #76 and #77. It covered settings and runtime persistence, backup/import rollback, Chrome Sync conflict resolution, blocklist and DNR ownership, durable clocks and alarms, native-new-tab handling, Layout Editor concurrency, asynchronous rendering, localization, generated full/blocker-only packages, and repository/PR state.
 
-## Material findings fixed
+GitHub Actions was not used as a readiness criterion. Validation was performed locally from a clean copy with a fresh `npm ci`.
 
-### Cross-context lost updates
+## Confirmed findings and fixes
 
-- Added a shared cross-context storage transaction primitive based on Web Locks, with a deterministic per-context fallback for tests and older runtimes.
-- Settings and runtime stale checks now occur inside the same transaction as their writes.
-- A stale snapshot with timestamp `0` can no longer bypass conflict protection.
-- Data revision increments are serialized and remain unique when multiple changes occur in the same millisecond.
-- Focus statistics, locale, onboarding, settings, runtime, blocklist and backup-relevant writes participate in the same `data-write` transaction boundary.
+### Cross-context persistence
 
-### Runtime mutations and reset
+- Added a shared Web Locks based storage critical section, with a deterministic per-context fallback.
+- Settings and runtime stale checks now occur in the same critical section as their writes.
+- Data revisions remain in the existing versioned storage shape and advance monotonically.
+- Blocklist, statistics, locale, onboarding, backup, reset, and runtime mutations participate in the same data-write ordering where relevant.
 
-- Note, task and link-page messages carry the exact previous value on which the edit was based.
-- The service worker rejects an old tab's mutation after another tab or a backup restore changed the persisted value.
-- The page reloads the latest persisted runtime after a conflict instead of silently overwriting it.
-- Complete Start Tab reset is owned by the service worker and removes current runtime, legacy runtime, migration data and clock alarms together.
-- Durable clock actions and clock completion mutate runtime atomically.
+### Backup and restore safety
 
-### Backup and Browser Sync
+- Direct JSON exports now normalize every managed storage value, not only settings and runtime.
+- Pre-import recovery includes normalized legacy runtime data.
+- Successful imports remove legacy runtime state.
+- Failed imports roll back exact managed storage, the previous recovery snapshot, data revision, DNR rules, and clock alarms, including when the original profile was empty or the failure occurred after a partial write.
+- Imported running timers immediately rebuild their durable alarms.
+- Full Start Tab reset now writes settings and runtime together and rolls back storage and alarms after a partial failure.
 
-- Backup export reads one consistent storage snapshot.
-- Import runs under one transaction, normalizes legacy runtime into the recovery snapshot and deletes legacy runtime after successful application.
-- A failed apply or DNR synchronization restores the exact previous storage keys, including any earlier pre-import recovery backup.
-- Browser Sync passes its remote content revision into import instead of incrementing the data revision twice.
-- Unsupported future local or imported schemas remain protected from downgrade writes.
+### Chrome Sync
 
-### Blocklist/DNR consistency
+- Upload, restore, and smart-sync operations are serialized across extension contexts.
+- Bundle content and its revision are captured from one atomic snapshot.
+- Export time no longer changes `contentUpdatedAt`; unchanged content keeps a stable revision.
+- Legacy profiles without a revision do not fabricate recency. When an existing remote snapshot is present, Smart Sync prefers it and preserves the local profile as the pre-import recovery backup.
+- Existing protections for deterministic checksums, clean-device restoration, conflict resolution, and orphan chunk cleanup remain covered by executable fixtures.
 
-- Add, remove, replace and clear operations now treat storage plus dynamic DNR rules as one recoverable transaction.
-- If DNR rejects the new rules, original storage and original rules are restored.
-- The shared data revision changes only after the complete operation succeeds.
-- Rule reconciliation is serialized with blocklist mutations.
+### Runtime and clocks
 
-### Deployable OAuth packaging
+- Note, task, and link-page mutations carry optimistic preconditions and compare-and-write atomically in the service worker.
+- A stale tab cannot silently overwrite data restored by backup or changed in another tab.
+- Clock runtime persistence and alarm updates happen inside one ordered operation.
+- Completion, reset, deletion, import, rollback, and startup reconciliation remove stale alarms and preserve the current durable alarm set.
+- Conditional instance cleanup cannot delete data for a block restored concurrently.
 
-- Default builds no longer ship the placeholder Google OAuth client ID.
-- Without `GOOGLE_OAUTH_CLIENT_ID`, generated manifests omit both `oauth2` and the unused `identity` permission.
-- A Google-enabled build injects a validated Chrome OAuth client ID from the environment.
-- A malformed non-empty ID fails the build instead of producing an ambiguous artifact.
-- Release and manual-QA documentation now describe the actual `build/` and `build-blocker-only/` outputs and the build-time OAuth workflow.
+### Native new tab
 
-### UI correctness
+- Native-new-tab bypass state is now a bounded per-tab TTL map.
+- Observing the first navigation event no longer consumes the bypass, so later status-only `tabs.onUpdated` events cannot immediately redirect the same native tab back to Start Tab.
+- Browser-specific fallback attempts remain serialized and require an observed native navigation.
 
-- Options no longer sorts the persisted layout block array in place.
-- Theme image previews safely quote URL values.
-- Reset in Options delegates to the complete service-worker reset rather than deleting only one runtime key.
+### UI concurrency and errors
 
-## Executable regression coverage
+- Layout Editor distinguishes its own save from external settings changes.
+- External changes update the persisted baseline while preserving an active draft, so Cancel returns to the latest saved state.
+- Layout save finalizes persisted editor state before best-effort runtime cleanup.
+- Options ignores stale asynchronous statistics renders.
+- Asynchronous block actions report errors instead of silently swallowing them.
+- External-data renderers cache requests and guard detached DOM updates.
 
-Round 7 fixtures verify:
+### Deployment packaging
 
-- simultaneous settings writes produce exactly one winner and one stale conflict;
-- simultaneous runtime writes produce exactly one winner and one stale conflict;
-- zero-timestamp stale writes are rejected;
-- concurrent revision updates are monotonic and unique;
-- real service-worker messages reject stale note, task and link-page edits;
-- forced DNR failure rolls blocklist storage and rules back without advancing revision;
-- exported recovery data includes normalized legacy runtime;
-- successful import removes legacy runtime;
-- forced import failure restores the previous storage and previous recovery backup;
-- complete reset removes both runtime schemas and clock alarms.
+- Removed the placeholder OAuth client from the source manifest.
+- Default full and blocker-only builds omit OAuth and the `identity` permission.
+- A Google-enabled build requires a valid `GOOGLE_OAUTH_CLIENT_ID` and fails early for placeholders or malformed IDs.
+- Blocker-only now omits the unused `history` permission and hides/disables Start Tab-only controls in Options.
+- Added generated-manifest validation for OAuth/permission consistency and a dedicated deployment guide.
 
-## Local clean-room validation
+### Regression coverage
 
-Executed without using GitHub Actions as a readiness signal:
+- Added executable Round 7 fixtures for Web Lock serialization, concurrent stale writers, stable revisions, normalized exports, sync serialization, safe first sync, empty-state rollback, post-revision rollback, reset rollback, alarm restoration, imported running clocks, and conditional runtime cleanup.
+- Added static guards for lock ownership, transaction boundaries, optimistic preconditions, duplicate operations, native bypass lifetime, Layout Editor external baselines, and generated build invariants.
 
-```text
-npm ci --no-audit --no-fund --loglevel=error
-npm test
-npm run typecheck
-npm run build
-npm run build:blocker-only
-GOOGLE_OAUTH_CLIENT_ID=round7-test.apps.googleusercontent.com node build.mjs --outdir=build-google
-GOOGLE_OAUTH_CLIENT_ID=round7-test.apps.googleusercontent.com node scripts/validate-build-output.mjs build-google full
-```
+## Validation performed
 
-All commands passed.
+The final source tree passed 25 consecutive Round 7 race/rollback fixture runs and then a full clean-room validation from a separate directory:
 
-Additional checks found no duplicate TypeScript/JavaScript module stems, source maps, `eval`, `new Function`, debugger statements or debug logging in production source. Full output owns `newtab.html`; blocker-only output contains no new-tab override or assets. Default output omits Google OAuth and `identity`; the Google-enabled output contains both with the supplied ID.
+- `npm ci --no-audit --no-fund --loglevel=error`
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+- `npm run build:blocker-only`
+- `GOOGLE_OAUTH_CLIENT_ID="1234567890-abcdefghijklmnopqrstuvwxyz123456.apps.googleusercontent.com" npm run build:google`
+- invalid/placeholder OAuth build rejection
 
-## External boundary
+Additional checks confirmed:
 
-Repository-internal automated and static checks cannot prove real Chrome Web Store review, real Google OAuth consent, Calendar/Drive behavior with a production client, physical interaction across every Chromium-derived browser, or real multi-device `chrome.storage.sync` propagation and quota behavior. These remain explicit manual deployment checks rather than being falsely reported as completed.
+- both generated manifests are Manifest V3 version `3.0.0`;
+- the full package contains `chrome_url_overrides.newtab`;
+- the blocker-only package omits the new-tab override and new-tab assets;
+- generated bundles contain neither `eval` nor `new Function`;
+- source contains no debugger statements or unfinished `FIXME`, `HACK`, or `XXX` markers;
+- 34 TypeScript modules have no import cycles;
+- no workflow or package-lock change is part of this audit;
+- the default manifests contain no placeholder credentials;
+- blocker-only omits `history`, while the full profile retains it for Recent History.
+
+## Repository state checked before the branch
+
+- no open pull requests were present;
+- all 77 existing pull requests were closed as merged;
+- the GitHub branch-search connector returned no results even for `master`, so it was treated as unreliable and was not used as proof that physical stale refs were absent.
+
+After merge, the authoritative completion checks are: the audit PR is merged, its squash commit is the current `master` head, and no open pull requests remain.
+
+## External validation not claimed
+
+Real-account Google OAuth, Drive and Calendar behavior, real multi-device Chrome Sync, and physical testing across multiple Chromium-derived browsers require external interactive environments. The code paths, error handling, transaction boundaries, generated packages, and local mocks were audited, but those external integrations are not represented as physically exercised in this pass.
