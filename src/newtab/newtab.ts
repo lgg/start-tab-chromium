@@ -1,7 +1,7 @@
 import { loadI18n, type I18n } from "../lib/i18n.js";
+import { sendMessage } from "../lib/messages.js";
 import {
   getStartPageRuntimeState,
-  setStartPageRuntimeState,
   type StartPageRuntimeState,
 } from "../lib/start-page-runtime.js";
 import {
@@ -182,10 +182,18 @@ function render(): void {
     i18n,
     settings,
     runtime,
-    setRuntime: async (next) => {
-      runtime = next;
-      context.runtime = next;
-      await setStartPageRuntimeState(next);
+    setRuntime: async (mutation) => {
+      switch (mutation.kind) {
+        case "note":
+          await sendMessage({ type: "runtime-note", instanceId: mutation.instanceId, value: mutation.value });
+          break;
+        case "tasks":
+          await sendMessage({ type: "runtime-tasks", instanceId: mutation.instanceId, tasks: mutation.tasks });
+          break;
+        case "linkPage":
+          await sendMessage({ type: "runtime-link-page", instanceId: mutation.instanceId, page: mutation.page });
+          break;
+      }
     },
     requestRender: () => queueStateRefresh(),
     registerCleanup: registerRenderCleanup,
@@ -223,7 +231,7 @@ async function refreshState(): Promise<void> {
 }
 
 async function openNativeNewTab(): Promise<void> {
-  const tab = await chrome.tabs.create({ active: true });
+  const tab = await chrome.tabs.create({ active: true, url: "about:blank" });
   if (typeof tab.id !== "number") return;
   await chrome.storage.local.set({
     [NATIVE_NEW_TAB_BYPASS_KEY]: {

@@ -170,13 +170,13 @@ export function renderLinkCollection(
   const previous = actionButton(context.i18n.t("previousPage"), async () => {
     page = (page - 1 + totalPages) % totalPages;
     context.runtime.linkPages[block.id] = page;
-    await context.setRuntime(context.runtime);
+    await context.setRuntime({ kind: "linkPage", instanceId: block.id, page });
     draw();
   }, "button button--secondary");
   const next = actionButton(context.i18n.t("nextPage"), async () => {
     page = (page + 1) % totalPages;
     context.runtime.linkPages[block.id] = page;
-    await context.setRuntime(context.runtime);
+    await context.setRuntime({ kind: "linkPage", instanceId: block.id, page });
     draw();
   }, "button button--secondary");
   const label = element("span", "pager__label");

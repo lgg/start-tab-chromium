@@ -77,3 +77,20 @@ jobs:
             src/lib/theme-editor.ts
             src/newtab/block-renderers.ts
           retention-days: 1
+      - name: Upload complete audit snapshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: complete-audit-snapshot
+          path: |
+            .github/workflows/ci.yml
+            build.mjs
+            package.json
+            package-lock.json
+            tsconfig.json
+            src
+            scripts
+            docs
+            build
+            build-blocker-only
+          retention-days: 1

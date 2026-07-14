@@ -1,37 +1,20 @@
-import { recordFocusSessionCompleted, recordFocusSessionInterrupted, recordFocusSessionStarted } from "../lib/focus-stats.js";
+import { sendMessage, type ClockAction } from "../lib/messages.js";
 import {
-  clearClockAlarm,
-  completeClockInstance,
   defaultClockForBlock,
   elapsedClockMs,
   getStartPageRuntimeState,
-  pauseClockState,
   remainingClockMs,
-  resetClockState,
-  scheduleClockAlarm,
-  startClockState,
-  type ClockCompletionResult,
 } from "../lib/start-page-runtime.js";
 import type { BlockInstance, LocalTask } from "../lib/start-page-settings.js";
 import { actionButton, element, formatDuration } from "./block-renderer-common.js";
 import type { BlockRenderContext } from "./block-renderer-types.js";
 
-function notificationMessage(block: Extract<BlockInstance, { type: "timer" | "pomodoro" }>, context: BlockRenderContext): string {
-  return block.type === "pomodoro" ? context.i18n.t("pomodoroDone") : context.i18n.t("timerDone");
-}
-
-async function applyCompletion(result: ClockCompletionResult, context: BlockRenderContext): Promise<void> {
-  if (!result.completed || !result.block) return;
-  if (result.focusTimeMs > 0) await recordFocusSessionCompleted(result.focusTimeMs);
-  if (result.notify && (result.block.type === "timer" || result.block.type === "pomodoro")) {
-    await chrome.notifications.create(`start-tab-clock-${result.block.id}-${Date.now()}`, {
-      type: "basic",
-      iconUrl: "icons/icon.128.png",
-      title: result.block.title,
-      message: notificationMessage(result.block, context),
-    });
-  }
+async function refreshClock(
+  block: Extract<BlockInstance, { type: "timer" | "stopwatch" | "pomodoro" }>,
+  context: BlockRenderContext,
+): Promise<void> {
   context.runtime = await getStartPageRuntimeState(context.settings);
+  if (!context.runtime.clocks[block.id]) context.runtime.clocks[block.id] = defaultClockForBlock(block);
   context.requestRender();
 }
 
@@ -45,55 +28,55 @@ export function renderClock(
   const phase = element("div", "clock__phase");
   const display = element("div", "clock__display");
   const actions = element("div", "clock__actions");
-  const startPause = actionButton("", async () => {
-    const now = Date.now();
-    if (clock.running) {
-      const wasWork = block.type === "pomodoro" && clock.phase === "work" && clock.focusSessionStartedAt !== null;
-      const focusElapsed = wasWork ? Math.max(0, now - (clock.focusSessionStartedAt ?? now)) : 0;
-      clock = pauseClockState(clock, now);
-      if (wasWork && focusElapsed > 0) {
-        await recordFocusSessionInterrupted(focusElapsed);
-        clock.focusSessionStartedAt = null;
-      }
-      await clearClockAlarm(block.id);
-    } else {
-      const startingWork = block.type === "pomodoro" && (clock.phase ?? "work") === "work";
-      clock = startClockState(clock, now);
-      if (startingWork) await recordFocusSessionStarted();
-      await scheduleClockAlarm(block.id, clock);
-    }
-    context.runtime.clocks[block.id] = clock;
-    await context.setRuntime(context.runtime);
+  let requestPending = false;
+
+  const runAction = async (action: ClockAction): Promise<void> => {
+    if (requestPending) return;
+    requestPending = true;
     update();
-  });
-  const reset = actionButton(context.i18n.t("clockReset"), async () => {
-    if (block.type === "pomodoro" && clock.running && clock.phase === "work" && clock.focusSessionStartedAt !== null) {
-      await recordFocusSessionInterrupted(Math.max(0, Date.now() - clock.focusSessionStartedAt));
+    try {
+      await sendMessage({ type: "clock-action", instanceId: block.id, action });
+    } finally {
+      requestPending = false;
+      await refreshClock(block, context);
     }
-    clock = resetClockState(block);
-    context.runtime.clocks[block.id] = clock;
-    await clearClockAlarm(block.id);
-    await context.setRuntime(context.runtime);
-    update();
-  }, "button button--secondary");
+  };
+
+  const startPause = actionButton("", () => runAction("toggle"));
+  const reset = actionButton(context.i18n.t("clockReset"), () => runAction("reset"), "button button--secondary");
   actions.append(startPause, reset);
   if (block.type === "pomodoro") container.append(phase);
   container.append(display, actions);
 
-  let completionPending = false;
+  const requestCompletion = async (token: string): Promise<void> => {
+    if (requestPending) return;
+    requestPending = true;
+    update();
+    try {
+      await sendMessage({ type: "complete-clock", instanceId: block.id, token });
+    } finally {
+      requestPending = false;
+      await refreshClock(block, context);
+    }
+  };
+
   const update = (): void => {
+    clock = context.runtime.clocks[block.id] ?? clock;
     const now = Date.now();
     const value = block.type === "stopwatch" ? elapsedClockMs(clock, now) : remainingClockMs(clock, now);
     display.textContent = formatDuration(value, block.type === "stopwatch");
     startPause.textContent = context.i18n.t(clock.running ? "clockPause" : "clockStart");
+    startPause.disabled = requestPending;
+    reset.disabled = requestPending;
     if (block.type === "pomodoro") phase.textContent = context.i18n.t(clock.phase === "break" ? "pomodoroBreak" : "pomodoroWork");
-    if (clock.running && block.type !== "stopwatch" && value <= 0 && !completionPending) {
-      completionPending = true;
-      void completeClockInstance(block.id, clock.completionToken).then(async (result) => {
-        await applyCompletion(result, context);
-      }).finally(() => { completionPending = false; });
+    if (clock.running && block.type !== "stopwatch" && value <= 0 && clock.completionToken && !requestPending) {
+      void requestCompletion(clock.completionToken).catch(() => {
+        requestPending = false;
+        update();
+      });
     }
   };
+
   update();
   const timer = window.setInterval(update, 250);
   context.registerCleanup(() => window.clearInterval(timer));
@@ -114,12 +97,14 @@ export function renderNote(
     context.runtime.notes[block.id] = textarea.value;
     saveTimer = window.setTimeout(() => {
       saveTimer = 0;
-      void context.setRuntime(context.runtime);
+      void context.setRuntime({ kind: "note", instanceId: block.id, value: textarea.value });
     }, 180);
   });
   context.registerCleanup(() => {
+    const pending = saveTimer !== 0;
     window.clearTimeout(saveTimer);
-    if (saveTimer) void context.setRuntime(context.runtime);
+    saveTimer = 0;
+    if (pending) void context.setRuntime({ kind: "note", instanceId: block.id, value: textarea.value });
   });
   container.append(textarea);
 }
@@ -138,7 +123,7 @@ function taskRow(
   const title = element("span", task.done ? "task__title task__title--done" : "task__title", task.title);
   const remove = actionButton("×", async () => {
     context.runtime.tasks[block.id] = (context.runtime.tasks[block.id] ?? []).filter((candidate) => candidate.id !== task.id);
-    await context.setRuntime(context.runtime);
+    await context.setRuntime({ kind: "tasks", instanceId: block.id, tasks: context.runtime.tasks[block.id] ?? [] });
     redraw();
   }, "icon-button");
   remove.title = context.i18n.t("removeTask");
@@ -146,7 +131,7 @@ function taskRow(
   checkbox.addEventListener("change", () => {
     task.done = checkbox.checked;
     task.updatedAt = Date.now();
-    void context.setRuntime(context.runtime).then(redraw);
+    void context.setRuntime({ kind: "tasks", instanceId: block.id, tasks: context.runtime.tasks[block.id] ?? [] }).then(redraw);
   });
   row.append(checkbox, title, remove);
   return row;
@@ -184,7 +169,7 @@ export function renderLocalTasks(
     };
     context.runtime.tasks[block.id] = [...(context.runtime.tasks[block.id] ?? []), task];
     input.value = "";
-    void context.setRuntime(context.runtime).then(redraw);
+    void context.setRuntime({ kind: "tasks", instanceId: block.id, tasks: context.runtime.tasks[block.id] ?? [] }).then(redraw);
   });
   container.append(form, list);
   redraw();

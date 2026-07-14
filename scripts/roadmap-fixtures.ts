@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { FOCUS_STATS_KEY, normalizeFocusStats } from "../src/lib/focus-stats.js";
 import { migrateBackup } from "../src/lib/backup.js";
+import { isMessage } from "../src/lib/messages.js";
 import {
   BUILT_IN_THEMES,
   DEFAULT_SETTINGS,
@@ -9,9 +11,13 @@ import {
   createThemeId,
 } from "../src/lib/start-page-defaults.js";
 import {
+  START_PAGE_RUNTIME_KEY,
   defaultClockForBlock,
   elapsedClockMs,
+  getStartPageRuntimeState,
+  isFutureRuntimeSchema,
   normalizeRuntimeState,
+  setStartPageRuntimeState,
   pauseClockState,
   remainingClockMs,
   startClockState,
@@ -20,8 +26,11 @@ import {
   START_PAGE_SCHEMA_VERSION,
   canAddBlock,
   cloneBlock,
+  getStartPageSettings,
+  isFutureStartPageSchema,
   normalizeStartPageSettings,
   normalizeTheme,
+  setStartPageSettings,
   type BlockInstance,
   type StartPageSettings,
 } from "../src/lib/start-page-settings.js";
@@ -268,5 +277,89 @@ assert.equal(migratedBackup.version, 4);
 assert.equal((migratedBackup.storage.startPageSettings as StartPageSettings).schemaVersion, START_PAGE_SCHEMA_VERSION);
 assert.equal((migratedBackup.storage.startPageRuntimeState as { version: number }).version, 2);
 assert.deepEqual(migratedBackup.storage.blockedSites, ["example.com"]);
+
+// Storage-backed regression fixtures use a minimal Chrome API mock.
+const storageState: Record<string, unknown> = {};
+const chromeMock = {
+  storage: {
+    local: {
+      async get(keys?: string | string[]): Promise<Record<string, unknown>> {
+        const requested = keys === undefined ? Object.keys(storageState) : Array.isArray(keys) ? keys : [keys];
+        return Object.fromEntries(requested.filter((key) => Object.prototype.hasOwnProperty.call(storageState, key)).map((key) => [key, storageState[key]]));
+      },
+      async set(items: Record<string, unknown>): Promise<void> {
+        for (const [key, value] of Object.entries(items)) {
+          assert.notEqual(value, undefined, `chrome.storage.local.set must not receive undefined for ${key}`);
+          storageState[key] = structuredClone(value);
+        }
+      },
+      async remove(keys: string | string[]): Promise<void> {
+        for (const key of Array.isArray(keys) ? keys : [keys]) delete storageState[key];
+      },
+    },
+  },
+} as unknown as typeof chrome;
+Object.defineProperty(globalThis, "chrome", { value: chromeMock, configurable: true });
+
+const futureSettings = { ...cloneSettings(DEFAULT_SETTINGS), schemaVersion: START_PAGE_SCHEMA_VERSION + 10, futureField: { keep: true } };
+storageState.startPageSettings = structuredClone(futureSettings);
+assert.equal(isFutureStartPageSchema(storageState.startPageSettings), true);
+await getStartPageSettings();
+assert.deepEqual(storageState.startPageSettings, futureSettings, "Reading a future settings schema must not overwrite it");
+await assert.rejects(() => setStartPageSettings(cloneSettings(DEFAULT_SETTINGS)), /newer extension version/);
+
+const timestampSettings = cloneSettings(DEFAULT_SETTINGS);
+timestampSettings.updatedAt = 100;
+for (const block of timestampSettings.layout.blocks) {
+  block.createdAt = 100;
+  block.updatedAt = 100;
+}
+storageState.startPageSettings = structuredClone(timestampSettings);
+const originalNow = Date.now;
+Date.now = () => 200;
+const changedSettings = cloneSettings(timestampSettings);
+const timestampTimer = findBlock(changedSettings, "timer");
+timestampTimer.config.durationSeconds += 1;
+await setStartPageSettings(changedSettings);
+const changedStored = storageState.startPageSettings as StartPageSettings;
+assert.equal(findBlock(changedStored, "timer").updatedAt, 200, "Changed blocks must receive a fresh updatedAt");
+Date.now = () => 300;
+await setStartPageSettings(cloneSettings(changedStored));
+const unchangedStored = storageState.startPageSettings as StartPageSettings;
+assert.equal(findBlock(unchangedStored, "timer").updatedAt, 200, "Unchanged blocks must retain their previous updatedAt");
+Date.now = originalNow;
+
+const runtimeSettings = normalizeStartPageSettings(timestampSettings);
+const futureRuntime = { version: 99, updatedAt: 123, clocks: { future: { keep: true } }, notes: {}, tasks: {}, linkPages: {} };
+storageState[START_PAGE_RUNTIME_KEY] = structuredClone(futureRuntime);
+storageState.startTabInstanceState = { keepLegacy: true };
+assert.equal(isFutureRuntimeSchema(storageState[START_PAGE_RUNTIME_KEY]), true);
+await getStartPageRuntimeState(runtimeSettings);
+assert.deepEqual(storageState[START_PAGE_RUNTIME_KEY], futureRuntime, "Reading a future runtime schema must not overwrite it");
+assert.deepEqual(storageState.startTabInstanceState, { keepLegacy: true }, "Future runtime reads must not delete legacy side data");
+await assert.rejects(() => setStartPageRuntimeState(normalizeRuntimeState(undefined, runtimeSettings)), /newer extension version/);
+
+const backupWithoutStats = migrateBackup(oldBackup);
+assert.equal(Object.prototype.hasOwnProperty.call(backupWithoutStats.storage, FOCUS_STATS_KEY), false, "Missing optional focus stats must stay absent instead of becoming undefined");
+assert.throws(() => migrateBackup({ ...oldBackup, storage: { ...oldBackup.storage, startPageSettings: futureSettings } }), /newer extension version/);
+assert.throws(() => migrateBackup({ ...oldBackup, storage: { ...oldBackup.storage, startPageRuntimeState: futureRuntime } }), /newer extension version/);
+
+const normalizedStats = normalizeFocusStats({
+  version: 1,
+  totals: {},
+  byDay: {},
+  byDomain: {},
+  processedClockCompletions: Object.fromEntries(Array.from({ length: 700 }, (_, index) => [`token-${index}`, index + 1])),
+});
+assert.equal(Object.keys(normalizedStats.processedClockCompletions).length, 512, "Clock completion dedupe history must remain bounded");
+
+assert.equal(isMessage({ type: "clock-action", instanceId: "timer-main", action: "toggle" }), true);
+assert.equal(isMessage({ type: "complete-clock", instanceId: "timer-main", token: "token" }), true);
+assert.equal(isMessage({ type: "reset-clocks" }), true);
+assert.equal(isMessage({ type: "reset-stats" }), true);
+assert.equal(isMessage({ type: "runtime-note", instanceId: "note-main", value: "draft" }), true);
+assert.equal(isMessage({ type: "runtime-link-page", instanceId: "links-main", page: 2 }), true);
+assert.equal(isMessage({ type: "delete-instance-runtime", instanceId: "note-main" }), true);
+assert.equal(isMessage({ type: "complete-clock", instanceId: "", token: "token" }), false);
 
 console.log("Roadmap fixtures passed");

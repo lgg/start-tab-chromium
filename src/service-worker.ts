@@ -2,7 +2,7 @@
  * Manifest V3 service worker.
  *
  * It owns declarativeNetRequest synchronization, fallback new-tab redirects,
- * focus statistics, schema migration, and durable per-instance clock alarms.
+ * focus statistics, schema migration, and every mutation of durable clocks.
  */
 
 import {
@@ -14,15 +14,35 @@ import {
   syncRules,
   unblockHost,
 } from "./lib/blocklist.js";
-import { recordBlockedNavigation, recordFocusSessionCompleted } from "./lib/focus-stats.js";
-import { isMessage, type Ack, type Message } from "./lib/messages.js";
+import {
+  recordBlockedNavigation,
+  recordFocusSessionCompleted,
+  recordFocusSessionInterrupted,
+  recordFocusSessionStarted,
+  recordUnblockAfterCountdown,
+  resetFocusStats,
+} from "./lib/focus-stats.js";
+import { isMessage, type Ack, type ClockAction, type Message } from "./lib/messages.js";
 import {
   completeClockInstance,
+  defaultClockForBlock,
+  deleteInstanceRuntime,
   getStartPageRuntimeState,
   parseClockAlarmName,
+  pauseClockState,
+  resetClockState,
   scheduleClockAlarm,
+  setStartPageRuntimeState,
+  startClockState,
 } from "./lib/start-page-runtime.js";
-import { getStartPageSettings } from "./lib/start-page-settings.js";
+import {
+  getStartPageSettings,
+  type BlockInstance,
+  type ClockRuntimeState,
+  type LocalTask,
+  type StartPageRuntimeState,
+  type StartPageSettings,
+} from "./lib/start-page-settings.js";
 
 const START_TAB_PAGE = "newtab.html";
 const NATIVE_NEW_TAB_BYPASS_KEY = "startTabNativeNewTabBypass";
@@ -66,8 +86,29 @@ interface LocaleCatalog {
   [key: string]: { message?: string };
 }
 
+type ClockBlock = Extract<BlockInstance, { type: "timer" | "stopwatch" | "pomodoro" }>;
+
+let runtimeJob: Promise<void> = Promise.resolve();
+let statsJob: Promise<void> = Promise.resolve();
+
 function ignoreBackgroundError(): void {
   // Event listeners cannot surface async failures to callers in MV3.
+}
+
+function isClockBlock(block: BlockInstance): block is ClockBlock {
+  return block.type === "timer" || block.type === "stopwatch" || block.type === "pomodoro";
+}
+
+function runStatsJob(operation: () => Promise<void>): Promise<void> {
+  const next = statsJob.catch(ignoreBackgroundError).then(operation);
+  statsJob = next;
+  return next;
+}
+
+function runRuntimeJob(operation: () => Promise<void>): Promise<void> {
+  const next = runtimeJob.catch(ignoreBackgroundError).then(operation);
+  runtimeJob = next;
+  return next;
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -92,7 +133,9 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  void handleClockAlarm(alarm.name).catch(ignoreBackgroundError);
+  const parsed = parseClockAlarmName(alarm.name);
+  if (!parsed) return;
+  void runRuntimeJob(() => finishClockCompletion(parsed.instanceId, parsed.token)).catch(ignoreBackgroundError);
 });
 
 chrome.runtime.onMessage.addListener(
@@ -103,7 +146,7 @@ chrome.runtime.onMessage.addListener(
     }
     handle(message)
       .then(() => sendResponse({ ok: true }))
-      .catch((error: unknown) => sendResponse({ ok: false, error: String(error) }));
+      .catch((error: unknown) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
     return true;
   },
 );
@@ -113,18 +156,105 @@ async function handle(message: Message): Promise<void> {
     case "block": await blockHost(message.host); break;
     case "unblock": await unblockHost(message.host); break;
     case "clear": await clearAll(); break;
+    case "clock-action": await runRuntimeJob(() => performClockAction(message.instanceId, message.action)); break;
+    case "complete-clock": await runRuntimeJob(() => finishClockCompletion(message.instanceId, message.token)); break;
+    case "reset-clocks": await resetAllClocks(); break;
+    case "runtime-note": await runRuntimeJob(() => updateRuntimeNote(message.instanceId, message.value)); break;
+    case "runtime-tasks": await runRuntimeJob(() => updateRuntimeTasks(message.instanceId, message.tasks)); break;
+    case "runtime-link-page": await runRuntimeJob(() => updateRuntimeLinkPage(message.instanceId, message.page)); break;
+    case "delete-instance-runtime": await runRuntimeJob(() => deleteInstanceRuntime(message.instanceId)); break;
+    case "record-unblock": await runStatsJob(() => recordUnblockAfterCountdown(message.host)); break;
+    case "reset-stats": await runStatsJob(resetFocusStats); break;
   }
 }
 
-async function handleClockAlarm(name: string): Promise<void> {
-  const parsed = parseClockAlarmName(name);
-  if (!parsed) return;
-  const result = await completeClockInstance(parsed.instanceId, parsed.token);
+async function clockContext(instanceId: string): Promise<{
+  settings: StartPageSettings;
+  runtime: StartPageRuntimeState;
+  block: ClockBlock | null;
+  clock: ClockRuntimeState | null;
+}> {
+  const settings = await getStartPageSettings();
+  const block = settings.layout.blocks.find(
+    (candidate): candidate is ClockBlock => candidate.id === instanceId && isClockBlock(candidate),
+  ) ?? null;
+  const runtime = await getStartPageRuntimeState(settings);
+  const clock = block ? runtime.clocks[instanceId] ?? defaultClockForBlock(block) : null;
+  return { settings, runtime, block, clock };
+}
+
+async function updateRuntimeNote(instanceId: string, value: string): Promise<void> {
+  const settings = await getStartPageSettings();
+  if (!settings.layout.blocks.some((block) => block.id === instanceId && block.type === "note")) return;
+  const runtime = await getStartPageRuntimeState(settings);
+  runtime.notes[instanceId] = value.slice(0, 200_000);
+  await setStartPageRuntimeState(runtime);
+}
+
+async function updateRuntimeTasks(instanceId: string, tasks: LocalTask[]): Promise<void> {
+  const settings = await getStartPageSettings();
+  if (!settings.layout.blocks.some((block) => block.id === instanceId && block.type === "localTasks")) return;
+  const runtime = await getStartPageRuntimeState(settings);
+  runtime.tasks[instanceId] = structuredClone(tasks);
+  await setStartPageRuntimeState(runtime);
+}
+
+async function updateRuntimeLinkPage(instanceId: string, page: number): Promise<void> {
+  const settings = await getStartPageSettings();
+  if (!settings.layout.blocks.some((block) => block.id === instanceId && (block.type === "links" || block.type === "startPinned"))) return;
+  const runtime = await getStartPageRuntimeState(settings);
+  runtime.linkPages[instanceId] = Math.min(10_000, Math.max(0, Math.round(page)));
+  await setStartPageRuntimeState(runtime);
+}
+
+async function performClockAction(instanceId: string, action: ClockAction): Promise<void> {
+  const { runtime, block, clock } = await clockContext(instanceId);
+  if (!block || !clock) return;
+
+  const now = Date.now();
+  let next: ClockRuntimeState;
+  let interruptedMs = 0;
+  let startedWork = false;
+
+  if (action === "reset") {
+    if (block.type === "pomodoro" && clock.running && clock.phase === "work" && clock.focusSessionStartedAt !== null) {
+      interruptedMs = Math.max(0, now - clock.focusSessionStartedAt);
+    }
+    next = resetClockState(block);
+  } else if (clock.running) {
+    if (block.type === "pomodoro" && clock.phase === "work" && clock.focusSessionStartedAt !== null) {
+      interruptedMs = Math.max(0, now - clock.focusSessionStartedAt);
+    }
+    next = pauseClockState(clock, now);
+    if (next.type === "pomodoro") next.focusSessionStartedAt = null;
+  } else {
+    startedWork = block.type === "pomodoro" && (clock.phase ?? "work") === "work";
+    next = startClockState(clock, now);
+  }
+
+  runtime.clocks[instanceId] = next;
+  await setStartPageRuntimeState(runtime);
+  await scheduleClockAlarm(instanceId, next);
+  if (startedWork) await runStatsJob(recordFocusSessionStarted);
+  if (interruptedMs > 0) await runStatsJob(() => recordFocusSessionInterrupted(interruptedMs));
+}
+
+async function resetAllClocks(): Promise<void> {
+  const settings = await getStartPageSettings();
+  const clockIds = settings.layout.blocks.filter(isClockBlock).map((block) => block.id);
+  for (const instanceId of clockIds) {
+    await runRuntimeJob(() => performClockAction(instanceId, "reset"));
+  }
+}
+
+async function finishClockCompletion(instanceId: string, token: string): Promise<void> {
+  const result = await completeClockInstance(instanceId, token);
   if (!result.completed || !result.block) return;
-  if (result.focusTimeMs > 0) await recordFocusSessionCompleted(result.focusTimeMs);
+  const completionId = `${instanceId}:${token}`;
+  if (result.focusTimeMs > 0) await runStatsJob(() => recordFocusSessionCompleted(result.focusTimeMs, completionId));
   if (!result.notify) return;
   const messageKey = result.block.type === "pomodoro" ? "pomodoroDone" : "timerDone";
-  await chrome.notifications.create(`start-tab-clock-${parsed.instanceId}-${parsed.token}`, {
+  await chrome.notifications.create(`start-tab-clock-${instanceId}-${token}`, {
     type: "basic",
     iconUrl: "icons/icon.128.png",
     title: result.block.title,
@@ -166,7 +296,7 @@ async function reconcileClockAlarms(): Promise<void> {
   for (const [instanceId, clock] of clocks) {
     if (!clock.running || clock.type === "stopwatch" || clock.targetAt === null || !clock.completionToken) continue;
     if (clock.targetAt <= now + 1000) {
-      await handleClockAlarm(`start-tab-clock:${encodeURIComponent(instanceId)}:${encodeURIComponent(clock.completionToken)}`);
+      await runRuntimeJob(() => finishClockCompletion(instanceId, clock.completionToken!));
     } else {
       await scheduleClockAlarm(instanceId, clock);
     }
@@ -237,7 +367,7 @@ async function rememberIfBlocked(url: string): Promise<void> {
   const host = await blockedSiteForUrl(url);
   if (!host) return;
   await rememberBlockedNavigation(url);
-  await recordBlockedNavigation(host);
+  await runStatsJob(() => recordBlockedNavigation(host));
 }
 
 async function migrateAndSyncRules(): Promise<void> {
