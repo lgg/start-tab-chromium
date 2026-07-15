@@ -24,10 +24,24 @@ jobs:
           node-version: 22
       - name: Apply exact locally audited patch
         run: |
-          base64 -d .github/round10.patch.gz.b64 | gzip -d > /tmp/round10.patch
+          cat \
+            .github/round10.patch.part1 \
+            .github/round10.patch.part2 \
+            .github/round10.patch.part3 \
+            .github/round10.patch.part4 \
+            .github/round10.patch.part5 \
+            | base64 -d | gzip -d > /tmp/round10.patch
+          test "$(sha256sum /tmp/round10.patch | awk '{print $1}')" = "04eecadb7318fd9753eea08613c005e5e33aead75e907854bc4a35c5d27e7f7a"
           git apply --check /tmp/round10.patch
           git apply /tmp/round10.patch
-          rm .github/round10.patch.gz.b64 .github/workflows/apply-round10-audit.yml
+          rm \
+            .github/round10.patch.gz.b64 \
+            .github/round10.patch.part1 \
+            .github/round10.patch.part2 \
+            .github/round10.patch.part3 \
+            .github/round10.patch.part4 \
+            .github/round10.patch.part5 \
+            .github/workflows/apply-round10-audit.yml
           git diff --check
       - name: Validate exact source snapshot
         run: |
@@ -57,7 +71,14 @@ jobs:
             scripts/validate-round6-static.mjs \
             scripts/validate-round7-static.mjs \
             docs/audit-2026-07-15-round-10.md
-          git add -u .github/round10.patch.gz.b64 .github/workflows/apply-round10-audit.yml
+          git add -u \
+            .github/round10.patch.gz.b64 \
+            .github/round10.patch.part1 \
+            .github/round10.patch.part2 \
+            .github/round10.patch.part3 \
+            .github/round10.patch.part4 \
+            .github/round10.patch.part5 \
+            .github/workflows/apply-round10-audit.yml
           git diff --cached --check
           git commit -m "Deep audit round 10: atomic sync and revision transactions"
           git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
