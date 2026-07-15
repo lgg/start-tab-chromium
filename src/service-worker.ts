@@ -27,6 +27,8 @@ import { isMessage, type Ack, type ClockAction, type Message } from "./lib/messa
 import {
   completeClockInstance,
   defaultClockForBlock,
+  isFutureRuntimeSchema,
+  START_PAGE_RUNTIME_KEY,
   deleteInstanceRuntime,
   getStartPageRuntimeState,
   parseClockAlarmName,
@@ -40,6 +42,8 @@ import {
 } from "./lib/start-page-runtime.js";
 import {
   getStartPageSettings,
+  isFutureStartPageSchema,
+  START_PAGE_SETTINGS_KEY,
   type BlockInstance,
   type ClockRuntimeState,
   type LocalTask,
@@ -296,7 +300,8 @@ async function resetAllClocks(): Promise<void> {
 
 async function finishClockCompletion(instanceId: string, token: string): Promise<void> {
   const result = await completeClockInstance(instanceId, token);
-  if (!result.completed || !result.block) return;
+  if (!result.completed || !result.block || !result.clock) return;
+  await scheduleClockAlarm(instanceId, result.clock);
   const completionId = `${instanceId}:${token}`;
   if (result.focusTimeMs > 0) await runStatsJob(() => recordFocusSessionCompleted(result.focusTimeMs, completionId));
   if (!result.notify) return;
@@ -325,6 +330,8 @@ async function workerMessage(key: string): Promise<string> {
 }
 
 async function reconcileClockAlarms(): Promise<void> {
+  const raw = await chrome.storage.local.get([START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY]);
+  if (isFutureStartPageSchema(raw[START_PAGE_SETTINGS_KEY]) || isFutureRuntimeSchema(raw[START_PAGE_RUNTIME_KEY])) return;
   const settings = await getStartPageSettings();
   const runtime = await getStartPageRuntimeState(settings);
   const clocks = new Map(Object.entries(runtime.clocks));
