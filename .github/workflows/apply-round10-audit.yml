@@ -51,11 +51,9 @@ jobs:
           npm run build:blocker-only
           GOOGLE_OAUTH_CLIENT_ID=round10-remote.apps.googleusercontent.com npm run build:google
           npm audit --omit=dev
-      - name: Commit validated source-only diff
+      - name: Stage validated source-only diff
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
+          git add -A -- \
             src/lib/backup.ts \
             src/lib/blocklist.ts \
             src/lib/chrome-sync.ts \
@@ -69,8 +67,7 @@ jobs:
             scripts/round7-fixtures.ts \
             scripts/validate-round6-static.mjs \
             scripts/validate-round7-static.mjs \
-            docs/audit-2026-07-15-round-10.md
-          git add -u \
+            docs/audit-2026-07-15-round-10.md \
             .github/round10.patch.gz.b64 \
             .github/round10.patch.part1 \
             .github/round10.patch.part2 \
@@ -78,5 +75,11 @@ jobs:
             .github/round10.patch.part4 \
             .github/round10.patch.part5
           git diff --cached --check
+          git diff --cached --name-status
+      - name: Create validated source commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "Deep audit round 10: atomic sync and revision transactions"
-          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+      - name: Push validated source commit
+        run: git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
