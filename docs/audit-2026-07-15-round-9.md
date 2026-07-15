@@ -13,6 +13,7 @@ This audit independently rechecked the current production architecture after PR 
 
 - A Pomodoro configured to auto-start its next phase persisted the next phase as running but did not create its next Chrome alarm. The service worker now schedules the returned next-phase clock before recording statistics or showing a notification.
 - A legacy running Timer or Pomodoro without a completion token could remain stuck at zero. Normalization now assigns a deterministic completion token to any running legacy countdown that lacks one.
+- Clock persistence and alarm creation were separate operations. A concurrent backup restore could replace runtime between them, after which a delayed scheduler could install an alarm for stale state. Per-instance scheduling now re-reads compatible persisted runtime under the shared `data-write` lock and aligns alarms only to that current state.
 
 ### Backup and reset alarm transactions
 
@@ -33,7 +34,7 @@ This audit independently rechecked the current production architecture after PR 
 - Reads of future settings no longer write migration-report side data.
 - Runtime migration and mutation paths now refuse writes when the stored settings schema is newer than the extension understands.
 - Future settings reads preserve current and legacy runtime storage rather than normalizing or deleting it.
-- Service-worker startup/alarm reconciliation exits without changing alarms when either settings or runtime uses an unsupported future schema.
+- Stored alarm reconciliation is performed from one compatible storage snapshot under the `data-write` lock and exits without changing alarms when either settings or runtime uses an unsupported future schema.
 - Explicit user-requested full reset remains the intentional recovery path.
 
 ### Deterministic legacy task migration
@@ -48,6 +49,7 @@ This audit independently rechecked the current production architecture after PR 
 Round 7 and roadmap fixtures now verify:
 
 - Pomodoro auto-start persists and schedules the next durable alarm;
+- delayed alarm scheduling discards a stale token and aligns to the current persisted clock;
 - legacy running countdowns receive stable completion tokens;
 - active clocks restored from backup receive alarms and stale alarms are removed;
 - alarm reconciliation failure restores exact storage, DNR, revision, and alarm state;
