@@ -14,6 +14,7 @@ import {
 import { FOCUS_STATS_KEY, normalizeFocusStats } from "./focus-stats.js";
 import { normalizeRuntimeState } from "./start-page-runtime.js";
 import { DEFAULT_SETTINGS, isRecord, normalizeStartPageSettings } from "./start-page-settings.js";
+import { withStorageLock } from "./storage-lock.js";
 
 const META_KEY = "startTabSyncMeta";
 const LOCAL_META_KEY = "startTabLocalSyncMeta";
@@ -161,7 +162,10 @@ async function writeRemoteSnapshot(snapshot: Awaited<ReturnType<typeof prepareSn
   await writeLocalMeta(meta);
   return meta;
 }
-export async function uploadChromeSyncBackup(): Promise<void> { await writeRemoteSnapshot(await prepareSnapshot()); }
+async function uploadChromeSyncBackupInTransaction(): Promise<void> { await writeRemoteSnapshot(await prepareSnapshot()); }
+export async function uploadChromeSyncBackup(): Promise<void> {
+  await withStorageLock("chrome-sync", uploadChromeSyncBackupInTransaction);
+}
 async function readRemoteBundle(parsed: ParsedMeta): Promise<BackupBundle> {
   const { meta } = parsed;
   const keys = Array.from({ length: meta.chunks }, (_, index) => chunkKey(index));
@@ -186,14 +190,17 @@ async function restoreParsedSnapshot(parsed: ParsedMeta): Promise<void> {
   if (parsed.legacy) await writeRemoteSnapshot(await prepareSnapshot());
   else await writeLocalMeta(parsed.meta);
 }
-export async function restoreChromeSyncBackup(): Promise<void> {
+async function restoreChromeSyncBackupInTransaction(): Promise<void> {
   const parsed = await readRemoteMeta();
   if (!parsed) throw new Error("No Start Tab backup found in chrome.storage.sync");
   await restoreParsedSnapshot(parsed);
 }
-export async function syncChromeSyncBackup(): Promise<ChromeSyncResult> {
+export async function restoreChromeSyncBackup(): Promise<void> {
+  await withStorageLock("chrome-sync", restoreChromeSyncBackupInTransaction);
+}
+async function syncChromeSyncBackupInTransaction(): Promise<ChromeSyncResult> {
   const remote = await readRemoteMeta();
-  if (!remote) { await uploadChromeSyncBackup(); return "uploaded"; }
+  if (!remote) { await uploadChromeSyncBackupInTransaction(); return "uploaded"; }
   const localSnapshot = await prepareSnapshot();
   if (remote.legacy) {
     const remoteBundle = await readRemoteBundle(remote);
@@ -218,4 +225,7 @@ export async function syncChromeSyncBackup(): Promise<ChromeSyncResult> {
   if (remoteWins(remote.meta, localSnapshot)) { await restoreParsedSnapshot(remote); return "restored"; }
   await writeRemoteSnapshot(localSnapshot);
   return "uploaded";
+}
+export async function syncChromeSyncBackup(): Promise<ChromeSyncResult> {
+  return withStorageLock("chrome-sync", syncChromeSyncBackupInTransaction);
 }
