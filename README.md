@@ -15,41 +15,61 @@ Start Tab is a Manifest V3 extension for Chromium-based browsers. It combines a 
 - Track focus statistics: raw block hits, deduplicated avoided visits, estimated time saved, Pomodoro sessions, interrupted focus sessions, total focus time, and countdown unblocks.
 - Localized UI with English and Russian catalogs.
 - Configurable custom new tab page with date/time, IP, links, search, timer, stopwatch, Pomodoro, notes, local tasks, recent history, browser pinned tabs, Start Tab pinned links, Google Calendar, weather, command, and focus stats blocks.
-- First-run layout onboarding for the custom new tab page.
-- Start page appearance settings through background preset tiles with favorites, color tiles, gradient tiles, image tiles, and animated effect tiles.
-- Preset themes/backgrounds for ChatGPT dark, Start Tab dark, ChatGPT light, pastel slate, pastel rose, Matrix-style, cyberpunk-style, black, aurora, mesh, spotlight, noise, and animated gradient backgrounds.
-- Settings button visibility and hover-area controls for the custom new tab page.
-- Link grid settings: rows, columns, icon size, font size, and horizontal or vertical paged navigation.
-- Timer, stopwatch, and Pomodoro state persistence across closed and reopened new tabs.
-- Optional notifications for timer and Pomodoro completion.
+- Typed instance-based block records with stable IDs, versioned schemas, independent settings, and per-instance runtime state.
+- Multiple independent instances for repeatable blocks, including date/time, IP, links, search, timers, stopwatches, Pomodoro, notes, local tasks, Google Calendar, weather, and Start Tab pinned links.
+- Singleton enforcement for browser-global blocks such as commands, recent history, browser pinned tabs, and focus statistics.
+- Block creation, duplication, deletion, enable/disable controls, destructive-action protection, and shared per-instance settings from both Options and the inline editor.
+- First-run layout onboarding and presets for focus, dashboard, minimal, development, and rest workflows.
+- Complete visual Layout Editor with a localized block palette, keyboard controls, drag/resize, Grid and Free modes, and Contained Page and Full Viewport zones.
+- Horizontal expansion only when Free-mode content actually extends beyond the standard viewport.
+- Versioned theme system covering tile-based backgrounds, text, card surfaces, borders, opacity, shadows, accents, interaction states, typography, radius, and spacing.
+- Built-in ChatGPT dark, Start Tab dark, ChatGPT light, pastel slate, pastel rose, Matrix-style, cyberpunk-style, black, aurora, mesh, spotlight, noise, and animated-gradient themes.
+- Custom theme create, edit, duplicate, delete, standalone import, and standalone export flows.
+- Animated backgrounds with effect-specific controls and `prefers-reduced-motion` handling.
+- Settings button visibility and hover-area controls.
+- Link grid rows, columns, icon size, font size, and horizontal or vertical paged navigation.
+- Independent Timer, Stopwatch, and Pomodoro state persistence across new tabs and service-worker restarts, with durable alarms and optional completion notifications.
 - Tabbed options page with General, Start Tab, Blocklist, Backup, and About sections.
-- Start Tab page-content toggle inside the Start Tab options section.
-- Options page with localization, backup, appearance, search, IP, Google Calendar, weather, links, timers, focus stats, and drag/drop layout controls.
-- Weather settings support decimal latitude and longitude values.
-- IP lookup supports provider selection plus multiple public fallback providers when the selected service is unavailable.
-- Layout presets for focus, dashboard, minimal, development, and rest workflows.
-- Layout editor ordering, enabling, disabling, numeric geometry editing, visual width/height resize controls, full-viewport layout zone, and block settings entry points.
-- Command block actions for opening settings, exporting a backup, resetting clocks, and resetting focus statistics.
-- Manual JSON export/import for all local extension data with a versioned backup schema and v1 migration path.
-- Browser sync backup through chunked `chrome.storage.sync`, checksum validation, device metadata, and latest-wins smart sync.
+- Centralized validation for numeric settings, URLs, coordinates, provider endpoints, search templates, clocks, themes, and imported data.
+- Versioned JSON export/import with legacy migration, pre-import recovery, rollback, and corrupted-element isolation.
+- Browser backup through chunked `chrome.storage.sync`, checksum validation, device metadata, deterministic conflict handling, and latest-wins smart sync.
 - Google Drive backup/restore through Drive `appDataFolder` when OAuth is configured.
-- Google Calendar event block when OAuth is configured.
-- Weather block powered by Open-Meteo with current, daily, and weekly display modes plus configurable forecast and geocoding endpoints.
+- Google Calendar event blocks with independent calendar IDs and filters when OAuth is configured.
+- Weather blocks powered by Open-Meteo with current, daily, and weekly display modes plus configurable forecast and geocoding endpoints.
+- IP lookup provider selection with public fallbacks.
 - Two build variants: full Start Tab with custom new tab override, and blocker-only without replacing the browser new tab page.
+- Optional Google-enabled full build with build-time OAuth client injection.
 - Fallback new-tab redirect for Chromium-derived browsers that expose a browser new-tab URL but do not apply `chrome_url_overrides.newtab` normally.
-- Release packaging and store permission notes in `docs/release.md`.
-- Migration from the legacy `blocked` storage key to the current host-only blocklist.
+- Migration from legacy singleton Start Tab settings/runtime and the legacy `blocked` storage key.
 
 ## Development
 
 ```bash
 npm ci
+npm test
 npm run typecheck
 npm run build
 npm run build:blocker-only
 ```
 
-The full production extension is built into `build/` and can be loaded as an unpacked Chromium extension. The blocker-only variant is built into `build-blocker-only/` and omits `chrome_url_overrides.newtab` from the generated manifest.
+The full production extension is built into `build/` and can be loaded as an unpacked Chromium extension. The blocker-only variant is built into `build-blocker-only/` and omits `chrome_url_overrides.newtab`, new-tab assets, and the unused `history` permission.
+
+### Google-enabled build
+
+Create a Chrome extension OAuth client for the final extension ID, then inject it at build time:
+
+```bash
+GOOGLE_OAUTH_CLIENT_ID="1234567890-example.apps.googleusercontent.com" npm run build:google
+```
+
+PowerShell:
+
+```powershell
+$env:GOOGLE_OAUTH_CLIENT_ID = "1234567890-example.apps.googleusercontent.com"
+npm run build:google
+```
+
+The Google-enabled artifact is written to `build-google/`. The builder validates the ID and includes the Calendar/Drive OAuth configuration plus the `identity` permission. Default full and blocker-only builds deliberately omit both OAuth configuration and `identity`. Placeholder or malformed IDs fail validation instead of producing an ambiguous package.
 
 ## Local Install And New Tab Checks
 
@@ -67,23 +87,15 @@ The full production extension is built into `build/` and can be loaded as an unp
 5. Open extension Options -> About -> Open Start Tab. If this opens the Start Tab page, the extension page itself is working.
 6. Open Options -> Start Tab and keep Enable Start Tab page content checked.
 7. Open a new tab. In Chrome, the manifest override should own it directly. In browsers such as Comet, the service worker also tries a fallback redirect when the browser exposes an internal new-tab URL such as `chrome://newtab`, `chrome://new-tab-page`, `chrome-search://local-ntp`, or a Comet-specific new-tab URL.
-8. If the diagnostic page works but Ctrl+T still opens the browser default page, the browser is not exposing a redirectable tab URL to extensions. In that case, verify the same build in Chrome or Edge to separate a Start Tab bug from a browser-level limitation.
+8. If the diagnostic page works but Ctrl+T still opens the browser default page, the browser is not exposing a redirectable tab URL to extensions. Verify the same build in Chrome or Edge to separate a Start Tab defect from a browser-level limitation.
 
 ## Google Integrations
 
-Google Calendar and Google Drive sync require a real OAuth client ID in `src/manifest.json`:
+Google Calendar and Google Drive require the Google-enabled build described above. Do not edit the generated manifest manually.
 
-```json
-"oauth2": {
-  "client_id": "REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com",
-  "scopes": [
-    "https://www.googleapis.com/auth/calendar.readonly",
-    "https://www.googleapis.com/auth/drive.appdata"
-  ]
-}
-```
+Without `GOOGLE_OAUTH_CLIENT_ID`, the builder removes the source manifest placeholder and the `identity` permission. Google-backed blocks and Drive actions show a configuration message and do not start a meaningless authorization request.
 
-Until the placeholder is replaced, Google-backed blocks and Drive sync show a configuration message instead of requesting auth.
+Real end-to-end Calendar and Drive validation requires a production OAuth client associated with the final packaged extension ID and a real Google account.
 
 ## Chromium New Tab Limitation
 
@@ -94,53 +106,61 @@ Chromium does not provide a runtime API to toggle `chrome_url_overrides.newtab` 
 
 Inside the full build, the Start Tab settings page can enable or disable the Start Tab page content. That setting does not remove the manifest-level new tab override from an already installed full build.
 
+## Data Architecture And Migration
+
+- Start Page settings schema: version 4.
+- Per-instance runtime schema: version 2.
+- Full backup schema: version 4.
+- Theme schema: version 1.
+- Every block instance stores a stable ID, type, enabled state, zone, Grid and Free geometry, order, typed configuration, and timestamps.
+- Mutable notes, tasks, link-page positions, timers, stopwatches, and Pomodoro state are stored by instance ID.
+- Legacy singleton/global settings are migrated idempotently into block instances.
+- Unknown or damaged elements are isolated where possible instead of resetting unrelated valid data.
+- Unsupported future schemas are not silently downgraded or overwritten.
+- Backup import validates and migrates before applying, preserves a recovery snapshot, and restores the previous state if application or DNR synchronization fails.
+
 ## Project Layout
 
-- `src/manifest.json` - Chromium extension manifest.
-- `src/service-worker.ts` - blocklist mutations, storage migration, DNR rule sync, fallback new-tab redirect, and block-hit tracking.
-- `src/lib/blocklist.ts` - shared blocklist and redirect logic.
-- `src/lib/focus-stats.ts` - focus and blocking statistics.
-- `src/lib/backup.ts` - versioned manual backup export/import.
-- `src/lib/chrome-sync.ts` - chunked browser sync backup and latest-wins smart sync.
+- `src/manifest.json` - Chromium extension source manifest; the builder strips or injects optional OAuth configuration.
+- `src/service-worker.ts` - blocklist/DNR transactions, storage migration, durable clock ownership, fallback new-tab redirect, and focus tracking.
+- `src/lib/start-page-types.ts` - typed block, layout, theme, and runtime schemas.
+- `src/lib/start-page-defaults.ts` - registry, defaults, presets, and built-in themes.
+- `src/lib/start-page-validation.ts` - centralized schema and setting validation.
+- `src/lib/start-page-settings.ts` - migration and persistence for instance-based settings.
+- `src/lib/start-page-runtime.ts` - per-instance runtime persistence.
+- `src/lib/backup.ts` - versioned manual backup export/import and recovery.
+- `src/lib/chrome-sync.ts` - chunked browser sync backup and deterministic conflict handling.
 - `src/lib/google-integration.ts` - Google Calendar and Drive helpers.
 - `src/lib/i18n.ts` - runtime locale detection and message formatting.
+- `src/newtab/` - custom start page, block renderers, theme runtime, and Layout Editor.
+- `src/options/` - settings, block-instance management, themes, backup, and integrations.
 - `src/popup/` - browser action popup.
 - `src/blocked/` - blocked-site interstitial page.
-- `src/newtab/` - custom start page.
-- `src/options/` - settings page.
 - `src/_locales/` - English and Russian localization catalogs.
-- `docs/release.md` - release checklist and permission notes.
-- `icons/` - extension icons.
+- `scripts/roadmap-fixtures.ts` - executable roadmap migration/runtime fixtures.
+- `scripts/validate-static.mjs` - architecture, localization, security, and production-graph validation.
+- `docs/manual-qa-3.0.0.md` - reproducible interactive QA checklist.
+- `docs/deployment-3.0.0.md` - deployable build profiles and external validation boundary.
+- `docs/release.md` - release checklist and permission rationale.
 
-## Roadmap
+## Roadmap Status — Completed In 3.0.0
 
-### Instance-Based Blocks
+The former Instance-Based Blocks, Layout Editor, Themes and Backgrounds, and Settings Coverage roadmap is implemented in the current production architecture.
 
-- Move Start Tab blocks from singleton type settings to instance-based block records.
-- Allow multiple independent instances for repeatable block types: date/time in different time zones, weather for different cities, search blocks with different engines, local task lists, Google Calendar blocks with different calendar/account filters, timers, stopwatches, Pomodoro blocks, notes, and link grids.
-- Keep browser-owned singleton blocks unique: recent history, browser pinned tabs, and other browser-global sources that should not be duplicated.
-- Add block creation, duplication, removal, and per-instance settings from both the options page and the inline layout editor.
-- Store block settings inside each block instance so export/import, browser sync, and Google Drive backup preserve every configured block independently.
+- [x] Typed instance-based blocks and singleton constraints.
+- [x] Independent repeatable block configuration and runtime state.
+- [x] Automatic idempotent migration from legacy singleton data.
+- [x] Full palette-based Layout Editor with Grid/Free modes and Contained/Full zones.
+- [x] Shared per-instance settings in Options and the inline editor.
+- [x] Complete tile-based theme system and custom theme import/export.
+- [x] Central validation and settings coverage inventory.
+- [x] Versioned backup/import, Browser Sync, and Google Drive restore migration.
+- [x] English/Russian localization parity.
+- [x] Full, blocker-only, and optional Google-enabled build validation.
+- [x] Automated migration/runtime/static fixtures and reproducible manual QA documentation.
+- [x] Multiple completed independent post-roadmap audit rounds with production hardening.
 
-### Layout Editor
-
-- Add a full block palette with repeatable and singleton block availability rules.
-- Add per-block settings panels opened from the gear icon on each block while editing the new tab page.
-- Keep both layout modes: free positioning with drag/resize anywhere and grid positioning with snap-to-grid width and height.
-- Keep both layout zones: contained page and full viewport, including horizontal expansion only after blocks are moved or resized beyond the default viewport.
-
-### Themes And Backgrounds
-
-- Promote background presets into a complete theme system covering background, text color, card surface, accent, font family, and sizing.
-- Add export/import for custom themes independently from full settings backup.
-- Keep all background configuration tile-based; do not expose duplicate raw background color, image URL, or effect fields outside the tile editor.
-- Add richer configurable animated backgrounds where each effect exposes only relevant controls.
-
-### Settings Coverage
-
-- Audit every stored Start Tab setting and expose it in the options page or per-block settings where appropriate.
-- Keep backup/export/import coverage aligned with every new setting and block instance schema migration.
-- Add validation for numeric settings, URL settings, and provider endpoints so browser-native validation errors do not reject valid values.
+Future work should be added as concrete new issues or a new roadmap section rather than leaving these completed 3.0.0 features marked as pending.
 
 ## License
 
