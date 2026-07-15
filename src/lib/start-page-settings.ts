@@ -1,4 +1,4 @@
-import { markStartTabDataChanged } from "./data-revision.js";
+import { commitStorageMutationWithRevision } from "./data-revision.js";
 import { withStorageLock } from "./storage-lock.js";
 import {
   BLOCK_DESCRIPTORS,
@@ -168,11 +168,21 @@ async function readRawSettings(): Promise<unknown> {
   return items[START_PAGE_SETTINGS_KEY];
 }
 
-async function persistSettingsInTransaction(settings: StartPageSettings, report?: MigrationReport): Promise<void> {
-  const payload: Record<string, unknown> = { [START_PAGE_SETTINGS_KEY]: settings };
-  if (report) payload[START_PAGE_MIGRATION_REPORT_KEY] = report;
-  await chrome.storage.local.set(payload);
-  await markStartTabDataChanged(settings.updatedAt || Date.now());
+async function persistSettingsInTransaction(
+  settings: StartPageSettings,
+  report?: MigrationReport,
+  clearMigrationReport = false,
+): Promise<void> {
+  await commitStorageMutationWithRevision(
+    [START_PAGE_SETTINGS_KEY, START_PAGE_MIGRATION_REPORT_KEY],
+    async () => {
+      const payload: Record<string, unknown> = { [START_PAGE_SETTINGS_KEY]: settings };
+      if (report) payload[START_PAGE_MIGRATION_REPORT_KEY] = report;
+      await chrome.storage.local.set(payload);
+      if (clearMigrationReport) await chrome.storage.local.remove(START_PAGE_MIGRATION_REPORT_KEY);
+    },
+    settings.updatedAt || Date.now(),
+  );
 }
 
 export function createDefaultStartPageSettings(now = Date.now()): StartPageSettings {
@@ -259,8 +269,7 @@ export async function updateStartPageSettings(
 export async function resetStartPageSettings(): Promise<StartPageSettings> {
   return withStorageLock("data-write", async () => {
     const settings = createDefaultStartPageSettings();
-    await persistSettingsInTransaction(settings);
-    await chrome.storage.local.remove(START_PAGE_MIGRATION_REPORT_KEY);
+    await persistSettingsInTransaction(settings, undefined, true);
     return settings;
   });
 }

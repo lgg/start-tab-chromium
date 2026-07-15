@@ -1,4 +1,4 @@
-import { markStartTabDataChanged } from "../lib/data-revision.js";
+import { commitStorageMutationWithRevision } from "../lib/data-revision.js";
 import { loadI18n, type I18n } from "../lib/i18n.js";
 import { sendMessage } from "../lib/messages.js";
 import { withStorageLock } from "../lib/storage-lock.js";
@@ -280,8 +280,10 @@ async function finishOnboarding(presetId: LayoutPresetId | null): Promise<void> 
     }
   }
   await withStorageLock("data-write", async () => {
-    await chrome.storage.local.set({ [ONBOARDING_KEY]: { onboarded: true } });
-    await markStartTabDataChanged();
+    await commitStorageMutationWithRevision(
+      [ONBOARDING_KEY],
+      () => chrome.storage.local.set({ [ONBOARDING_KEY]: { onboarded: true } }),
+    );
   });
   document.getElementById("onboarding")?.remove();
   queueRender();

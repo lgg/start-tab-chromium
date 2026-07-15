@@ -7,6 +7,7 @@ const localState: StorageAreaState = {};
 const syncState: StorageAreaState = {};
 const listeners = new Set<ChangeListener>();
 let failNextLocalGet = false;
+let remoteMetaAfterChunkRead: unknown = undefined;
 
 function requestedKeys(keys?: string | string[] | Record<string, unknown> | null): string[] {
   if (keys == null) return [];
@@ -27,6 +28,11 @@ function storageArea(state: StorageAreaState, areaName: "local" | "sync") {
       for (const key of requestedKeys(keys)) {
         if (Object.prototype.hasOwnProperty.call(state, key)) output[key] = structuredClone(state[key]);
         else if (typeof keys === "object" && !Array.isArray(keys) && keys !== null) output[key] = structuredClone(keys[key]);
+      }
+      if (areaName === "sync" && remoteMetaAfterChunkRead !== undefined && Array.isArray(keys)
+        && keys.some((key) => key.startsWith("startTabSyncChunk"))) {
+        state.startTabSyncMeta = structuredClone(remoteMetaAfterChunkRead);
+        remoteMetaAfterChunkRead = undefined;
       }
       return output;
     },
@@ -128,6 +134,37 @@ await assert.rejects(() => blocklistApi.migrateLegacyStorage(), /transient/);
 await blocklistApi.migrateLegacyStorage();
 assert.deepEqual(await blocklistApi.getBlockedSites(), ["example.com"]);
 
+
+const futureRemoteSyncMeta = { version: 4, futurePayload: { preserve: true } };
+syncState.startTabSyncMeta = structuredClone(futureRemoteSyncMeta);
+const syncBeforeFutureUpload = structuredClone(syncState);
+await assert.rejects(() => syncApi.uploadChromeSyncBackup(), /newer extension version/);
+assert.deepEqual(syncState, syncBeforeFutureUpload, "Upload must not overwrite future remote sync metadata");
+await assert.rejects(() => syncApi.restoreChromeSyncBackup(), /newer extension version/);
+assert.deepEqual(syncState, syncBeforeFutureUpload, "Restore must not mutate future remote sync metadata");
+await assert.rejects(() => syncApi.syncChromeSyncBackup(), /newer extension version/);
+assert.deepEqual(syncState, syncBeforeFutureUpload, "Smart sync must not overwrite future remote sync metadata");
+delete syncState.startTabSyncMeta;
+
+const futureBackupVersionMeta = {
+  version: 3,
+  updatedAt: new Date().toISOString(),
+  contentUpdatedAt: 1,
+  deviceId: "future-device",
+  snapshotId: "future-snapshot",
+  checksum: "a".repeat(64),
+  contentChecksum: "b".repeat(64),
+  chunks: 1,
+  backupVersion: 5,
+};
+syncState.startTabSyncMeta = structuredClone(futureBackupVersionMeta);
+const syncBeforeFutureBackupVersion = structuredClone(syncState);
+await assert.rejects(() => syncApi.uploadChromeSyncBackup(), /newer extension version/);
+await assert.rejects(() => syncApi.restoreChromeSyncBackup(), /newer extension version/);
+await assert.rejects(() => syncApi.syncChromeSyncBackup(), /newer extension version/);
+assert.deepEqual(syncState, syncBeforeFutureBackupVersion, "Current sync protocol metadata with a future backup schema must remain untouched");
+delete syncState.startTabSyncMeta;
+
 const remoteSettings = settingsApi.cloneSettings(await settingsApi.getStartPageSettings());
 remoteSettings.layout.gap = 31;
 await settingsApi.setStartPageSettings(remoteSettings);
@@ -135,8 +172,13 @@ syncState.startTabSyncMeta = { invalid: true };
 syncState.startTabSyncChunk9 = "orphan";
 await syncApi.uploadChromeSyncBackup();
 assert.equal(Object.prototype.hasOwnProperty.call(syncState, "startTabSyncChunk9"), false, "Orphaned sync chunks must be removed even when prior metadata is corrupt");
-const remoteMeta = structuredClone(syncState.startTabSyncMeta);
+const remoteMeta = structuredClone(syncState.startTabSyncMeta) as Record<string, unknown>;
 assert.ok(remoteMeta, "Remote sync metadata must be written");
+const localBeforeConcurrentRestore = structuredClone(localState);
+remoteMetaAfterChunkRead = { ...remoteMeta, updatedAt: new Date(Date.parse(String(remoteMeta.updatedAt)) + 1_000).toISOString(), snapshotId: "concurrent-remote-snapshot" };
+await assert.rejects(() => syncApi.restoreChromeSyncBackup(), /changed concurrently/);
+assert.deepEqual(localState, localBeforeConcurrentRestore, "A remote snapshot change during chunk reads must abort before local import");
+syncState.startTabSyncMeta = structuredClone(remoteMeta);
 for (const key of Object.keys(localState)) delete localState[key];
 const result = await syncApi.syncChromeSyncBackup();
 assert.equal(result, "restored", "A pristine device must restore existing remote data");

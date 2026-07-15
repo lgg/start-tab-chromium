@@ -1,7 +1,7 @@
 import { normalizeBlockedSites, normalizeLastBlockedUrls, syncRulesInCurrentTransaction } from "./blocklist.js";
-import { DATA_REVISION_KEY, markStartTabDataChanged } from "./data-revision.js";
+import { DATA_REVISION_KEY, markStartTabDataChanged, readStartTabDataRevision } from "./data-revision.js";
 import { withStorageLock } from "./storage-lock.js";
-import { FOCUS_STATS_KEY, normalizeFocusStats } from "./focus-stats.js";
+import { FOCUS_STATS_KEY, isFutureFocusStatsSchema, normalizeFocusStats } from "./focus-stats.js";
 import {
   LEGACY_INSTANCE_RUNTIME_KEY,
   START_PAGE_RUNTIME_KEY,
@@ -50,6 +50,11 @@ export interface BackupBundle {
 
 export interface BackupImportOptions {
   dataRevisionAt?: number;
+}
+
+export interface ExportedBackupSnapshot {
+  bundle: BackupBundle;
+  dataRevision: number;
 }
 
 export interface BackupImportReport {
@@ -102,6 +107,9 @@ function assertSupportedSchemas(storage: Record<string, unknown>): void {
   if (isFutureRuntimeSchema(storage[START_PAGE_RUNTIME_KEY])) {
     throw new Error("This backup contains Start Tab runtime data from a newer extension version");
   }
+  if (isFutureFocusStatsSchema(storage[FOCUS_STATS_KEY])) {
+    throw new Error("This backup contains focus statistics from a newer extension version");
+  }
 }
 
 function normalizedStorage(source: Record<string, unknown>): Record<string, unknown> {
@@ -147,12 +155,23 @@ export function migrateBackup(value: unknown): BackupBundle {
   );
 }
 
-export async function exportBackup(): Promise<BackupBundle> {
+async function exportBackupInCurrentTransaction(): Promise<BackupBundle> {
+  const snapshot = await chrome.storage.local.get([...SNAPSHOT_KEYS]);
+  assertSupportedSchemas(snapshot);
+  return currentSchema(normalizedStorage(snapshot), new Date().toISOString(), backupId());
+}
+
+/** Capture backup content and its conflict-resolution revision from one data-write snapshot. */
+export async function exportBackupSnapshot(): Promise<ExportedBackupSnapshot> {
   return withStorageLock("data-write", async () => {
-    const snapshot = await chrome.storage.local.get([...SNAPSHOT_KEYS]);
-    assertSupportedSchemas(snapshot);
-    return currentSchema(normalizedStorage(snapshot), new Date().toISOString(), backupId());
+    const bundle = await exportBackupInCurrentTransaction();
+    const dataRevision = await readStartTabDataRevision(backupModifiedAt(bundle));
+    return { bundle, dataRevision };
   });
+}
+
+export async function exportBackup(): Promise<BackupBundle> {
+  return (await exportBackupSnapshot()).bundle;
 }
 
 function keysAbsentFrom(storage: Record<string, unknown>, keys: readonly string[] = STORAGE_KEYS): string[] {
@@ -215,7 +234,6 @@ export function backupModifiedAt(bundle: BackupBundle): number {
   const settings = isRecord(bundle.storage[START_PAGE_SETTINGS_KEY]) ? bundle.storage[START_PAGE_SETTINGS_KEY] : {};
   const runtime = isRecord(bundle.storage[START_PAGE_RUNTIME_KEY]) ? bundle.storage[START_PAGE_RUNTIME_KEY] : {};
   return Math.max(
-    Date.parse(bundle.exportedAt) || 0,
     typeof settings.updatedAt === "number" ? settings.updatedAt : 0,
     typeof runtime.updatedAt === "number" ? runtime.updatedAt : 0,
   );

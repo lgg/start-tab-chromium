@@ -1,4 +1,4 @@
-import { markStartTabDataChanged } from "./data-revision.js";
+import { commitStorageMutationWithRevision } from "./data-revision.js";
 import { withStorageLock } from "./storage-lock.js";
 
 export const SUPPORTED_LOCALES = ["en", "ru"] as const;
@@ -33,9 +33,10 @@ export async function getLocalePreference(): Promise<LocalePreference> {
 
 export async function setLocalePreference(preference: LocalePreference): Promise<void> {
   await withStorageLock("data-write", async () => {
-    if (preference === "auto") await chrome.storage.local.remove(LOCALE_OVERRIDE_KEY);
-    else await chrome.storage.local.set({ [LOCALE_OVERRIDE_KEY]: preference });
-    await markStartTabDataChanged();
+    await commitStorageMutationWithRevision([LOCALE_OVERRIDE_KEY], async () => {
+      if (preference === "auto") await chrome.storage.local.remove(LOCALE_OVERRIDE_KEY);
+      else await chrome.storage.local.set({ [LOCALE_OVERRIDE_KEY]: preference });
+    });
   });
 }
 

@@ -1,9 +1,10 @@
-import { markStartTabDataChanged } from "./data-revision.js";
+import { commitStorageMutationWithRevision } from "./data-revision.js";
 import { sendMessage } from "./messages.js";
 import { withStorageLock } from "./storage-lock.js";
 import { readStartPageSettingsSnapshot, type StartPageSettings } from "./start-page-settings.js";
 
 export const FOCUS_STATS_KEY = "focusStats";
+export const FOCUS_STATS_SCHEMA_VERSION = 1;
 
 interface CountSet {
   blockHits: number;
@@ -81,8 +82,15 @@ function normalizeDomainStats(value: unknown): DomainStats {
   };
 }
 
+export function isFutureFocusStatsSchema(value: unknown): boolean {
+  return isRecord(value)
+    && typeof value.version === "number"
+    && Number.isInteger(value.version)
+    && value.version > FOCUS_STATS_SCHEMA_VERSION;
+}
+
 export function normalizeFocusStats(value: unknown): FocusStats {
-  if (!isRecord(value) || value.version !== 1) return emptyStats();
+  if (!isRecord(value) || value.version !== FOCUS_STATS_SCHEMA_VERSION) return emptyStats();
   const stats: FocusStats = { version: 1, totals: normalizeCounts(value.totals), byDay: {}, byDomain: {}, processedClockCompletions: {} };
   if (isRecord(value.byDay)) for (const [key, counts] of Object.entries(value.byDay)) if (key) stats.byDay[key] = normalizeCounts(counts);
   if (isRecord(value.byDomain)) for (const [host, domainStats] of Object.entries(value.byDomain)) if (host) stats.byDomain[host] = normalizeDomainStats(domainStats);
@@ -95,17 +103,23 @@ export function normalizeFocusStats(value: unknown): FocusStats {
   return stats;
 }
 
-async function readStats(): Promise<FocusStats> {
+async function readStats(requireCompatible = false): Promise<FocusStats> {
   const items = await chrome.storage.local.get(FOCUS_STATS_KEY);
-  return normalizeFocusStats(items[FOCUS_STATS_KEY]);
+  const raw = items[FOCUS_STATS_KEY];
+  if (requireCompatible && isFutureFocusStatsSchema(raw)) {
+    throw new Error("Focus statistics were created by a newer extension version and cannot be modified safely");
+  }
+  return normalizeFocusStats(raw);
 }
 async function writeStatsInTransaction(stats: FocusStats): Promise<void> {
-  await chrome.storage.local.set({ [FOCUS_STATS_KEY]: stats });
-  await markStartTabDataChanged();
+  await commitStorageMutationWithRevision(
+    [FOCUS_STATS_KEY],
+    () => chrome.storage.local.set({ [FOCUS_STATS_KEY]: stats }),
+  );
 }
 async function mutateStats(mutator: (stats: FocusStats) => void): Promise<void> {
   await withStorageLock("data-write", async () => {
-    const stats = await readStats();
+    const stats = await readStats(true);
     mutator(stats);
     await writeStatsInTransaction(stats);
   });
@@ -134,7 +148,7 @@ export async function recordBlockedNavigation(host: string): Promise<void> {
     const settings = await readStartPageSettingsSnapshot();
     const now = Date.now();
     const dedupeMs = Math.max(1, settings.focusStats.avoidedVisitDedupeSeconds) * 1000;
-    const stats = await readStats();
+    const stats = await readStats(true);
     const day = ensureDay(stats);
     const domain = ensureDomain(stats, host);
     const isAvoidedVisit = now - domain.lastAvoidedAt >= dedupeMs;
@@ -169,7 +183,7 @@ export async function recordFocusSessionStarted(): Promise<void> {
 }
 export async function recordFocusSessionCompleted(focusTimeMs: number, completionId?: string): Promise<void> {
   await withStorageLock("data-write", async () => {
-    const stats = await readStats();
+    const stats = await readStats(true);
     if (completionId && stats.processedClockCompletions[completionId]) return;
     addToCounts(stats.totals, { focusSessionsCompleted: 1, focusTimeMs });
     addToCounts(ensureDay(stats), { focusSessionsCompleted: 1, focusTimeMs });
