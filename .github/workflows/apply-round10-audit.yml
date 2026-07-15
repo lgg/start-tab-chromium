@@ -53,8 +53,8 @@ jobs:
           npm audit --omit=dev
       - name: Stage validated source-only diff
         run: |
-          rm -rf build build-blocker-only build-google node_modules validation-logs locale-parity-report.json
-          git add -A
+          git add docs/audit-2026-07-15-round-10.md
+          git add -u
           git diff --cached --check
           git diff --cached --name-status
       - name: Create validated source commit
