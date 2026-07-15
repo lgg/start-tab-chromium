@@ -13,6 +13,7 @@ export interface GoogleCalendarEvent {
   title: string;
   start: string;
   end: string;
+  allDay: boolean;
 }
 
 interface CalendarEventPayload {
@@ -76,7 +77,8 @@ async function googleFetch<T>(url: string, init: RequestInit = {}, interactive =
   }
 
   if (!response.ok) throw new Error(`Google API request failed: ${response.status}`);
-  return (await response.json()) as T;
+  const text = await response.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 function normalizedCalendarId(calendarId: string): string {
@@ -102,6 +104,7 @@ export async function listCalendarEvents(calendarId = DEFAULT_CALENDAR_ID, maxRe
     title: event.summary ?? "Untitled event",
     start: event.start?.dateTime ?? event.start?.date ?? "",
     end: event.end?.dateTime ?? event.end?.date ?? "",
+    allDay: Boolean(event.start?.date && !event.start.dateTime),
   }));
 }
 
@@ -112,6 +115,14 @@ async function findDriveBackupFile(interactive = false): Promise<DriveFile | nul
   url.searchParams.set("q", `name='${DRIVE_BACKUP_FILE_NAME}' and trashed=false`);
   const payload = await googleFetch<DriveListResponse>(url.toString(), {}, interactive);
   return payload.files?.[0] ?? null;
+}
+
+function driveMultipartBoundary(content: string): string {
+  let boundary: string;
+  do {
+    boundary = `start-tab-${crypto.randomUUID().replaceAll("-", "")}`;
+  } while (content.includes(boundary));
+  return boundary;
 }
 
 export async function uploadDriveBackup(): Promise<void> {
@@ -132,7 +143,8 @@ export async function uploadDriveBackup(): Promise<void> {
     name: DRIVE_BACKUP_FILE_NAME,
     parents: ["appDataFolder"],
   };
-  const boundary = "start-tab-boundary";
+  const metadataJson = JSON.stringify(metadata);
+  const boundary = driveMultipartBoundary(`${metadataJson}\n${body}`);
   await googleFetch<unknown>(`${GOOGLE_DRIVE_UPLOAD_URL}?uploadType=multipart`, {
     method: "POST",
     headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
@@ -140,7 +152,7 @@ export async function uploadDriveBackup(): Promise<void> {
       `--${boundary}`,
       "Content-Type: application/json; charset=UTF-8",
       "",
-      JSON.stringify(metadata),
+      metadataJson,
       `--${boundary}`,
       "Content-Type: application/json",
       "",
