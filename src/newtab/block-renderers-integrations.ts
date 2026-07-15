@@ -44,10 +44,23 @@ interface WeatherResult {
   days: WeatherDay[];
 }
 
-function eventLabel(event: GoogleCalendarEvent, i18n: I18n): string {
+function calendarDate(value: string): Date | null {
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  const date = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]), 12)
+    : new Date(value);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+export function calendarEventLabel(event: GoogleCalendarEvent, i18n: I18n): string {
   if (!event.start) return event.title;
-  const start = new Date(event.start);
-  if (!Number.isFinite(start.getTime())) return `${event.title} · ${i18n.t("calendarAllDay")}`;
+  const start = calendarDate(event.start);
+  if (event.allDay) {
+    if (!start) return `${event.title} · ${i18n.t("calendarAllDay")}`;
+    const date = new Intl.DateTimeFormat(i18n.locale, { dateStyle: "short" }).format(start);
+    return `${event.title} · ${date} · ${i18n.t("calendarAllDay")}`;
+  }
+  if (!start) return `${event.title} · ${i18n.t("calendarAllDay")}`;
   return `${event.title} · ${new Intl.DateTimeFormat(i18n.locale, { dateStyle: "short", timeStyle: "short" }).format(start)}`;
 }
 
@@ -69,7 +82,7 @@ export function renderGoogleCalendar(
     const filtered = query ? events.filter((event) => event.title.toLocaleLowerCase().includes(query)) : events;
     const list = element("div", "calendar-list");
     if (block.config.accountLabel) list.append(element("p", "block-meta", block.config.accountLabel));
-    list.append(...filtered.map((event) => element("div", "calendar-event", eventLabel(event, context.i18n))));
+    list.append(...filtered.map((event) => element("div", "calendar-event", calendarEventLabel(event, context.i18n))));
     if (filtered.length === 0) list.append(element("p", "empty-state", context.i18n.t("emptyList")));
     status.replaceWith(list);
   }).catch(() => {
