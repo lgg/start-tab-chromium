@@ -21,6 +21,7 @@ import {
 export const BACKUP_VERSION = 4;
 export const PRE_IMPORT_BACKUP_KEY = "startTabPreImportBackup";
 
+const LEGACY_BLOCKED_SITES_KEY = "blocked";
 const STORAGE_KEYS = [
   "blockedSites",
   "lastBlockedUrls",
@@ -31,7 +32,7 @@ const STORAGE_KEYS = [
   FOCUS_STATS_KEY,
 ] as const;
 
-const SNAPSHOT_KEYS = [...STORAGE_KEYS, LEGACY_INSTANCE_RUNTIME_KEY] as const;
+const SNAPSHOT_KEYS = [...STORAGE_KEYS, LEGACY_BLOCKED_SITES_KEY, LEGACY_INSTANCE_RUNTIME_KEY] as const;
 const ROLLBACK_KEYS = [...SNAPSHOT_KEYS, PRE_IMPORT_BACKUP_KEY, DATA_REVISION_KEY] as const;
 
 export type BackupStorageKey = (typeof STORAGE_KEYS)[number];
@@ -100,6 +101,12 @@ function normalizeLocale(value: unknown): "en" | "ru" | null {
   return value === "en" || value === "ru" ? value : null;
 }
 
+function normalizeBackupBlockedSites(source: Record<string, unknown>): string[] {
+  const current = Array.isArray(source.blockedSites) ? source.blockedSites : [];
+  const legacy = Array.isArray(source[LEGACY_BLOCKED_SITES_KEY]) ? source[LEGACY_BLOCKED_SITES_KEY] : [];
+  return normalizeBlockedSites([...current, ...legacy]);
+}
+
 function assertSupportedSchemas(storage: Record<string, unknown>): void {
   if (isFutureStartPageSchema(storage[START_PAGE_SETTINGS_KEY])) {
     throw new Error("This backup contains Start Tab settings from a newer extension version");
@@ -121,7 +128,7 @@ function normalizedStorage(source: Record<string, unknown>): Record<string, unkn
   );
   const locale = normalizeLocale(source.localeOverride);
   const storage: Record<string, unknown> = {
-    blockedSites: normalizeBlockedSites(source.blockedSites),
+    blockedSites: normalizeBackupBlockedSites(source),
     lastBlockedUrls: normalizeLastBlockedUrls(source.lastBlockedUrls),
     [START_PAGE_SETTINGS_KEY]: settings,
     [START_PAGE_RUNTIME_KEY]: runtime,
