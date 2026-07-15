@@ -34,6 +34,7 @@ jobs:
           test "$(sha256sum /tmp/round10.patch | awk '{print $1}')" = "04eecadb7318fd9753eea08613c005e5e33aead75e907854bc4a35c5d27e7f7a"
           git apply --check /tmp/round10.patch
           git apply /tmp/round10.patch
+          sed -i 's/[[:space:]]\+$//' docs/audit-2026-07-15-round-10.md
           rm \
             .github/round10.patch.gz.b64 \
             .github/round10.patch.part1 \
