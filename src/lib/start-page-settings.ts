@@ -187,19 +187,13 @@ export async function readStartPageSettingsSnapshot(): Promise<StartPageSettings
 export async function getStartPageSettings(): Promise<StartPageSettings> {
   const raw = await readRawSettings();
   const initial = normalizeStartPageSettingsWithReport(raw);
-  if (isFutureStartPageSchema(raw)) {
-    await chrome.storage.local.set({ [START_PAGE_MIGRATION_REPORT_KEY]: initial.report });
-    return initial.settings;
-  }
+  if (isFutureStartPageSchema(raw)) return initial.settings;
   if (jsonEqual(raw, initial.settings)) return initial.settings;
 
   return withStorageLock("data-write", async () => {
     const currentRaw = await readRawSettings();
     const { settings, report } = normalizeStartPageSettingsWithReport(currentRaw);
-    if (isFutureStartPageSchema(currentRaw)) {
-      await chrome.storage.local.set({ [START_PAGE_MIGRATION_REPORT_KEY]: report });
-      return settings;
-    }
+    if (isFutureStartPageSchema(currentRaw)) return settings;
     if (jsonEqual(currentRaw, settings)) return settings;
     const stamped = withBlockTimestamps(null, settings, Date.now());
     await persistSettingsInTransaction(stamped, report);
