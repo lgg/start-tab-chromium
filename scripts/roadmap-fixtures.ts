@@ -97,62 +97,10 @@ const legacy = {
     containedMaxWidth: 1280,
     showBlockTitles: true,
     blocks: [
-      {
-        id: "timer",
-        type: "timer",
-        enabled: false,
-        zone: "contained",
-        column: 2,
-        row: 3,
-        width: 4,
-        height: 2,
-        order: 0,
-        config: { durationSeconds: 90, notifyOnComplete: false },
-      },
-      {
-        id: "note",
-        type: "note",
-        enabled: true,
-        zone: "contained",
-        column: 6,
-        row: 3,
-        width: 3,
-        height: 2,
-        order: 1,
-        config: { placeholder: "Legacy note", confirmDeleteWithContent: true },
-      },
-      {
-        id: "tasks",
-        type: "localTasks",
-        enabled: true,
-        zone: "contained",
-        column: 1,
-        row: 6,
-        width: 4,
-        height: 3,
-        order: 2,
-        config: { placeholder: "Legacy task", showCompleted: true, confirmDeleteWithContent: true },
-      },
-      {
-        id: "links",
-        type: "links",
-        enabled: true,
-        zone: "contained",
-        column: 5,
-        row: 6,
-        width: 4,
-        height: 3,
-        order: 3,
-        config: {
-          columns: 2,
-          rows: 2,
-          pageDirection: "horizontal",
-          fontFamily: "system-ui",
-          fontSize: 13,
-          iconSize: 28,
-          items: [{ id: "legacy-link", icon: "L", title: "Legacy", url: "https://example.com" }],
-        },
-      },
+      { id: "timer", type: "timer", enabled: false, zone: "contained", column: 2, row: 3, width: 4, height: 2, order: 0, config: { durationSeconds: 90, notifyOnComplete: false } },
+      { id: "note", type: "note", enabled: true, zone: "contained", column: 6, row: 3, width: 3, height: 2, order: 1, config: { placeholder: "Legacy note", confirmDeleteWithContent: true } },
+      { id: "tasks", type: "localTasks", enabled: true, zone: "contained", column: 1, row: 6, width: 4, height: 3, order: 2, config: { placeholder: "Legacy task", showCompleted: true, confirmDeleteWithContent: true } },
+      { id: "links", type: "links", enabled: true, zone: "contained", column: 5, row: 6, width: 4, height: 3, order: 3, config: { columns: 2, rows: 2, pageDirection: "horizontal", fontFamily: "system-ui", fontSize: 13, iconSize: 28, items: [{ id: "legacy-link", icon: "L", title: "Legacy", url: "https://example.com" }] } },
     ],
   },
 };
@@ -170,16 +118,7 @@ assert.deepEqual(normalizeStartPageSettings(migrated), migrated, "Migration must
 
 const damaged = normalizeStartPageSettings({
   ...migrated,
-  layout: {
-    ...migrated.layout,
-    columns: -100,
-    gap: 9999,
-    blocks: [
-      { ...migratedTimer, column: -30, row: -4, width: -1, height: 0 },
-      { id: "unknown", type: "does-not-exist", config: { arbitrary: true } },
-      null,
-    ],
-  },
+  layout: { ...migrated.layout, columns: -100, gap: 9999, blocks: [{ ...migratedTimer, column: -30, row: -4, width: -1, height: 0 }, { id: "unknown", type: "does-not-exist", config: { arbitrary: true } }, null] },
 });
 assert.ok(damaged.layout.columns >= 1);
 assert.ok(damaged.layout.gap <= 60);
@@ -188,17 +127,7 @@ assert.ok(damaged.layout.blocks.every((block) => block.width >= 1 && block.heigh
 assert.ok(damaged.layout.blocks.every((block) => block.type !== ("does-not-exist" as BlockInstance["type"])));
 
 const legacyRuntime = normalizeRuntimeState({
-  clocks: {
-    timer: {
-      type: "timer",
-      running: true,
-      startedAt: 10_000,
-      elapsedMs: 5_000,
-      durationMs: 90_000,
-      targetAt: 95_000,
-      completionToken: "legacy-token",
-    },
-  },
+  clocks: { timer: { type: "timer", running: true, startedAt: 10_000, elapsedMs: 5_000, durationMs: 90_000, targetAt: 95_000, completionToken: "legacy-token" } },
   localTasks: [{ id: "old-task", title: "Keep me", done: false, createdAt: 1, updatedAt: 1 }],
   notes: { note: "Keep this note" },
   linkPages: { links: 2 },
@@ -210,6 +139,12 @@ assert.ok(legacyRuntime.clocks[migratedTimer.id]);
 assert.equal(legacyRuntime.notes[note.id], "Keep this note");
 assert.equal(legacyRuntime.tasks[tasks.id]?.[0]?.title, "Keep me");
 assert.equal(legacyRuntime.linkPages[links.id], 2);
+const damagedTaskSource = { localTasks: [{ id: "", title: "Missing id", done: false }, { id: "duplicate", title: "First duplicate", done: false }, { id: "duplicate", title: "Second duplicate", done: true }] };
+const normalizedDamagedTasksA = normalizeRuntimeState(damagedTaskSource, migrated).tasks[tasks.id];
+const normalizedDamagedTasksB = normalizeRuntimeState(damagedTaskSource, migrated).tasks[tasks.id];
+assert.ok(normalizedDamagedTasksA.every((task) => task.id.length > 0), "Legacy task IDs must never normalize to an empty identifier");
+assert.equal(new Set(normalizedDamagedTasksA.map((task) => task.id)).size, normalizedDamagedTasksA.length, "Legacy task IDs must be unique after normalization");
+assert.deepEqual(normalizedDamagedTasksA, normalizedDamagedTasksB, "Legacy task normalization must be deterministic across repeated migrations");
 
 const clockBlock = createBlockInstance("timer", { config: { type: "timer", durationSeconds: 120, notifyOnComplete: true } });
 const idleClock = defaultClockForBlock(clockBlock);
@@ -225,80 +160,21 @@ assert.equal(remainingClockMs(pausedClock, 500_000), 105_000);
 const customThemeId = createThemeId();
 assert.ok(customThemeId.startsWith("theme-"));
 const themeIssues = [];
-const normalizedTheme = normalizeTheme({
-  id: customThemeId,
-  name: "Fixture",
-  builtIn: false,
-  schemaVersion: 1,
-  background: {
-    kind: "effect",
-    baseColor: "#000000",
-    config: { effect: "aurora", speed: 999, intensity: -3, blur: 9999 },
-  },
-  tokens: {
-    textPrimary: "#ffffff",
-    textSecondary: "#aaaaaa",
-    cardSurface: "#111111",
-    cardBorder: "rgba(255,255,255,.1)",
-    cardOpacity: 99,
-    shadow: "none",
-    accent: "#00ffff",
-    hover: "rgba(0,255,255,.1)",
-    active: "rgba(0,255,255,.2)",
-    fontFamily: "system-ui",
-    baseFontSize: 200,
-    headingScale: 20,
-    borderRadius: 200,
-    spacing: 200,
-  },
-  createdAt: 1,
-  updatedAt: 1,
-}, cloneTheme(BUILT_IN_THEMES[0]!), "theme", themeIssues);
+const normalizedTheme = normalizeTheme({ id: customThemeId, name: "Fixture", builtIn: false, schemaVersion: 1, background: { kind: "effect", baseColor: "#000000", config: { effect: "aurora", speed: 999, intensity: -3, blur: 9999 } }, tokens: { textPrimary: "#ffffff", textSecondary: "#aaaaaa", cardSurface: "#111111", cardBorder: "rgba(255,255,255,.1)", cardOpacity: 99, shadow: "none", accent: "#00ffff", hover: "rgba(0,255,255,.1)", active: "rgba(0,255,255,.2)", fontFamily: "system-ui", baseFontSize: 200, headingScale: 20, borderRadius: 200, spacing: 200 }, createdAt: 1, updatedAt: 1 }, cloneTheme(BUILT_IN_THEMES[0]!), "theme", themeIssues);
 assert.equal(normalizedTheme.builtIn, false);
 assert.ok(normalizedTheme.tokens.cardOpacity <= 1);
 assert.ok(normalizedTheme.tokens.baseFontSize <= 32);
 assert.ok(normalizedTheme.background.kind === "effect" && normalizedTheme.background.config.intensity <= 1);
 
-const oldBackup = {
-  app: "Start Tab",
-  version: 3,
-  exportedAt: "2026-01-01T00:00:00.000Z",
-  storage: {
-    startPageSettings: legacy,
-    startPageRuntimeState: {
-      clocks: { timer: { running: false, elapsedMs: 12_000, durationMs: 90_000 } },
-      localTasks: [{ id: "backup-task", title: "Backup task", done: false }],
-    },
-    blockedSites: ["example.com"],
-  },
-};
+const oldBackup = { app: "Start Tab", version: 3, exportedAt: "2026-01-01T00:00:00.000Z", storage: { startPageSettings: legacy, startPageRuntimeState: { clocks: { timer: { running: false, elapsedMs: 12_000, durationMs: 90_000 } }, localTasks: [{ id: "backup-task", title: "Backup task", done: false }] }, blockedSites: ["example.com"] } };
 const migratedBackup = migrateBackup(oldBackup);
 assert.equal(migratedBackup.version, 4);
 assert.equal((migratedBackup.storage.startPageSettings as StartPageSettings).schemaVersion, START_PAGE_SCHEMA_VERSION);
 assert.equal((migratedBackup.storage.startPageRuntimeState as { version: number }).version, 2);
 assert.deepEqual(migratedBackup.storage.blockedSites, ["example.com"]);
 
-// Storage-backed regression fixtures use a minimal Chrome API mock.
 const storageState: Record<string, unknown> = {};
-const chromeMock = {
-  storage: {
-    local: {
-      async get(keys?: string | string[]): Promise<Record<string, unknown>> {
-        const requested = keys === undefined ? Object.keys(storageState) : Array.isArray(keys) ? keys : [keys];
-        return Object.fromEntries(requested.filter((key) => Object.prototype.hasOwnProperty.call(storageState, key)).map((key) => [key, storageState[key]]));
-      },
-      async set(items: Record<string, unknown>): Promise<void> {
-        for (const [key, value] of Object.entries(items)) {
-          assert.notEqual(value, undefined, `chrome.storage.local.set must not receive undefined for ${key}`);
-          storageState[key] = structuredClone(value);
-        }
-      },
-      async remove(keys: string | string[]): Promise<void> {
-        for (const key of Array.isArray(keys) ? keys : [keys]) delete storageState[key];
-      },
-    },
-  },
-} as unknown as typeof chrome;
+const chromeMock = { storage: { local: { async get(keys?: string | string[]): Promise<Record<string, unknown>> { const requested = keys === undefined ? Object.keys(storageState) : Array.isArray(keys) ? keys : [keys]; return Object.fromEntries(requested.filter((key) => Object.prototype.hasOwnProperty.call(storageState, key)).map((key) => [key, storageState[key]])); }, async set(items: Record<string, unknown>): Promise<void> { for (const [key, value] of Object.entries(items)) { assert.notEqual(value, undefined, `chrome.storage.local.set must not receive undefined for ${key}`); storageState[key] = structuredClone(value); } }, async remove(keys: string | string[]): Promise<void> { for (const key of Array.isArray(keys) ? keys : [keys]) delete storageState[key]; } } } } as unknown as typeof chrome;
 Object.defineProperty(globalThis, "chrome", { value: chromeMock, configurable: true });
 
 const futureSettings = { ...cloneSettings(DEFAULT_SETTINGS), schemaVersion: START_PAGE_SCHEMA_VERSION + 10, futureField: { keep: true } };
@@ -306,14 +182,20 @@ storageState.startPageSettings = structuredClone(futureSettings);
 assert.equal(isFutureStartPageSchema(storageState.startPageSettings), true);
 await getStartPageSettings();
 assert.deepEqual(storageState.startPageSettings, futureSettings, "Reading a future settings schema must not overwrite it");
+assert.equal(Object.prototype.hasOwnProperty.call(storageState, "startPageMigrationReport"), false, "Future settings reads must not write migration side data");
+const futureSettingsView = normalizeStartPageSettings(futureSettings);
+const runtimeUnderFutureSettings = normalizeRuntimeState(undefined, futureSettingsView);
+storageState[START_PAGE_RUNTIME_KEY] = structuredClone(runtimeUnderFutureSettings);
+storageState.startTabInstanceState = { preserveWithFutureSettings: true };
+await getStartPageRuntimeState(futureSettingsView);
+assert.deepEqual(storageState[START_PAGE_RUNTIME_KEY], runtimeUnderFutureSettings, "Future settings reads must not rewrite related runtime data");
+assert.deepEqual(storageState.startTabInstanceState, { preserveWithFutureSettings: true }, "Future settings reads must not delete legacy runtime side data");
+await assert.rejects(() => setStartPageRuntimeState(runtimeUnderFutureSettings), /newer extension version/);
 await assert.rejects(() => setStartPageSettings(cloneSettings(DEFAULT_SETTINGS)), /newer extension version/);
 
 const timestampSettings = cloneSettings(DEFAULT_SETTINGS);
 timestampSettings.updatedAt = 100;
-for (const block of timestampSettings.layout.blocks) {
-  block.createdAt = 100;
-  block.updatedAt = 100;
-}
+for (const block of timestampSettings.layout.blocks) { block.createdAt = 100; block.updatedAt = 100; }
 storageState.startPageSettings = structuredClone(timestampSettings);
 const originalNow = Date.now;
 Date.now = () => 200;
@@ -344,13 +226,7 @@ assert.equal(Object.prototype.hasOwnProperty.call(backupWithoutStats.storage, FO
 assert.throws(() => migrateBackup({ ...oldBackup, storage: { ...oldBackup.storage, startPageSettings: futureSettings } }), /newer extension version/);
 assert.throws(() => migrateBackup({ ...oldBackup, storage: { ...oldBackup.storage, startPageRuntimeState: futureRuntime } }), /newer extension version/);
 
-const normalizedStats = normalizeFocusStats({
-  version: 1,
-  totals: {},
-  byDay: {},
-  byDomain: {},
-  processedClockCompletions: Object.fromEntries(Array.from({ length: 700 }, (_, index) => [`token-${index}`, index + 1])),
-});
+const normalizedStats = normalizeFocusStats({ version: 1, totals: {}, byDay: {}, byDomain: {}, processedClockCompletions: Object.fromEntries(Array.from({ length: 700 }, (_, index) => [`token-${index}`, index + 1])) });
 assert.equal(Object.keys(normalizedStats.processedClockCompletions).length, 512, "Clock completion dedupe history must remain bounded");
 
 assert.equal(isMessage({ type: "clock-action", instanceId: "timer-main", action: "toggle" }), true);

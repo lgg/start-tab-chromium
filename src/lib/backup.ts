@@ -1,5 +1,5 @@
 import { normalizeBlockedSites, normalizeLastBlockedUrls, syncRulesInCurrentTransaction } from "./blocklist.js";
-import { markStartTabDataChanged } from "./data-revision.js";
+import { DATA_REVISION_KEY, markStartTabDataChanged } from "./data-revision.js";
 import { withStorageLock } from "./storage-lock.js";
 import { FOCUS_STATS_KEY, normalizeFocusStats } from "./focus-stats.js";
 import {
@@ -7,6 +7,9 @@ import {
   START_PAGE_RUNTIME_KEY,
   isFutureRuntimeSchema,
   normalizeRuntimeState,
+  readClockAlarmSnapshot,
+  reconcileClockAlarmsForRuntime,
+  restoreClockAlarmSnapshot,
 } from "./start-page-runtime.js";
 import {
   START_PAGE_SETTINGS_KEY,
@@ -29,7 +32,7 @@ const STORAGE_KEYS = [
 ] as const;
 
 const SNAPSHOT_KEYS = [...STORAGE_KEYS, LEGACY_INSTANCE_RUNTIME_KEY] as const;
-const ROLLBACK_KEYS = [...SNAPSHOT_KEYS, PRE_IMPORT_BACKUP_KEY] as const;
+const ROLLBACK_KEYS = [...SNAPSHOT_KEYS, PRE_IMPORT_BACKUP_KEY, DATA_REVISION_KEY] as const;
 
 export type BackupStorageKey = (typeof STORAGE_KEYS)[number];
 
@@ -168,6 +171,7 @@ export async function importBackup(value: unknown, options: BackupImportOptions 
 
   return withStorageLock("data-write", async () => {
     const current = await chrome.storage.local.get([...ROLLBACK_KEYS]);
+    const currentAlarms = await readClockAlarmSnapshot();
     assertSupportedSchemas(current);
     const next = { ...migrated.storage };
     const removals = keysAbsentFrom(next, SNAPSHOT_KEYS);
@@ -178,11 +182,13 @@ export async function importBackup(value: unknown, options: BackupImportOptions 
       await chrome.storage.local.set(next);
       if (removals.length > 0) await chrome.storage.local.remove(removals);
       await syncRulesInCurrentTransaction();
+      await reconcileClockAlarmsForRuntime(next[START_PAGE_RUNTIME_KEY] as ReturnType<typeof normalizeRuntimeState>);
       await markStartTabDataChanged(options.dataRevisionAt);
     } catch (error) {
       try {
         await restoreStorageSnapshot(current);
         await syncRulesInCurrentTransaction();
+        await restoreClockAlarmSnapshot(currentAlarms);
       } catch (rollbackError) {
         throw new AggregateError([error, rollbackError], "Backup import failed and rollback was incomplete");
       }

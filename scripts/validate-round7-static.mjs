@@ -29,17 +29,30 @@ for (const [name, source] of [["settings", settings], ["runtime", runtime], ["ba
 }
 assert.match(settings, /value\.updatedAt !== previous\.updatedAt/, "Settings must reject zero-timestamp stale snapshots");
 assert.match(runtime, /currentUpdatedAt !== expectedUpdatedAt/, "Runtime must reject zero-timestamp stale snapshots");
+assert.match(runtime, /readRuntimeSettingsSnapshot\(true\)/, "Runtime writes must reject unsupported future settings schemas");
+assert.match(runtime, /reconcileStoredClockAlarms[\s\S]*isFutureStartPageSchema[\s\S]*isFutureRuntimeSchema[\s\S]*return/, "Stored alarm reconciliation must not touch unsupported future schemas");
+assert.match(runtime, /scheduleClockAlarm[\s\S]*withStorageLock\(["']data-write["']/, "Per-instance alarm scheduling must re-read current runtime under the data-write lock");
 assert.match(runtime, /resetStartPageData/, "Complete Start Tab reset must be centralized");
 assert.match(runtime, /ONBOARDING_KEY/, "Complete Start Tab reset must clear onboarding state");
 assert.match(runtime, /absentResetKeys/, "Complete Start Tab reset must preserve exact key absence during rollback");
-assert.match(runtime, /reconcileClockAlarmsForRuntime/, "Complete Start Tab reset must restore durable alarms on rollback");
+assert.match(runtime, /readClockAlarmSnapshot/, "Complete Start Tab reset must capture durable alarms before mutation");
+assert.match(runtime, /restoreClockAlarmSnapshot/, "Complete Start Tab reset must restore exact durable alarm metadata on rollback");
+assert.match(runtime, /legacyClockToken/, "Running legacy countdowns must receive deterministic completion tokens");
+assert.match(runtime, /stableTaskHash/, "Legacy task identifiers must be deterministic");
+assert.match(serviceWorker, /completeClockInstance[\s\S]*scheduleClockAlarm/, "Clock completion must schedule an auto-started next phase");
 assert.match(runtime, /AggregateError/, "Complete Start Tab reset must report incomplete rollback");
 assert.match(backup, /ROLLBACK_KEYS/, "Backup rollback must preserve the prior recovery backup");
+assert.match(backup, /DATA_REVISION_KEY/, "Backup rollback must restore the previous data revision");
+assert.match(backup, /readClockAlarmSnapshot/, "Backup import must snapshot durable alarms before applying data");
+assert.match(backup, /reconcileClockAlarmsForRuntime/, "Backup import must reconcile active countdown alarms");
+assert.match(backup, /restoreClockAlarmSnapshot/, "Backup rollback must restore exact prior alarms");
 assert.match(backup, /AggregateError/, "Backup import must report incomplete rollback");
+assert.match(sync, /withStorageLock\(["']chrome-sync["']/, "Chrome Sync decisions and writes must be serialized across extension contexts");
 assert.match(sync, /dataRevisionAt: parsed\.meta\.contentUpdatedAt/, "Chrome Sync restore must advance revision exactly through backup import");
 assert.doesNotMatch(sync, /importBackup\(bundle\);\s*await markStartTabDataChanged/, "Chrome Sync restore must not double-increment data revision");
 assert.match(blocklist, /applyBlocklistMutation/, "Blocklist writes must use transactional storage/DNR updates");
 assert.match(blocklist, /restoreBlocklistStorage/, "Blocklist DNR failures must restore storage");
+assert.match(blocklist, /DATA_REVISION_KEY/, "Blocklist rollback must restore the previous data revision");
 for (const marker of ["expectedValue", "expectedTasks", "expectedPage"]) {
   assert.ok(messages.includes(marker), `Message validation must include ${marker}`);
   assert.ok(serviceWorker.includes(marker), `Service worker must enforce ${marker}`);

@@ -28,6 +28,7 @@ assert.match(blocklist, /migrationPromise = undefined/, "Transient migration fai
 assert.match(settings, /changed in another extension context/, "Settings must reject stale snapshots");
 assert.match(runtime, /changed in another extension context/, "Runtime must reject stale snapshots");
 assert.match(runtime, /resetStartPageRuntimeState/, "Runtime reset must be centralized");
+assert.match(sync, /withStorageLock\(["']chrome-sync["']/, "Sync operations must be serialized across extension contexts");
 assert.match(sync, /isPristineBackup/, "Sync must protect a pre-existing remote snapshot on a clean device");
 assert.match(sync, /Object\.keys\(value\).*sort/s, "Canonical sync JSON must sort object keys");
 assert.match(sync, /startsWith\(CHUNK_PREFIX\)/, "Sync uploads must clean orphaned chunks even when old metadata is corrupt");

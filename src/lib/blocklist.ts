@@ -8,7 +8,7 @@
  * extension's blocked.html page.
  */
 
-import { markStartTabDataChanged } from "./data-revision.js";
+import { DATA_REVISION_KEY, markStartTabDataChanged } from "./data-revision.js";
 import { sendMessage } from "./messages.js";
 import { withStorageLock } from "./storage-lock.js";
 
@@ -229,7 +229,7 @@ interface BlocklistMutationState {
 async function restoreBlocklistStorage(snapshot: Record<string, unknown>): Promise<void> {
   const payload: Record<string, unknown> = {};
   const removals: string[] = [];
-  for (const key of [STORAGE_KEY, LAST_BLOCKED_URLS_KEY]) {
+  for (const key of [STORAGE_KEY, LAST_BLOCKED_URLS_KEY, DATA_REVISION_KEY]) {
     if (Object.prototype.hasOwnProperty.call(snapshot, key)) payload[key] = snapshot[key];
     else removals.push(key);
   }
@@ -240,7 +240,7 @@ async function restoreBlocklistStorage(snapshot: Record<string, unknown>): Promi
 async function applyBlocklistMutation(
   transform: (current: { sites: string[]; lastBlockedUrls: Record<string, string> }) => BlocklistMutationState,
 ): Promise<string[]> {
-  const original = await chrome.storage.local.get([STORAGE_KEY, LAST_BLOCKED_URLS_KEY]);
+  const original = await chrome.storage.local.get([STORAGE_KEY, LAST_BLOCKED_URLS_KEY, DATA_REVISION_KEY]);
   const previousSites = normalizeBlockedSites(original[STORAGE_KEY]);
   const current = { sites: previousSites, lastBlockedUrls: normalizeLastBlockedUrls(original[LAST_BLOCKED_URLS_KEY]) };
   const requested = transform(structuredClone(current));
