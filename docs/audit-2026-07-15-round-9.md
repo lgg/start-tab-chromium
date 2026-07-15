@@ -1,7 +1,7 @@
 # Deep Audit Round 9 — Runtime Completion, Recovery, and Schema Safety
 
 Date: 2026-07-15
-Base: `master` at `591c408072ab278ed598daed52a8a8864ab783af`
+Base: effective production tree from PR #80 (`591c408072ab278ed598daed52a8a8864ab783af`); the audit branch was cut from current `master` at `ceb151258cf20a8fcaf7c661d40141a3680201c3`, whose intervening commits do not change the production tree.
 
 ## Scope
 
