@@ -47,7 +47,10 @@ async function copyStaticAssets() {
   ]);
 
   const manifest = JSON.parse(await readFile(source("manifest.json"), "utf8"));
-  if (blockerOnly) delete manifest.chrome_url_overrides;
+  if (blockerOnly) {
+    delete manifest.chrome_url_overrides;
+    manifest.permissions = (manifest.permissions ?? []).filter((permission) => permission !== "history");
+  }
   const googleOAuthClientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() ?? "";
   const validGoogleOAuthClientId = /^[a-zA-Z0-9._-]+\.apps\.googleusercontent\.com$/.test(googleOAuthClientId);
   if (googleOAuthClientId && !validGoogleOAuthClientId) {
