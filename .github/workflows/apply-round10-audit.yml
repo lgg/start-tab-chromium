@@ -1,21 +1,22 @@
 name: Apply Round 10 audited snapshot
 
 on:
-  push:
-    branches:
-      - codex/deep-audit-round-10-20260715
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
 
 jobs:
   apply-validate-commit:
+    if: github.event.pull_request.head.ref == 'codex/deep-audit-round-10-20260715'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Checkout audit branch
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -59,4 +60,4 @@ jobs:
           git add -u .github/round10.patch.gz.b64 .github/workflows/apply-round10-audit.yml
           git diff --cached --check
           git commit -m "Deep audit round 10: atomic sync and revision transactions"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
