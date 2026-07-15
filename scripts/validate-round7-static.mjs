@@ -30,6 +30,10 @@ for (const [name, source] of [["settings", settings], ["runtime", runtime], ["ba
 assert.match(settings, /value\.updatedAt !== previous\.updatedAt/, "Settings must reject zero-timestamp stale snapshots");
 assert.match(runtime, /currentUpdatedAt !== expectedUpdatedAt/, "Runtime must reject zero-timestamp stale snapshots");
 assert.match(runtime, /resetStartPageData/, "Complete Start Tab reset must be centralized");
+assert.match(runtime, /ONBOARDING_KEY/, "Complete Start Tab reset must clear onboarding state");
+assert.match(runtime, /absentResetKeys/, "Complete Start Tab reset must preserve exact key absence during rollback");
+assert.match(runtime, /reconcileClockAlarmsForRuntime/, "Complete Start Tab reset must restore durable alarms on rollback");
+assert.match(runtime, /AggregateError/, "Complete Start Tab reset must report incomplete rollback");
 assert.match(backup, /ROLLBACK_KEYS/, "Backup rollback must preserve the prior recovery backup");
 assert.match(backup, /AggregateError/, "Backup import must report incomplete rollback");
 assert.match(sync, /dataRevisionAt: parsed\.meta\.contentUpdatedAt/, "Chrome Sync restore must advance revision exactly through backup import");

@@ -62,6 +62,7 @@ jobs:
           run_check typecheck npm run typecheck
           run_check build-full npm run build
           run_check build-blocker-only npm run build:blocker-only
+          run_check build-google env GOOGLE_OAUTH_CLIENT_ID=ci-validation.apps.googleusercontent.com npm run build:google
           exit "$status"
       - name: Upload validation logs
         if: always()
@@ -84,6 +85,7 @@ jobs:
           name: complete-audit-snapshot
           path: |
             .github/workflows/ci.yml
+            README.md
             build.mjs
             package.json
             package-lock.json
@@ -94,4 +96,5 @@ jobs:
             icons
             build
             build-blocker-only
+            build-google
           retention-days: 1

@@ -56,6 +56,7 @@ for (const file of [
 
 if (variant === "full") {
   assert.equal(manifest.chrome_url_overrides?.newtab, "newtab.html", "Full build must own the new tab page");
+  assert.ok(manifest.permissions?.includes("history"), "Full builds require history for the Recent History block");
   for (const file of ["newtab.js", "newtab.html", "newtab.css", "newtab-gate.js"]) {
     assert.equal(await exists(file), true, `Full build is missing ${file}`);
   }
@@ -69,6 +70,7 @@ if (variant === "full") {
   assert.doesNotMatch(gateSource, /startTabNativeNewTabBypass|chrome:\/\/new-tab-page|chrome-search:\/\/local-ntp/, "newtab-gate.js must not mutate bypass state or navigate tabs directly");
 } else {
   assert.equal(manifest.chrome_url_overrides, undefined, "Blocker-only build must omit the new-tab override");
+  assert.equal(manifest.permissions?.includes("history"), false, "Blocker-only build must omit the unused history permission");
   for (const file of ["newtab.js", "newtab.html", "newtab.css", "newtab-gate.js"]) {
     assert.equal(await exists(file), false, `Blocker-only build must not contain ${file}`);
   }

@@ -4,12 +4,13 @@ This checklist is designed for a clean Chromium profile. Record browser version,
 
 ## Preparation
 
-1. Run the required automated checks.
-2. Build both variants.
-3. Load `dist/` as an unpacked extension in one clean profile.
-4. Load `dist-blocker-only/` in a separate clean profile.
-5. Keep DevTools open for the service worker, popup, Options, blocked page, and new-tab page while testing.
-6. Confirm there are no uncaught console errors before starting.
+1. Run `npm ci`, `npm test`, and `npm run typecheck`.
+2. Build the standard profiles with `npm run build` and `npm run build:blocker-only`.
+3. Load `build/` as an unpacked extension in one clean profile.
+4. Load `build-blocker-only/` in a separate clean profile.
+5. For Google integration QA, set a real `GOOGLE_OAUTH_CLIENT_ID`, run `npm run build:google`, and load `build-google/` in a third clean profile.
+6. Keep DevTools open for the service worker, popup, Options, blocked page, and new-tab page while testing.
+7. Confirm there are no uncaught console errors before starting.
 
 ## Blocker
 
@@ -190,15 +191,21 @@ With a real OAuth client and account:
 
 ### Full
 
-- [ ] `manifest.json` contains `chrome_url_overrides.newtab`.
+- [ ] `build/manifest.json` contains `chrome_url_overrides.newtab`.
 - [ ] New-tab page, popup, Options, blocked page, and service worker load without console errors.
 
 ### Blocker-only
 
-- [ ] `manifest.json` does not contain `chrome_url_overrides`.
-- [ ] New-tab entry files are not required by the package.
+- [ ] `build-blocker-only/manifest.json` does not contain `chrome_url_overrides`.
+- [ ] New-tab entry files are absent from the package.
 - [ ] Browser native new tab remains unchanged.
 - [ ] Popup, Options, blocker, backup, and statistics remain functional.
+
+### Google-enabled full
+
+- [ ] `build-google/manifest.json` contains the supplied OAuth client ID and `identity` permission.
+- [ ] The build still contains `chrome_url_overrides.newtab` and all full Start Tab assets.
+- [ ] A malformed non-empty OAuth client ID fails the build.
 
 ## Result recording
 

@@ -47,7 +47,10 @@ async function copyStaticAssets() {
   ]);
 
   const manifest = JSON.parse(await readFile(source("manifest.json"), "utf8"));
-  if (blockerOnly) delete manifest.chrome_url_overrides;
+  if (blockerOnly) {
+    delete manifest.chrome_url_overrides;
+    manifest.permissions = (manifest.permissions ?? []).filter((permission) => permission !== "history");
+  }
   const googleOAuthClientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() ?? "";
   const validGoogleOAuthClientId = /^[a-zA-Z0-9._-]+\.apps\.googleusercontent\.com$/.test(googleOAuthClientId);
   if (googleOAuthClientId && !validGoogleOAuthClientId) {
@@ -67,6 +70,9 @@ const forbiddenProductionInputs = [
   "src/lib/start-page-theme-store.ts",
   "src/lib/start-page-settings-store.ts",
   "src/lib/start-page-validation-v2.ts",
+  "src/lib/start-page-reset.ts",
+  "src/lib/start-page-runtime-clock.ts",
+  "src/lib/start-page-settings-themes.ts",
   "src/newtab/block-renderers.js",
   "src/newtab/block-renderers-v2.ts",
   "src/newtab/block-renderers-runtime-v2.js",
