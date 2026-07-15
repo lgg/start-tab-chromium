@@ -53,7 +53,7 @@ jobs:
           npm audit --omit=dev
       - name: Stage validated source-only diff
         run: |
-          git add docs/audit-2026-07-15-round-10.md
+          git add -f docs/audit-2026-07-15-round-10.md
           git add -u
           git diff --cached --check
           git diff --cached --name-status
