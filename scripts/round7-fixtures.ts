@@ -11,6 +11,7 @@ const messageListeners: MessageListener[] = [];
 const alarmNames = new Set<string>();
 let dynamicRules: chrome.declarativeNetRequest.Rule[] = [];
 let failNextDnrUpdate = false;
+let failSetAfterApplyForKey: string | null = null;
 
 const lockTails = new Map<string, Promise<void>>();
 const lockManager = {
@@ -57,6 +58,11 @@ function storageArea(state: StorageAreaState, areaName: "local" | "sync") {
         state[key] = structuredClone(value);
       }
       for (const listener of listeners) listener(changes, areaName);
+      if (areaName === "local" && failSetAfterApplyForKey && Object.prototype.hasOwnProperty.call(items, failSetAfterApplyForKey)) {
+        const key = failSetAfterApplyForKey;
+        failSetAfterApplyForKey = null;
+        throw new Error(`forced storage failure after writing ${key}`);
+      }
     },
     async remove(keys: string | string[]): Promise<void> {
       const changes: Record<string, chrome.storage.StorageChange> = {};
@@ -238,12 +244,38 @@ for (const key of Object.keys(exactBeforeFailure)) {
 }
 assert.deepEqual(localState.startTabPreImportBackup, oldRecovery, "Rollback must preserve the prior recovery backup");
 
+const timerBlock = persistedSettings.layout.blocks.find((block) => block.type === "timer");
+assert.ok(timerBlock);
+const resetRuntime = await runtimeApi.getStartPageRuntimeState();
+const resetNow = Date.now();
+const resetToken = "reset-rollback-token";
+resetRuntime.clocks[timerBlock.id] = {
+  ...runtimeApi.defaultClockForBlock(timerBlock),
+  running: true,
+  startedAt: resetNow,
+  targetAt: resetNow + 60_000,
+  completionToken: resetToken,
+};
+await runtimeApi.setStartPageRuntimeState(resetRuntime);
+const resetAlarmName = runtimeApi.clockAlarmName(timerBlock.id, resetToken);
+alarmNames.add(resetAlarmName);
+localState.startPageOnboarding = { onboarded: true };
+localState.startPageMigrationReport = { marker: "preserve-on-rollback" };
+const beforeFailedReset = structuredClone(localState);
+const alarmsBeforeFailedReset = [...alarmNames].sort();
+failSetAfterApplyForKey = "startPageSettings";
+const failedResetAck = await workerMessage({ type: "reset-start-page" });
+assert.equal(failedResetAck.ok, false);
+assert.deepEqual(localState, beforeFailedReset, "Failed reset must restore every storage key");
+assert.deepEqual([...alarmNames].sort(), alarmsBeforeFailedReset, "Failed reset must restore durable clock alarms");
+
 localState.startTabInstanceState = { localTasks: {} };
-alarmNames.add(`${runtimeApi.CLOCK_ALARM_PREFIX}fixture:token`);
 const resetAck = await workerMessage({ type: "reset-start-page" });
 assert.deepEqual(resetAck, { ok: true });
 assert.equal(Object.prototype.hasOwnProperty.call(localState, "startPageRuntimeState"), false);
 assert.equal(Object.prototype.hasOwnProperty.call(localState, "startTabInstanceState"), false);
+assert.equal(Object.prototype.hasOwnProperty.call(localState, "startPageMigrationReport"), false);
+assert.equal(Object.prototype.hasOwnProperty.call(localState, "startPageOnboarding"), false);
 assert.equal(alarmNames.size, 0);
 assert.equal((await settingsApi.getStartPageSettings()).schemaVersion, settingsApi.START_PAGE_SCHEMA_VERSION);
 
