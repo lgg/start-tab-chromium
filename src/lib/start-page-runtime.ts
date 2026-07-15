@@ -15,11 +15,9 @@ import {
   START_PAGE_MIGRATION_REPORT_KEY,
   START_PAGE_SETTINGS_KEY,
   createDefaultStartPageSettings,
-  getStartPageSettings,
   isFutureStartPageSchema,
   isRecord,
   normalizeStartPageSettings,
-  readStartPageSettingsSnapshot,
 } from "./start-page-settings.js";
 
 export type { StartPageRuntimeState } from "./start-page-types.js";
@@ -59,6 +57,10 @@ function timestamp(value: unknown, fallback: number | null = null): number | nul
   return Math.min(Number.MAX_SAFE_INTEGER, Math.round(value));
 }
 
+function legacyClockToken(block: Extract<BlockInstance, { type: ClockBlockType }>, startedAt: number, targetAt: number, durationMs: number): string {
+  return `legacy-${block.type}-${startedAt.toString(36)}-${targetAt.toString(36)}-${durationMs.toString(36)}`;
+}
+
 function isClockBlock(block: BlockInstance): block is Extract<BlockInstance, { type: ClockBlockType }> {
   return (CLOCK_TYPES as readonly string[]).includes(block.type);
 }
@@ -91,6 +93,10 @@ function normalizeClock(block: Extract<BlockInstance, { type: ClockBlockType }>,
   const durationMs = block.type === "stopwatch" ? 0 : running || hasProgress ? storedDuration : configuredDuration;
   const accumulatedMs = finiteInteger(storedAccumulated, 0, 0, block.type === "stopwatch" ? MAX_CLOCK_MS : durationMs);
   const targetAt = block.type === "stopwatch" ? null : running ? timestamp(value.targetAt, startedAt + Math.max(0, durationMs - accumulatedMs)) : null;
+  const storedCompletionToken = typeof value.completionToken === "string" && value.completionToken ? value.completionToken : null;
+  const completionToken = block.type === "stopwatch" || !running || targetAt === null
+    ? null
+    : storedCompletionToken ?? legacyClockToken(block, startedAt, targetAt, durationMs);
   return {
     type: block.type,
     running,
@@ -100,30 +106,49 @@ function normalizeClock(block: Extract<BlockInstance, { type: ClockBlockType }>,
     targetAt,
     phase,
     focusSessionStartedAt: block.type === "pomodoro" ? timestamp(value.focusSessionStartedAt) : null,
-    completionToken: typeof value.completionToken === "string" && value.completionToken ? value.completionToken : null,
+    completionToken,
     lastCompletedToken: typeof value.lastCompletedToken === "string" && value.lastCompletedToken ? value.lastCompletedToken : null,
   };
+}
+
+function stableTaskHash(value: string): string {
+  let hash = 2166136261;
+  for (const character of value) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
 }
 
 function normalizeTask(value: unknown, index: number): LocalTask | null {
   if (!isRecord(value)) return null;
   const title = stringValue(value.title, "").trim().slice(0, 500);
   if (!title) return null;
-  const now = Date.now();
+  const requestedId = typeof value.id === "string" ? value.id.trim().slice(0, 160) : "";
   return {
-    id: stringValue(value.id, `task-${index + 1}-${now.toString(36)}`).slice(0, 160),
+    id: requestedId || `task-${index + 1}-${stableTaskHash(title)}`,
     title,
     done: value.done === true,
-    createdAt: finiteInteger(value.createdAt, now, 0, Number.MAX_SAFE_INTEGER),
-    updatedAt: finiteInteger(value.updatedAt, now, 0, Number.MAX_SAFE_INTEGER),
+    createdAt: finiteInteger(value.createdAt, 0, 0, Number.MAX_SAFE_INTEGER),
+    updatedAt: finiteInteger(value.updatedAt, 0, 0, Number.MAX_SAFE_INTEGER),
   };
 }
 
 function normalizeTaskList(value: unknown): LocalTask[] {
   if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
   return value.flatMap((item, index) => {
     const task = normalizeTask(item, index);
-    return task ? [task] : [];
+    if (!task) return [];
+    const baseId = task.id;
+    let id = baseId;
+    let suffix = 2;
+    while (seen.has(id)) {
+      id = `${baseId.slice(0, Math.max(1, 160 - String(suffix).length - 1))}-${suffix}`;
+      suffix += 1;
+    }
+    seen.add(id);
+    return [{ ...task, id }];
   });
 }
 
@@ -188,6 +213,16 @@ function jsonEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+async function readRuntimeSettingsSnapshot(requireCompatible: boolean): Promise<{ settings: StartPageSettings; future: boolean }> {
+  const items = await chrome.storage.local.get(START_PAGE_SETTINGS_KEY);
+  const raw = items[START_PAGE_SETTINGS_KEY];
+  const future = isFutureStartPageSchema(raw);
+  if (requireCompatible && future) {
+    throw new Error("Start Tab settings were created by a newer extension version and runtime data cannot be modified safely");
+  }
+  return { settings: normalizeStartPageSettings(raw), future };
+}
+
 async function persistRuntimeInTransaction(
   state: StartPageRuntimeState,
   settings: StartPageSettings,
@@ -215,19 +250,20 @@ async function persistRuntimeInTransaction(
 }
 
 export async function getStartPageRuntimeState(inputSettings?: StartPageSettings): Promise<StartPageRuntimeState> {
-  const settings = inputSettings ?? await getStartPageSettings();
+  const settingsSnapshot = await readRuntimeSettingsSnapshot(false);
+  const settings = inputSettings ?? settingsSnapshot.settings;
   const items = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
   const raw = items[START_PAGE_RUNTIME_KEY];
   const normalized = normalizeRuntimeState(raw, settings, items[LEGACY_INSTANCE_RUNTIME_KEY]);
-  if (isFutureRuntimeSchema(raw) || jsonEqual(raw, normalized)) return normalized;
+  if (settingsSnapshot.future || isFutureRuntimeSchema(raw) || jsonEqual(raw, normalized)) return normalized;
 
   return withStorageLock("data-write", async () => {
-    const freshSettings = await readStartPageSettingsSnapshot();
+    const freshSettingsSnapshot = await readRuntimeSettingsSnapshot(false);
     const freshItems = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
     const freshRaw = freshItems[START_PAGE_RUNTIME_KEY];
-    const freshNormalized = normalizeRuntimeState(freshRaw, freshSettings, freshItems[LEGACY_INSTANCE_RUNTIME_KEY]);
-    if (isFutureRuntimeSchema(freshRaw) || jsonEqual(freshRaw, freshNormalized)) return freshNormalized;
-    const migrated = await persistRuntimeInTransaction(freshNormalized, freshSettings, true);
+    const freshNormalized = normalizeRuntimeState(freshRaw, freshSettingsSnapshot.settings, freshItems[LEGACY_INSTANCE_RUNTIME_KEY]);
+    if (freshSettingsSnapshot.future || isFutureRuntimeSchema(freshRaw) || jsonEqual(freshRaw, freshNormalized)) return freshNormalized;
+    const migrated = await persistRuntimeInTransaction(freshNormalized, freshSettingsSnapshot.settings, true);
     if (freshItems[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined) {
       await chrome.storage.local.remove(LEGACY_INSTANCE_RUNTIME_KEY);
     }
@@ -237,7 +273,7 @@ export async function getStartPageRuntimeState(inputSettings?: StartPageSettings
 
 export async function setStartPageRuntimeState(state: StartPageRuntimeState): Promise<void> {
   await withStorageLock("data-write", async () => {
-    const settings = await readStartPageSettingsSnapshot();
+    const { settings } = await readRuntimeSettingsSnapshot(true);
     await persistRuntimeInTransaction(normalizeRuntimeState(state, settings), settings, false, state.updatedAt);
   });
 }
@@ -251,7 +287,7 @@ async function runRuntimeMutation<T>(
   mutator: (state: StartPageRuntimeState, settings: StartPageSettings) => RuntimeMutation<T>,
 ): Promise<{ result: T; state: StartPageRuntimeState }> {
   return withStorageLock("data-write", async () => {
-    const settings = await readStartPageSettingsSnapshot();
+    const { settings } = await readRuntimeSettingsSnapshot(true);
     const items = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
     const raw = items[START_PAGE_RUNTIME_KEY];
     if (isFutureRuntimeSchema(raw)) {
@@ -289,13 +325,38 @@ async function clearClockAlarms(): Promise<void> {
     .map((alarm) => chrome.alarms.clear(alarm.name)));
 }
 
-async function reconcileClockAlarmsForRuntime(runtime: StartPageRuntimeState): Promise<void> {
+export interface ClockAlarmSnapshot {
+  name: string;
+  scheduledTime: number;
+  periodInMinutes?: number;
+}
+
+export async function readClockAlarmSnapshot(): Promise<ClockAlarmSnapshot[]> {
+  return (await chrome.alarms.getAll())
+    .filter((alarm) => alarm.name.startsWith(CLOCK_ALARM_PREFIX))
+    .map((alarm) => ({
+      name: alarm.name,
+      scheduledTime: alarm.scheduledTime,
+      ...(typeof alarm.periodInMinutes === "number" ? { periodInMinutes: alarm.periodInMinutes } : {}),
+    }));
+}
+
+export async function restoreClockAlarmSnapshot(snapshot: ClockAlarmSnapshot[]): Promise<void> {
+  await clearClockAlarms();
+  for (const alarm of snapshot) {
+    chrome.alarms.create(alarm.name, {
+      when: alarm.scheduledTime,
+      ...(typeof alarm.periodInMinutes === "number" ? { periodInMinutes: alarm.periodInMinutes } : {}),
+    });
+  }
+}
+
+export async function reconcileClockAlarmsForRuntime(runtime: StartPageRuntimeState): Promise<void> {
   const desired = new Map<string, number>();
   for (const [instanceId, clock] of Object.entries(runtime.clocks)) {
     if (!clock.running || clock.type === "stopwatch" || clock.targetAt === null || !clock.completionToken) continue;
     desired.set(clockAlarmName(instanceId, clock.completionToken), Math.max(Date.now() + 100, clock.targetAt));
   }
-
   const existing = await chrome.alarms.getAll();
   await Promise.all(existing
     .filter((alarm) => alarm.name.startsWith(CLOCK_ALARM_PREFIX) && !desired.has(alarm.name))
@@ -306,15 +367,6 @@ async function reconcileClockAlarmsForRuntime(runtime: StartPageRuntimeState): P
 function resetSettings(raw: unknown, now: number): StartPageSettings {
   const previous = isFutureStartPageSchema(raw) ? null : normalizeStartPageSettings(raw);
   return createDefaultStartPageSettings(Math.max(now, (previous?.updatedAt ?? 0) + 1));
-}
-
-function runtimeFromStorage(storage: Record<string, unknown>): StartPageRuntimeState {
-  const settings = normalizeStartPageSettings(storage[START_PAGE_SETTINGS_KEY]);
-  return normalizeRuntimeState(
-    storage[START_PAGE_RUNTIME_KEY],
-    settings,
-    storage[LEGACY_INSTANCE_RUNTIME_KEY],
-  );
 }
 
 function absentResetKeys(storage: Record<string, unknown>): string[] {
@@ -333,6 +385,7 @@ export async function resetStartPageRuntimeState(): Promise<void> {
 export async function resetStartPageData(): Promise<StartPageSettings> {
   return withStorageLock("data-write", async () => {
     const previous = await chrome.storage.local.get([...RESET_STORAGE_KEYS]);
+    const previousAlarms = await readClockAlarmSnapshot();
     const settings = resetSettings(previous[START_PAGE_SETTINGS_KEY], Date.now());
 
     try {
@@ -343,7 +396,7 @@ export async function resetStartPageData(): Promise<StartPageSettings> {
         LEGACY_INSTANCE_RUNTIME_KEY,
         ONBOARDING_KEY,
       ]);
-      await reconcileClockAlarmsForRuntime(normalizeRuntimeState(undefined, settings));
+      await clearClockAlarms();
       await markStartTabDataChanged(settings.updatedAt);
       return settings;
     } catch (error) {
@@ -351,7 +404,7 @@ export async function resetStartPageData(): Promise<StartPageSettings> {
         const absent = absentResetKeys(previous);
         if (absent.length > 0) await chrome.storage.local.remove(absent);
         if (Object.keys(previous).length > 0) await chrome.storage.local.set(previous);
-        await reconcileClockAlarmsForRuntime(runtimeFromStorage(previous));
+        await restoreClockAlarmSnapshot(previousAlarms);
       } catch (rollbackError) {
         throw new AggregateError([error, rollbackError], "Failed to reset Start Tab data and restore the previous state");
       }
