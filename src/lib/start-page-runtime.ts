@@ -1,4 +1,4 @@
-import { DATA_REVISION_KEY, markStartTabDataChanged } from "./data-revision.js";
+import { commitStorageMutationWithRevision, DATA_REVISION_KEY, markStartTabDataChanged } from "./data-revision.js";
 import { withStorageLock } from "./storage-lock.js";
 import { sendMessage } from "./messages.js";
 import {
@@ -27,6 +27,12 @@ export const LEGACY_INSTANCE_RUNTIME_KEY = "startTabInstanceState";
 export const CLOCK_ALARM_PREFIX = "start-tab-clock:";
 
 const ONBOARDING_KEY = "startPageOnboarding";
+const RUNTIME_STORAGE_KEYS = [
+  START_PAGE_RUNTIME_KEY,
+  LEGACY_INSTANCE_RUNTIME_KEY,
+  DATA_REVISION_KEY,
+] as const;
+
 const RESET_STORAGE_KEYS = [
   START_PAGE_SETTINGS_KEY,
   START_PAGE_RUNTIME_KEY,
@@ -228,6 +234,7 @@ async function persistRuntimeInTransaction(
   settings: StartPageSettings,
   allowFutureOverwrite = false,
   expectedUpdatedAt: number | null = null,
+  removeLegacy = false,
 ): Promise<StartPageRuntimeState> {
   const items = await chrome.storage.local.get(START_PAGE_RUNTIME_KEY);
   const raw = items[START_PAGE_RUNTIME_KEY];
@@ -244,8 +251,14 @@ async function persistRuntimeInTransaction(
     version: RUNTIME_SCHEMA_VERSION,
     updatedAt: Math.max(Date.now(), currentUpdatedAt + 1),
   };
-  await chrome.storage.local.set({ [START_PAGE_RUNTIME_KEY]: stamped });
-  await markStartTabDataChanged(stamped.updatedAt);
+  await commitStorageMutationWithRevision(
+    removeLegacy ? [START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY] : [START_PAGE_RUNTIME_KEY],
+    async () => {
+      await chrome.storage.local.set({ [START_PAGE_RUNTIME_KEY]: stamped });
+      if (removeLegacy) await chrome.storage.local.remove(LEGACY_INSTANCE_RUNTIME_KEY);
+    },
+    stamped.updatedAt,
+  );
   return stamped;
 }
 
@@ -263,11 +276,13 @@ export async function getStartPageRuntimeState(inputSettings?: StartPageSettings
     const freshRaw = freshItems[START_PAGE_RUNTIME_KEY];
     const freshNormalized = normalizeRuntimeState(freshRaw, freshSettingsSnapshot.settings, freshItems[LEGACY_INSTANCE_RUNTIME_KEY]);
     if (freshSettingsSnapshot.future || isFutureRuntimeSchema(freshRaw) || jsonEqual(freshRaw, freshNormalized)) return freshNormalized;
-    const migrated = await persistRuntimeInTransaction(freshNormalized, freshSettingsSnapshot.settings, true);
-    if (freshItems[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined) {
-      await chrome.storage.local.remove(LEGACY_INSTANCE_RUNTIME_KEY);
-    }
-    return migrated;
+    return persistRuntimeInTransaction(
+      freshNormalized,
+      freshSettingsSnapshot.settings,
+      true,
+      null,
+      freshItems[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined,
+    );
   });
 }
 
@@ -297,10 +312,13 @@ async function runRuntimeMutation<T>(
     const mutation = mutator(structuredClone(current), settings);
     if (mutation.state === null) return { result: mutation.result, state: current };
     const next = normalizeRuntimeState(mutation.state, settings);
-    const saved = await persistRuntimeInTransaction(next, settings, false, current.updatedAt);
-    if (items[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined) {
-      await chrome.storage.local.remove(LEGACY_INSTANCE_RUNTIME_KEY);
-    }
+    const saved = await persistRuntimeInTransaction(
+      next,
+      settings,
+      false,
+      current.updatedAt,
+      items[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined,
+    );
     return { result: mutation.result, state: saved };
   });
 }
@@ -389,16 +407,34 @@ function resetSettings(raw: unknown, now: number): StartPageSettings {
   return createDefaultStartPageSettings(Math.max(now, (previous?.updatedAt ?? 0) + 1));
 }
 
-function absentResetKeys(storage: Record<string, unknown>): string[] {
-  return RESET_STORAGE_KEYS.filter((key) => !Object.prototype.hasOwnProperty.call(storage, key));
+function absentStorageKeys(storage: Record<string, unknown>, keys: readonly string[]): string[] {
+  return keys.filter((key) => !Object.prototype.hasOwnProperty.call(storage, key));
+}
+
+async function restoreStorageKeysSnapshot(snapshot: Record<string, unknown>, keys: readonly string[]): Promise<void> {
+  const absent = absentStorageKeys(snapshot, keys);
+  if (absent.length > 0) await chrome.storage.local.remove(absent);
+  if (Object.keys(snapshot).length > 0) await chrome.storage.local.set(snapshot);
 }
 
 export async function resetStartPageRuntimeState(): Promise<void> {
   await withStorageLock("data-write", async () => {
-    await chrome.storage.local.remove([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
-    await markStartTabDataChanged();
+    const previous = await chrome.storage.local.get([...RUNTIME_STORAGE_KEYS]);
+    const previousAlarms = await readClockAlarmSnapshot();
+    try {
+      await chrome.storage.local.remove([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
+      await clearClockAlarms();
+      await markStartTabDataChanged();
+    } catch (error) {
+      try {
+        await restoreStorageKeysSnapshot(previous, RUNTIME_STORAGE_KEYS);
+        await restoreClockAlarmSnapshot(previousAlarms);
+      } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], "Failed to reset Start Tab runtime and restore the previous state");
+      }
+      throw error;
+    }
   });
-  await clearClockAlarms();
 }
 
 /** Reset settings, onboarding, migrations, runtime, and durable alarms as one recoverable operation. */
@@ -417,13 +453,11 @@ export async function resetStartPageData(): Promise<StartPageSettings> {
         ONBOARDING_KEY,
       ]);
       await clearClockAlarms();
-      await markStartTabDataChanged(settings.updatedAt);
+      await markStartTabDataChanged(settings.updatedAt, { allowFutureOverwrite: true });
       return settings;
     } catch (error) {
       try {
-        const absent = absentResetKeys(previous);
-        if (absent.length > 0) await chrome.storage.local.remove(absent);
-        if (Object.keys(previous).length > 0) await chrome.storage.local.set(previous);
+        await restoreStorageKeysSnapshot(previous, RESET_STORAGE_KEYS);
         await restoreClockAlarmSnapshot(previousAlarms);
       } catch (rollbackError) {
         throw new AggregateError([error, rollbackError], "Failed to reset Start Tab data and restore the previous state");
@@ -584,24 +618,64 @@ export async function completeClockInstance(instanceId: string, expectedToken: s
   });
 }
 
+function rawRuntimeHasInstance(value: unknown, instanceId: string): boolean {
+  if (!isRecord(value)) return false;
+  return ["clocks", "notes", "tasks", "linkPages", "localTasks"].some((key) => {
+    const collection = value[key];
+    return isRecord(collection) && Object.prototype.hasOwnProperty.call(collection, instanceId);
+  });
+}
+
 export async function deleteInstanceRuntime(instanceId: string): Promise<void> {
   if (typeof document !== "undefined") {
     await sendMessage({ type: "delete-instance-runtime", instanceId });
     return;
   }
-  await mutateStartPageRuntimeState((runtime) => {
-    const existed = Object.prototype.hasOwnProperty.call(runtime.clocks, instanceId)
+  await withStorageLock("data-write", async () => {
+    const stored = await chrome.storage.local.get([
+      START_PAGE_SETTINGS_KEY,
+      ...RUNTIME_STORAGE_KEYS,
+    ]);
+    const previous = Object.fromEntries(RUNTIME_STORAGE_KEYS
+      .filter((key) => Object.prototype.hasOwnProperty.call(stored, key))
+      .map((key) => [key, stored[key]]));
+    const previousAlarms = await readClockAlarmSnapshot();
+    const rawSettings = stored[START_PAGE_SETTINGS_KEY];
+    const rawRuntime = stored[START_PAGE_RUNTIME_KEY];
+    const rawLegacy = stored[LEGACY_INSTANCE_RUNTIME_KEY];
+    if (isFutureStartPageSchema(rawSettings) || isFutureRuntimeSchema(rawRuntime)) {
+      throw new Error("Start Tab data was created by a newer extension version and instance runtime cannot be modified safely");
+    }
+    const settings = normalizeStartPageSettings(rawSettings);
+    const runtime = normalizeRuntimeState(rawRuntime, settings, rawLegacy);
+    const normalizedHasInstance = Object.prototype.hasOwnProperty.call(runtime.clocks, instanceId)
       || Object.prototype.hasOwnProperty.call(runtime.notes, instanceId)
       || Object.prototype.hasOwnProperty.call(runtime.tasks, instanceId)
       || Object.prototype.hasOwnProperty.call(runtime.linkPages, instanceId);
-    if (!existed) return { state: null, result: undefined };
+    const storedHasInstance = rawRuntimeHasInstance(rawRuntime, instanceId) || rawRuntimeHasInstance(rawLegacy, instanceId);
+    const alarmHasInstance = previousAlarms.some((alarm) => parseClockAlarmName(alarm.name)?.instanceId === instanceId);
+    if (!normalizedHasInstance && !storedHasInstance && !alarmHasInstance) return;
+
     delete runtime.clocks[instanceId];
     delete runtime.notes[instanceId];
     delete runtime.tasks[instanceId];
     delete runtime.linkPages[instanceId];
-    return { state: runtime, result: undefined };
+
+    try {
+      if (normalizedHasInstance || storedHasInstance) {
+        await persistRuntimeInTransaction(runtime, settings, false, runtime.updatedAt, rawLegacy !== undefined);
+      }
+      await clearClockAlarm(instanceId);
+    } catch (error) {
+      try {
+        await restoreStorageKeysSnapshot(previous, RUNTIME_STORAGE_KEYS);
+        await restoreClockAlarmSnapshot(previousAlarms);
+      } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], "Failed to delete instance runtime and restore the previous state");
+      }
+      throw error;
+    }
   });
-  await clearClockAlarm(instanceId);
 }
 
 export function instanceRuntimeHasUserData(instanceId: string, runtime: StartPageRuntimeState): boolean {

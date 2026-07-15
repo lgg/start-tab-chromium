@@ -17,6 +17,9 @@ let dynamicRules: chrome.declarativeNetRequest.Rule[] = [];
 let failNextDnrUpdate = false;
 let failSetAfterApplyForKey: string | null = null;
 let failAlarmCreateAfterApplyForName: string | null = null;
+let pauseNextBackupSnapshotRead = false;
+let backupSnapshotReadStarted: (() => void) | null = null;
+let backupSnapshotReadRelease: Promise<void> | null = null;
 
 const lockTails = new Map<string, Promise<void>>();
 const lockManager = {
@@ -45,6 +48,12 @@ function requestedKeys(keys?: string | string[] | Record<string, unknown> | null
 function storageArea(state: StorageAreaState, areaName: "local" | "sync") {
   return {
     async get(keys?: string | string[] | Record<string, unknown> | null): Promise<Record<string, unknown>> {
+      if (areaName === "local" && pauseNextBackupSnapshotRead && Array.isArray(keys)
+        && keys.includes("startPageSettings") && keys.includes("startPageRuntimeState") && keys.includes("blockedSites")) {
+        pauseNextBackupSnapshotRead = false;
+        backupSnapshotReadStarted?.();
+        if (backupSnapshotReadRelease) await backupSnapshotReadRelease;
+      }
       if (keys == null) return structuredClone(state);
       const output: Record<string, unknown> = {};
       for (const key of requestedKeys(keys)) {
@@ -124,8 +133,8 @@ const chromeMock = {
 } as unknown as typeof chrome;
 Object.defineProperty(globalThis, "chrome", { value: chromeMock, configurable: true });
 
-const [settingsApi, runtimeApi, backupApi, blocklistApi, revisionApi] = await Promise.all([
-  import("../src/lib/start-page-settings.js"), import("../src/lib/start-page-runtime.js"), import("../src/lib/backup.js"), import("../src/lib/blocklist.js"), import("../src/lib/data-revision.js"),
+const [settingsApi, runtimeApi, backupApi, blocklistApi, revisionApi, focusStatsApi, syncApi, i18nApi] = await Promise.all([
+  import("../src/lib/start-page-settings.js"), import("../src/lib/start-page-runtime.js"), import("../src/lib/backup.js"), import("../src/lib/blocklist.js"), import("../src/lib/data-revision.js"), import("../src/lib/focus-stats.js"), import("../src/lib/chrome-sync.js"), import("../src/lib/i18n.js"),
 ]);
 await import("../src/service-worker.js");
 
@@ -184,6 +193,55 @@ const stalePageAck = await workerMessage({ type: "runtime-link-page", instanceId
 assert.equal(stalePageAck.ok, false);
 assert.equal((await runtimeApi.getStartPageRuntimeState()).linkPages[linksBlock.id], 1);
 
+const settingsBeforeRevisionFailure = structuredClone(localState);
+const revisionFailingSettings = settingsApi.cloneSettings(await settingsApi.getStartPageSettings());
+revisionFailingSettings.layout.gap = revisionFailingSettings.layout.gap === 31 ? 30 : revisionFailingSettings.layout.gap + 1;
+failSetAfterApplyForKey = revisionApi.DATA_REVISION_KEY;
+await assert.rejects(() => settingsApi.setStartPageSettings(revisionFailingSettings), /forced storage failure/);
+assert.deepEqual(localState, settingsBeforeRevisionFailure, "Settings writes must roll back exactly when their revision commit fails");
+
+const runtimeBeforeRevisionFailure = structuredClone(localState);
+const currentNoteValue = (await runtimeApi.getStartPageRuntimeState()).notes[noteBlock.id] ?? "";
+failSetAfterApplyForKey = revisionApi.DATA_REVISION_KEY;
+const failedRuntimeAck = await workerMessage({ type: "runtime-note", instanceId: noteBlock.id, value: "must-roll-back", expectedValue: currentNoteValue });
+assert.equal(failedRuntimeAck.ok, false);
+assert.deepEqual(localState, runtimeBeforeRevisionFailure, "Runtime writes must roll back exactly when their revision commit fails");
+
+const statsBeforeRevisionFailure = structuredClone(localState);
+failSetAfterApplyForKey = revisionApi.DATA_REVISION_KEY;
+await assert.rejects(() => focusStatsApi.recordFocusSessionStarted(), /forced storage failure/);
+assert.deepEqual(localState, statsBeforeRevisionFailure, "Focus statistics writes must roll back exactly when their revision commit fails");
+
+const localeBeforeRevisionFailure = structuredClone(localState);
+failSetAfterApplyForKey = revisionApi.DATA_REVISION_KEY;
+await assert.rejects(() => i18nApi.setLocalePreference("ru"), /forced storage failure/);
+assert.deepEqual(localState, localeBeforeRevisionFailure, "Locale writes must roll back exactly when their revision commit fails");
+
+const atomicSnapshotSettings = await settingsApi.getStartPageSettings();
+const atomicSnapshotGap = atomicSnapshotSettings.layout.gap;
+let releaseAtomicSnapshot!: () => void;
+backupSnapshotReadRelease = new Promise<void>((resolve) => { releaseAtomicSnapshot = resolve; });
+const atomicSnapshotStarted = new Promise<void>((resolve) => { backupSnapshotReadStarted = resolve; });
+pauseNextBackupSnapshotRead = true;
+const atomicSnapshotPromise = backupApi.exportBackupSnapshot();
+await atomicSnapshotStarted;
+const atomicMutationPromise = settingsApi.updateStartPageSettings((current) => ({
+  ...current,
+  layout: { ...current.layout, gap: atomicSnapshotGap === 30 ? 28 : atomicSnapshotGap + 1 },
+}));
+releaseAtomicSnapshot();
+const revisionBeforeAtomicMutation = await revisionApi.readStartTabDataRevision();
+const atomicSnapshot = await atomicSnapshotPromise;
+await atomicMutationPromise;
+backupSnapshotReadStarted = null;
+backupSnapshotReadRelease = null;
+const atomicSnapshotStoredSettings = atomicSnapshot.bundle.storage.startPageSettings as typeof atomicSnapshotSettings;
+assert.equal(atomicSnapshotStoredSettings.layout.gap, atomicSnapshotGap, "Atomic backup snapshot must retain the content captured before a queued mutation");
+assert.equal(atomicSnapshot.dataRevision, revisionBeforeAtomicMutation, "Backup export time must not masquerade as a content modification revision");
+assert.ok(await revisionApi.readStartTabDataRevision() > atomicSnapshot.dataRevision, "A queued mutation must advance revision only after the atomic backup snapshot is complete");
+const reexportedAtomicSnapshot = await backupApi.exportBackupSnapshot();
+assert.equal(reexportedAtomicSnapshot.dataRevision, await revisionApi.readStartTabDataRevision(), "Repeated exports without data changes must preserve the same content revision");
+
 await blocklistApi.replaceBlockedSites(["original.example"]);
 const rulesBeforeFailure = structuredClone(dynamicRules);
 const revisionBeforeFailure = await revisionApi.readStartTabDataRevision();
@@ -198,6 +256,11 @@ failSetAfterApplyForKey = revisionApi.DATA_REVISION_KEY;
 await assert.rejects(() => blocklistApi.blockHost("revision-failure.example"), /forced storage failure/);
 assert.deepEqual(localState, blocklistBeforeRevisionFailure, "Blocklist rollback must restore the exact data revision after a revision write failure");
 assert.deepEqual(dynamicRules, rulesBeforeRevisionFailure, "Blocklist rollback must restore DNR after a revision write failure");
+
+const navigationBeforeRevisionFailure = structuredClone(localState);
+failSetAfterApplyForKey = revisionApi.DATA_REVISION_KEY;
+await assert.rejects(() => blocklistApi.rememberBlockedNavigation("https://original.example/deep-link"), /forced storage failure/);
+assert.deepEqual(localState, navigationBeforeRevisionFailure, "Remembered blocked URLs must roll back exactly when revision persistence fails");
 
 const currentSettingsForBackup = await settingsApi.getStartPageSettings();
 const currentTasksBlock = currentSettingsForBackup.layout.blocks.find((block) => block.type === "localTasks");
@@ -256,6 +319,68 @@ assert.deepEqual(localState, stateBeforeRevisionImportFailure, "Backup rollback 
 assert.deepEqual(dynamicRules, rulesBeforeRevisionImportFailure, "Backup rollback must restore DNR after a revision write failure");
 assert.deepEqual([...alarmState.values()].sort((left, right) => left.name.localeCompare(right.name)), alarmsBeforeRevisionImportFailure, "Backup rollback must restore alarms after a revision write failure");
 
+const orphanInstanceId = "removed-instance-orphan";
+const orphanRuntime = structuredClone(await runtimeApi.getStartPageRuntimeState());
+(orphanRuntime.notes as Record<string, string>)[orphanInstanceId] = "orphaned note";
+localState.startPageRuntimeState = structuredClone(orphanRuntime);
+const orphanAlarmName = runtimeApi.clockAlarmName(orphanInstanceId, "orphan-token");
+setAlarm(orphanAlarmName, Date.now() + 60_000);
+await runtimeApi.deleteInstanceRuntime(orphanInstanceId);
+const cleanedRawRuntime = localState.startPageRuntimeState as { notes?: Record<string, unknown> };
+assert.equal(Object.prototype.hasOwnProperty.call(cleanedRawRuntime.notes ?? {}, orphanInstanceId), false, "Deleting an instance after settings removal must remove orphaned raw runtime");
+assert.equal(alarmState.has(orphanAlarmName), false, "Deleting orphaned instance runtime must clear its durable alarm under the same lock");
+
+const rollbackOrphanId = "removed-instance-rollback";
+const rollbackRuntime = structuredClone(await runtimeApi.getStartPageRuntimeState());
+(rollbackRuntime.notes as Record<string, string>)[rollbackOrphanId] = "restore me";
+localState.startPageRuntimeState = structuredClone(rollbackRuntime);
+const rollbackOrphanAlarm = runtimeApi.clockAlarmName(rollbackOrphanId, "rollback-token");
+setAlarm(rollbackOrphanAlarm, Date.now() + 90_000);
+const beforeFailedInstanceDelete = structuredClone(localState);
+const alarmsBeforeFailedInstanceDelete = structuredClone([...alarmState.values()].sort((left, right) => left.name.localeCompare(right.name)));
+failSetAfterApplyForKey = revisionApi.DATA_REVISION_KEY;
+await assert.rejects(() => runtimeApi.deleteInstanceRuntime(rollbackOrphanId), /forced storage failure/);
+assert.deepEqual(localState, beforeFailedInstanceDelete, "Failed instance deletion must restore exact runtime and revision storage");
+assert.deepEqual([...alarmState.values()].sort((left, right) => left.name.localeCompare(right.name)), alarmsBeforeFailedInstanceDelete, "Failed instance deletion must restore exact alarm metadata");
+
+
+
+const futureLocalSyncMeta = { version: 4, futurePayload: { preserve: true } };
+localState.startTabLocalSyncMeta = structuredClone(futureLocalSyncMeta);
+const localBeforeFutureSync = structuredClone(localState);
+await assert.rejects(() => syncApi.uploadChromeSyncBackup(), /newer extension version/);
+assert.deepEqual(localState, localBeforeFutureSync, "Upload must preserve future local sync metadata");
+await assert.rejects(() => syncApi.syncChromeSyncBackup(), /newer extension version/);
+assert.deepEqual(localState, localBeforeFutureSync, "Smart sync must preserve future local sync metadata");
+delete localState.startTabLocalSyncMeta;
+
+const futureLocalBackupVersionMeta = {
+  version: 3,
+  updatedAt: new Date().toISOString(),
+  contentUpdatedAt: 1,
+  deviceId: "future-local-device",
+  snapshotId: "future-local-snapshot",
+  checksum: "c".repeat(64),
+  contentChecksum: "d".repeat(64),
+  chunks: 1,
+  backupVersion: backupApi.BACKUP_VERSION + 1,
+};
+localState.startTabLocalSyncMeta = structuredClone(futureLocalBackupVersionMeta);
+const localBeforeFutureBackupVersion = structuredClone(localState);
+await assert.rejects(() => syncApi.uploadChromeSyncBackup(), /newer extension version/);
+await assert.rejects(() => syncApi.syncChromeSyncBackup(), /newer extension version/);
+assert.deepEqual(localState, localBeforeFutureBackupVersion, "Current sync metadata carrying a future local backup schema must remain untouched");
+delete localState.startTabLocalSyncMeta;
+
+const futureFocusStats = { version: focusStatsApi.FOCUS_STATS_SCHEMA_VERSION + 1, futurePayload: { preserve: true } };
+localState[focusStatsApi.FOCUS_STATS_KEY] = structuredClone(futureFocusStats);
+await assert.rejects(() => focusStatsApi.recordFocusSessionStarted(), /newer extension version/);
+assert.deepEqual(localState[focusStatsApi.FOCUS_STATS_KEY], futureFocusStats, "Background statistics writes must preserve unsupported future schemas");
+await assert.rejects(() => backupApi.exportBackup(), /focus statistics from a newer extension version/);
+assert.deepEqual(localState[focusStatsApi.FOCUS_STATS_KEY], futureFocusStats, "Backup export must not normalize future statistics destructively");
+await focusStatsApi.resetFocusStats();
+assert.equal((localState[focusStatsApi.FOCUS_STATS_KEY] as { version: number }).version, focusStatsApi.FOCUS_STATS_SCHEMA_VERSION, "Explicit statistics reset may replace an unsupported future schema");
+
 const timerBlock = persistedSettings.layout.blocks.find((block) => block.type === "timer");
 assert.ok(timerBlock);
 const legacyClockSource = { version: 1, updatedAt: 1, clocks: { timer: { type: "timer", running: true, startedAt: 1_000, accumulatedMs: 5_000, durationMs: 60_000, targetAt: 56_000 } }, notes: {}, tasks: {}, linkPages: {} };
@@ -300,6 +425,14 @@ await runtimeApi.scheduleClockAlarm(timerBlock.id, staleScheduleClock);
 assert.equal(alarmState.has(runtimeApi.clockAlarmName(timerBlock.id, "stale-schedule-token")), false, "A delayed scheduling call must not preserve its stale alarm");
 assert.equal(alarmState.has(runtimeApi.clockAlarmName(timerBlock.id, currentScheduleToken)), true, "A delayed scheduling call must align alarms to the current persisted clock");
 
+
+const runtimeResetBefore = structuredClone(localState);
+const runtimeResetAlarmsBefore = structuredClone([...alarmState.values()].sort((left, right) => left.name.localeCompare(right.name)));
+failSetAfterApplyForKey = revisionApi.DATA_REVISION_KEY;
+await assert.rejects(() => runtimeApi.resetStartPageRuntimeState(), /forced storage failure/);
+assert.deepEqual(localState, runtimeResetBefore, "Failed runtime reset must restore exact runtime, legacy state, and revision");
+assert.deepEqual([...alarmState.values()].sort((left, right) => left.name.localeCompare(right.name)), runtimeResetAlarmsBefore, "Failed runtime reset must restore exact alarms without a post-lock race");
+
 const resetRuntime = await runtimeApi.getStartPageRuntimeState();
 const resetNow = Date.now(); const resetToken = "reset-rollback-token";
 resetRuntime.clocks[timerBlock.id] = { ...runtimeApi.defaultClockForBlock(timerBlock), running: true, startedAt: resetNow, targetAt: resetNow + 60_000, completionToken: resetToken };
@@ -309,6 +442,17 @@ setAlarm(resetAlarmName, resetNow + 60_000);
 setAlarm(`${runtimeApi.CLOCK_ALARM_PREFIX}periodic-fixture`, resetNow + 120_000, 5);
 localState.startPageOnboarding = { onboarded: true };
 localState.startPageMigrationReport = { marker: "preserve-on-rollback" };
+const futureDataRevision = { version: revisionApi.DATA_REVISION_SCHEMA_VERSION + 1, updatedAt: Date.now() + 1_000_000, futurePayload: { preserve: true } };
+localState[revisionApi.DATA_REVISION_KEY] = structuredClone(futureDataRevision);
+const beforeFutureRevisionOperations = structuredClone(localState);
+const settingsUnderFutureRevision = settingsApi.cloneSettings(await settingsApi.getStartPageSettings());
+settingsUnderFutureRevision.layout.gap = settingsUnderFutureRevision.layout.gap === 31 ? 30 : settingsUnderFutureRevision.layout.gap + 1;
+await assert.rejects(() => settingsApi.setStartPageSettings(settingsUnderFutureRevision), /data revision.*newer extension version/i);
+await assert.rejects(() => focusStatsApi.recordFocusSessionStarted(), /data revision.*newer extension version/i);
+await assert.rejects(() => i18nApi.setLocalePreference("ru"), /data revision.*newer extension version/i);
+await assert.rejects(() => backupApi.exportBackupSnapshot(), /data revision.*newer extension version/i);
+await assert.rejects(() => syncApi.uploadChromeSyncBackup(), /data revision.*newer extension version/i);
+assert.deepEqual(localState, beforeFutureRevisionOperations, "Unsupported future revision metadata must survive all older mutation and sync attempts exactly");
 const beforeFailedReset = structuredClone(localState);
 const alarmsBeforeFailedReset = structuredClone([...alarmState.values()].sort((left, right) => left.name.localeCompare(right.name)));
 failSetAfterApplyForKey = "startPageSettings";
@@ -325,6 +469,8 @@ assert.equal(Object.prototype.hasOwnProperty.call(localState, "startTabInstanceS
 assert.equal(Object.prototype.hasOwnProperty.call(localState, "startPageMigrationReport"), false);
 assert.equal(Object.prototype.hasOwnProperty.call(localState, "startPageOnboarding"), false);
 assert.equal(alarmState.size, 0);
+assert.equal((localState[revisionApi.DATA_REVISION_KEY] as { version: number }).version, revisionApi.DATA_REVISION_SCHEMA_VERSION, "Explicit full reset may replace future revision metadata");
+assert.ok((localState[revisionApi.DATA_REVISION_KEY] as { updatedAt: number }).updatedAt > futureDataRevision.updatedAt, "Explicit full reset must preserve monotonic ordering when replacing future revision metadata");
 assert.equal((await settingsApi.getStartPageSettings()).schemaVersion, settingsApi.START_PAGE_SCHEMA_VERSION);
 
 console.log("Round 7 fixtures passed");

@@ -29,9 +29,12 @@ assert.match(settings, /changed in another extension context/, "Settings must re
 assert.match(runtime, /changed in another extension context/, "Runtime must reject stale snapshots");
 assert.match(runtime, /resetStartPageRuntimeState/, "Runtime reset must be centralized");
 assert.match(sync, /withStorageLock\(["']chrome-sync["']/, "Sync operations must be serialized across extension contexts");
+assert.match(sync, /exportBackupSnapshot/, "Sync content and revision must come from one atomic snapshot");
 assert.match(sync, /isPristineBackup/, "Sync must protect a pre-existing remote snapshot on a clean device");
 assert.match(sync, /Object\.keys\(value\).*sort/s, "Canonical sync JSON must sort object keys");
 assert.match(sync, /startsWith\(CHUNK_PREFIX\)/, "Sync uploads must clean orphaned chunks even when old metadata is corrupt");
+assert.match(sync, /backupVersion > BACKUP_VERSION/, "Sync must not overwrite a future backup schema carried by the current metadata protocol");
+assert.match(sync, /syncMetaEqual/, "Sync must detect concurrent remote snapshot replacement before local commit");
 for (const type of ["replace-blocked-sites", "open-native-new-tab", "reset-start-page"]) {
   assert.ok(serviceWorker.includes(`case "${type}"`), `service-worker.ts must handle ${type}`);
 }

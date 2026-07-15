@@ -8,7 +8,7 @@
  * extension's blocked.html page.
  */
 
-import { DATA_REVISION_KEY, markStartTabDataChanged } from "./data-revision.js";
+import { commitStorageMutationWithRevision, DATA_REVISION_KEY, markStartTabDataChanged } from "./data-revision.js";
 import { sendMessage } from "./messages.js";
 import { withStorageLock } from "./storage-lock.js";
 
@@ -112,8 +112,14 @@ export async function migrateLegacyStorage(): Promise<void> {
     const current = Array.isArray(items[STORAGE_KEY]) ? (items[STORAGE_KEY] as string[]) : [];
     const legacy = Array.isArray(items[LEGACY_STORAGE_KEY]) ? (items[LEGACY_STORAGE_KEY] as string[]) : [];
     if (legacy.length === 0) return;
-    await setBlockedSitesInTransaction([...current, ...legacy]);
-    await chrome.storage.local.remove(LEGACY_STORAGE_KEY);
+    const normalized = normalizeBlockedSites([...current, ...legacy]);
+    await commitStorageMutationWithRevision(
+      [STORAGE_KEY, LEGACY_STORAGE_KEY],
+      async () => {
+        await chrome.storage.local.set({ [STORAGE_KEY]: normalized });
+        await chrome.storage.local.remove(LEGACY_STORAGE_KEY);
+      },
+    );
   }).catch((error) => {
     migrationPromise = undefined;
     throw error;
@@ -124,13 +130,6 @@ export async function migrateLegacyStorage(): Promise<void> {
 async function getLastBlockedUrls(): Promise<Record<string, string>> {
   const items = await chrome.storage.local.get(LAST_BLOCKED_URLS_KEY);
   return normalizeLastBlockedUrls(items[LAST_BLOCKED_URLS_KEY]);
-}
-
-async function setBlockedSitesInTransaction(sites: string[]): Promise<string[]> {
-  const normalized = normalizeBlockedSites(sites);
-  await chrome.storage.local.set({ [STORAGE_KEY]: normalized });
-  await markStartTabDataChanged();
-  return normalized;
 }
 
 export async function replaceBlockedSites(sites: string[]): Promise<string[]> {
@@ -164,8 +163,10 @@ export async function rememberBlockedNavigation(url: string): Promise<void> {
     if (!host) return;
     const urls = await getLastBlockedUrls();
     urls[host] = url;
-    await chrome.storage.local.set({ [LAST_BLOCKED_URLS_KEY]: urls });
-    await markStartTabDataChanged();
+    await commitStorageMutationWithRevision(
+      [LAST_BLOCKED_URLS_KEY],
+      () => chrome.storage.local.set({ [LAST_BLOCKED_URLS_KEY]: urls }),
+    );
   });
 }
 
@@ -184,8 +185,10 @@ export async function clearLastBlockedUrl(host: string): Promise<void> {
     const urls = await getLastBlockedUrls();
     if (!Object.prototype.hasOwnProperty.call(urls, normalized)) return;
     delete urls[normalized];
-    await chrome.storage.local.set({ [LAST_BLOCKED_URLS_KEY]: urls });
-    await markStartTabDataChanged();
+    await commitStorageMutationWithRevision(
+      [LAST_BLOCKED_URLS_KEY],
+      () => chrome.storage.local.set({ [LAST_BLOCKED_URLS_KEY]: urls }),
+    );
   });
 }
 
