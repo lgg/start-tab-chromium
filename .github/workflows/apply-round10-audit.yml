@@ -40,8 +40,7 @@ jobs:
             .github/round10.patch.part2 \
             .github/round10.patch.part3 \
             .github/round10.patch.part4 \
-            .github/round10.patch.part5 \
-            .github/workflows/apply-round10-audit.yml
+            .github/round10.patch.part5
           git diff --check
       - name: Validate exact source snapshot
         run: |
@@ -77,8 +76,7 @@ jobs:
             .github/round10.patch.part2 \
             .github/round10.patch.part3 \
             .github/round10.patch.part4 \
-            .github/round10.patch.part5 \
-            .github/workflows/apply-round10-audit.yml
+            .github/round10.patch.part5
           git diff --cached --check
           git commit -m "Deep audit round 10: atomic sync and revision transactions"
           git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
