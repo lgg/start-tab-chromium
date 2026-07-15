@@ -27,12 +27,11 @@ import { isMessage, type Ack, type ClockAction, type Message } from "./lib/messa
 import {
   completeClockInstance,
   defaultClockForBlock,
-  isFutureRuntimeSchema,
-  START_PAGE_RUNTIME_KEY,
   deleteInstanceRuntime,
   getStartPageRuntimeState,
   parseClockAlarmName,
   pauseClockState,
+  reconcileStoredClockAlarms,
   resetClockState,
   resetStartPageData,
   scheduleClockAlarm,
@@ -42,8 +41,6 @@ import {
 } from "./lib/start-page-runtime.js";
 import {
   getStartPageSettings,
-  isFutureStartPageSchema,
-  START_PAGE_SETTINGS_KEY,
   type BlockInstance,
   type ClockRuntimeState,
   type LocalTask,
@@ -330,31 +327,7 @@ async function workerMessage(key: string): Promise<string> {
 }
 
 async function reconcileClockAlarms(): Promise<void> {
-  const raw = await chrome.storage.local.get([START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY]);
-  if (isFutureStartPageSchema(raw[START_PAGE_SETTINGS_KEY]) || isFutureRuntimeSchema(raw[START_PAGE_RUNTIME_KEY])) return;
-  const settings = await getStartPageSettings();
-  const runtime = await getStartPageRuntimeState(settings);
-  const clocks = new Map(Object.entries(runtime.clocks));
-  const existing = await chrome.alarms.getAll();
-  await Promise.all(existing.flatMap((alarm) => {
-    const parsed = parseClockAlarmName(alarm.name);
-    if (!parsed) return [];
-    const clock = clocks.get(parsed.instanceId);
-    if (!clock || !clock.running || clock.completionToken !== parsed.token || clock.targetAt === null) {
-      return [chrome.alarms.clear(alarm.name)];
-    }
-    return [];
-  }));
-
-  const now = Date.now();
-  for (const [instanceId, clock] of clocks) {
-    if (!clock.running || clock.type === "stopwatch" || clock.targetAt === null || !clock.completionToken) continue;
-    if (clock.targetAt <= now + 1000) {
-      await runRuntimeJob(() => finishClockCompletion(instanceId, clock.completionToken!));
-    } else {
-      await scheduleClockAlarm(instanceId, clock);
-    }
-  }
+  await reconcileStoredClockAlarms();
 }
 
 async function redirectBrowserNewTab(tabId: number | undefined, url: string | undefined): Promise<void> {
@@ -426,7 +399,8 @@ async function rememberIfBlocked(url: string): Promise<void> {
 
 async function migrateAndSyncRules(): Promise<void> {
   await migrateLegacyStorage();
-  await getStartPageSettings();
+  const settings = await getStartPageSettings();
+  await getStartPageRuntimeState(settings);
   await reconcileClockAlarms();
   await syncRules();
 }

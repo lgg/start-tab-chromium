@@ -1,0 +1,65 @@
+{
+  "manifest_version": 3,
+  "name": "__MSG_appName__",
+  "version": "3.0.0",
+  "default_locale": "en",
+  "description": "__MSG_appDescription__",
+  "icons": {
+    "16": "icons/icon.16.png",
+    "48": "icons/icon.48.png",
+    "128": "icons/icon.128.png"
+  },
+  "homepage_url": "https://github.com/lgg/start-tab-chromium",
+  "action": {
+    "default_icon": {
+      "16": "icons/icon.16.png",
+      "48": "icons/icon.48.png",
+      "128": "icons/icon.128.png"
+    },
+    "default_title": "__MSG_appName__",
+    "default_popup": "popup.html"
+  },
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "oauth2": {
+    "client_id": "round9-race.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/calendar.readonly",
+      "https://www.googleapis.com/auth/drive.appdata"
+    ]
+  },
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "permissions": [
+    "tabs",
+    "history",
+    "identity",
+    "storage",
+    "unlimitedStorage",
+    "notifications",
+    "alarms",
+    "declarativeNetRequest",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "blocked.html"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "incognito": "split"
+}

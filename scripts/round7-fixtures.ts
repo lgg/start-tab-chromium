@@ -279,6 +279,27 @@ assert.equal(nextPomodoro.running, true); assert.equal(nextPomodoro.phase, "brea
 assert.ok(nextPomodoro.completionToken && nextPomodoro.completionToken !== "work-complete-token");
 assert.ok(alarmState.has(runtimeApi.clockAlarmName(pomodoroBlock.id, nextPomodoro.completionToken!)), "Auto-started Pomodoro phase must receive a durable alarm");
 
+const scheduleRaceRuntime = await runtimeApi.getStartPageRuntimeState();
+const scheduleRaceNow = Date.now();
+const currentScheduleToken = "current-schedule-token";
+scheduleRaceRuntime.clocks[timerBlock.id] = {
+  ...runtimeApi.defaultClockForBlock(timerBlock),
+  running: true,
+  startedAt: scheduleRaceNow,
+  targetAt: scheduleRaceNow + 75_000,
+  completionToken: currentScheduleToken,
+};
+await runtimeApi.setStartPageRuntimeState(scheduleRaceRuntime);
+const staleScheduleClock = {
+  ...scheduleRaceRuntime.clocks[timerBlock.id],
+  targetAt: scheduleRaceNow + 30_000,
+  completionToken: "stale-schedule-token",
+};
+setAlarm(runtimeApi.clockAlarmName(timerBlock.id, "stale-schedule-token"), scheduleRaceNow + 30_000);
+await runtimeApi.scheduleClockAlarm(timerBlock.id, staleScheduleClock);
+assert.equal(alarmState.has(runtimeApi.clockAlarmName(timerBlock.id, "stale-schedule-token")), false, "A delayed scheduling call must not preserve its stale alarm");
+assert.equal(alarmState.has(runtimeApi.clockAlarmName(timerBlock.id, currentScheduleToken)), true, "A delayed scheduling call must align alarms to the current persisted clock");
+
 const resetRuntime = await runtimeApi.getStartPageRuntimeState();
 const resetNow = Date.now(); const resetToken = "reset-rollback-token";
 resetRuntime.clocks[timerBlock.id] = { ...runtimeApi.defaultClockForBlock(timerBlock), running: true, startedAt: resetNow, targetAt: resetNow + 60_000, completionToken: resetToken };

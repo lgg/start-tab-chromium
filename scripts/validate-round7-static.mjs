@@ -30,7 +30,8 @@ for (const [name, source] of [["settings", settings], ["runtime", runtime], ["ba
 assert.match(settings, /value\.updatedAt !== previous\.updatedAt/, "Settings must reject zero-timestamp stale snapshots");
 assert.match(runtime, /currentUpdatedAt !== expectedUpdatedAt/, "Runtime must reject zero-timestamp stale snapshots");
 assert.match(runtime, /readRuntimeSettingsSnapshot\(true\)/, "Runtime writes must reject unsupported future settings schemas");
-assert.match(serviceWorker, /isFutureStartPageSchema[\s\S]*isFutureRuntimeSchema[\s\S]*return/, "Alarm reconciliation must not touch unsupported future schemas");
+assert.match(runtime, /reconcileStoredClockAlarms[\s\S]*isFutureStartPageSchema[\s\S]*isFutureRuntimeSchema[\s\S]*return/, "Stored alarm reconciliation must not touch unsupported future schemas");
+assert.match(runtime, /scheduleClockAlarm[\s\S]*withStorageLock\(["']data-write["']/, "Per-instance alarm scheduling must re-read current runtime under the data-write lock");
 assert.match(runtime, /resetStartPageData/, "Complete Start Tab reset must be centralized");
 assert.match(runtime, /ONBOARDING_KEY/, "Complete Start Tab reset must clear onboarding state");
 assert.match(runtime, /absentResetKeys/, "Complete Start Tab reset must preserve exact key absence during rollback");

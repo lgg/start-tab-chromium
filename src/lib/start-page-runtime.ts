@@ -364,6 +364,26 @@ export async function reconcileClockAlarmsForRuntime(runtime: StartPageRuntimeSt
   for (const [name, when] of desired) chrome.alarms.create(name, { when });
 }
 
+/** Reconcile durable alarms from one compatible storage snapshot under the data-write lock. */
+export async function reconcileStoredClockAlarms(): Promise<void> {
+  await withStorageLock("data-write", async () => {
+    const items = await chrome.storage.local.get([
+      START_PAGE_SETTINGS_KEY,
+      START_PAGE_RUNTIME_KEY,
+      LEGACY_INSTANCE_RUNTIME_KEY,
+    ]);
+    if (isFutureStartPageSchema(items[START_PAGE_SETTINGS_KEY])
+      || isFutureRuntimeSchema(items[START_PAGE_RUNTIME_KEY])) return;
+    const settings = normalizeStartPageSettings(items[START_PAGE_SETTINGS_KEY]);
+    const runtime = normalizeRuntimeState(
+      items[START_PAGE_RUNTIME_KEY],
+      settings,
+      items[LEGACY_INSTANCE_RUNTIME_KEY],
+    );
+    await reconcileClockAlarmsForRuntime(runtime);
+  });
+}
+
 function resetSettings(raw: unknown, now: number): StartPageSettings {
   const previous = isFutureStartPageSchema(raw) ? null : normalizeStartPageSettings(raw);
   return createDefaultStartPageSettings(Math.max(now, (previous?.updatedAt ?? 0) + 1));
@@ -476,10 +496,28 @@ export async function clearClockAlarm(instanceId: string): Promise<void> {
   await Promise.all(alarms.filter((alarm) => parseClockAlarmName(alarm.name)?.instanceId === instanceId).map((alarm) => chrome.alarms.clear(alarm.name)));
 }
 
-export async function scheduleClockAlarm(instanceId: string, clock: ClockRuntimeState): Promise<void> {
-  await clearClockAlarm(instanceId);
-  if (!clock.running || clock.targetAt === null || !clock.completionToken) return;
-  chrome.alarms.create(clockAlarmName(instanceId, clock.completionToken), { when: Math.max(Date.now() + 100, clock.targetAt) });
+export async function scheduleClockAlarm(instanceId: string, _clock: ClockRuntimeState): Promise<void> {
+  await withStorageLock("data-write", async () => {
+    const items = await chrome.storage.local.get([
+      START_PAGE_SETTINGS_KEY,
+      START_PAGE_RUNTIME_KEY,
+      LEGACY_INSTANCE_RUNTIME_KEY,
+    ]);
+    if (isFutureStartPageSchema(items[START_PAGE_SETTINGS_KEY])
+      || isFutureRuntimeSchema(items[START_PAGE_RUNTIME_KEY])) return;
+    const settings = normalizeStartPageSettings(items[START_PAGE_SETTINGS_KEY]);
+    const runtime = normalizeRuntimeState(
+      items[START_PAGE_RUNTIME_KEY],
+      settings,
+      items[LEGACY_INSTANCE_RUNTIME_KEY],
+    );
+    const current = runtime.clocks[instanceId];
+    await clearClockAlarm(instanceId);
+    if (!current?.running || current.targetAt === null || !current.completionToken) return;
+    chrome.alarms.create(clockAlarmName(instanceId, current.completionToken), {
+      when: Math.max(Date.now() + 100, current.targetAt),
+    });
+  });
 }
 
 export interface ClockCompletionResult {

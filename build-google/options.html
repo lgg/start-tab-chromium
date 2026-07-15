@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title></title>
+    <link rel="stylesheet" href="shared-ui.css" />
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="options">
+      <header class="options__header">
+        <div>
+          <h1 id="title"></h1>
+          <p id="subtitle"></p>
+        </div>
+        <div class="options__header-actions" id="headerActions"></div>
+      </header>
+      <nav class="options-nav" id="optionsNav" aria-label="Settings sections"></nav>
+      <div class="options-sections" id="sections"></div>
+      <p class="status" id="status" role="status" aria-live="polite"></p>
+    </main>
+    <input id="backupImportInput" type="file" accept="application/json,.json" hidden />
+    <input id="themeImportInput" type="file" accept="application/json,.json" hidden />
+    <script type="module" src="options.js"></script>
+  </body>
+</html>
