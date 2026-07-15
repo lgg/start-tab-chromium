@@ -53,29 +53,38 @@ jobs:
           npm audit --omit=dev
       - name: Stage validated source-only diff
         run: |
-          git add -A -- \
-            src/lib/backup.ts \
-            src/lib/blocklist.ts \
-            src/lib/chrome-sync.ts \
-            src/lib/data-revision.ts \
-            src/lib/focus-stats.ts \
-            src/lib/i18n.ts \
-            src/lib/start-page-runtime.ts \
-            src/lib/start-page-settings.ts \
-            src/newtab/newtab.ts \
-            scripts/round6-fixtures.ts \
-            scripts/round7-fixtures.ts \
-            scripts/validate-round6-static.mjs \
-            scripts/validate-round7-static.mjs \
-            docs/audit-2026-07-15-round-10.md \
-            .github/round10.patch.gz.b64 \
-            .github/round10.patch.part1 \
-            .github/round10.patch.part2 \
-            .github/round10.patch.part3 \
-            .github/round10.patch.part4 \
-            .github/round10.patch.part5
+          rm -rf build build-blocker-only build-google node_modules validation-logs locale-parity-report.json
+          git add -A
           git diff --cached --check
-          git diff --cached --name-status
+          python - <<'PY'
+          import subprocess
+          expected = {
+              '.github/round10.patch.gz.b64',
+              '.github/round10.patch.part1',
+              '.github/round10.patch.part2',
+              '.github/round10.patch.part3',
+              '.github/round10.patch.part4',
+              '.github/round10.patch.part5',
+              'docs/audit-2026-07-15-round-10.md',
+              'scripts/round6-fixtures.ts',
+              'scripts/round7-fixtures.ts',
+              'scripts/validate-round6-static.mjs',
+              'scripts/validate-round7-static.mjs',
+              'src/lib/backup.ts',
+              'src/lib/blocklist.ts',
+              'src/lib/chrome-sync.ts',
+              'src/lib/data-revision.ts',
+              'src/lib/focus-stats.ts',
+              'src/lib/i18n.ts',
+              'src/lib/start-page-runtime.ts',
+              'src/lib/start-page-settings.ts',
+              'src/newtab/newtab.ts',
+          }
+          actual = set(subprocess.check_output(['git', 'diff', '--cached', '--name-only'], text=True).splitlines())
+          print('staged:', *sorted(actual), sep='\n- ')
+          if actual != expected:
+              raise SystemExit(f'Unexpected staged files. Missing={sorted(expected-actual)} Extra={sorted(actual-expected)}')
+          PY
       - name: Create validated source commit
         run: |
           git config user.name "github-actions[bot]"
