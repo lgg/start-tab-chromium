@@ -8,10 +8,15 @@ const localState: StorageAreaState = {};
 const syncState: StorageAreaState = {};
 const listeners = new Set<ChangeListener>();
 const messageListeners: MessageListener[] = [];
-const alarmNames = new Set<string>();
+interface AlarmState { name: string; scheduledTime: number; periodInMinutes?: number }
+const alarmState = new Map<string, AlarmState>();
+function setAlarm(name: string, scheduledTime = Date.now() + 60_000, periodInMinutes?: number): void {
+  alarmState.set(name, { name, scheduledTime, ...(typeof periodInMinutes === "number" ? { periodInMinutes } : {}) });
+}
 let dynamicRules: chrome.declarativeNetRequest.Rule[] = [];
 let failNextDnrUpdate = false;
 let failSetAfterApplyForKey: string | null = null;
+let failAlarmCreateAfterApplyForName: string | null = null;
 
 const lockTails = new Map<string, Promise<void>>();
 const lockManager = {
@@ -22,9 +27,7 @@ const lockManager = {
     const tail = previous.catch(() => undefined).then(() => gate);
     lockTails.set(name, tail);
     await previous.catch(() => undefined);
-    try {
-      return await callback();
-    } finally {
+    try { return await callback(); } finally {
       release();
       if (lockTails.get(name) === tail) lockTails.delete(name);
     }
@@ -77,49 +80,41 @@ function storageArea(state: StorageAreaState, areaName: "local" | "sync") {
   };
 }
 
-function eventTarget() {
-  return { addListener(): void {} };
-}
+function eventTarget() { return { addListener(): void {} }; }
 
 const chromeMock = {
   storage: {
-    local: storageArea(localState, "local"),
-    sync: storageArea(syncState, "sync"),
-    onChanged: {
-      addListener(listener: ChangeListener): void { listeners.add(listener); },
-      removeListener(listener: ChangeListener): void { listeners.delete(listener); },
-    },
+    local: storageArea(localState, "local"), sync: storageArea(syncState, "sync"),
+    onChanged: { addListener(listener: ChangeListener): void { listeners.add(listener); }, removeListener(listener: ChangeListener): void { listeners.delete(listener); } },
   },
   alarms: {
     onAlarm: eventTarget(),
-    async getAll(): Promise<Array<{ name: string }>> { return [...alarmNames].map((name) => ({ name })); },
-    async clear(name: string): Promise<boolean> { return alarmNames.delete(name); },
-    create(name: string): void { alarmNames.add(name); },
+    async getAll(): Promise<AlarmState[]> { return structuredClone([...alarmState.values()]); },
+    async clear(name: string): Promise<boolean> { return alarmState.delete(name); },
+    create(name: string, info: chrome.alarms.AlarmCreateInfo): void {
+      const scheduledTime = typeof info.when === "number" ? info.when : Date.now() + Math.max(0, info.delayInMinutes ?? 0) * 60_000;
+      setAlarm(name, scheduledTime, info.periodInMinutes);
+      if (failAlarmCreateAfterApplyForName === name) { failAlarmCreateAfterApplyForName = null; throw new Error(`forced alarm failure after creating ${name}`); }
+    },
   },
   declarativeNetRequest: {
     async getDynamicRules(): Promise<chrome.declarativeNetRequest.Rule[]> { return structuredClone(dynamicRules); },
     async updateDynamicRules(update: { removeRuleIds?: number[]; addRules?: chrome.declarativeNetRequest.Rule[] }): Promise<void> {
-      if (failNextDnrUpdate) {
-        failNextDnrUpdate = false;
-        throw new Error("forced DNR failure");
-      }
+      if (failNextDnrUpdate) { failNextDnrUpdate = false; throw new Error("forced DNR failure"); }
       const removals = new Set(update.removeRuleIds ?? []);
       dynamicRules = dynamicRules.filter((rule) => !removals.has(rule.id));
       dynamicRules.push(...structuredClone(update.addRules ?? []));
     },
-    RuleActionType: { REDIRECT: "redirect" },
-    ResourceType: { MAIN_FRAME: "main_frame" },
+    RuleActionType: { REDIRECT: "redirect" }, ResourceType: { MAIN_FRAME: "main_frame" },
   },
   runtime: {
-    onInstalled: eventTarget(),
-    onStartup: eventTarget(),
+    onInstalled: eventTarget(), onStartup: eventTarget(),
     onMessage: { addListener(listener: MessageListener): void { messageListeners.push(listener); } },
     getURL(path: string): string { return `chrome-extension://fixture/${path}`; },
     getManifest(): chrome.runtime.Manifest { return { manifest_version: 3, name: "fixture", version: "3.0.0", chrome_url_overrides: { newtab: "newtab.html" } }; },
   },
   tabs: {
-    onCreated: eventTarget(),
-    onUpdated: eventTarget(),
+    onCreated: eventTarget(), onUpdated: eventTarget(),
     async create(): Promise<chrome.tabs.Tab> { return { id: 99, index: 0, pinned: false, highlighted: false, active: true, incognito: false, selected: true, discarded: false, autoDiscardable: true, groupId: -1, windowId: 1 }; },
     async update(): Promise<chrome.tabs.Tab> { return { id: 99, index: 0, pinned: false, highlighted: false, active: true, incognito: false, selected: true, discarded: false, autoDiscardable: true, groupId: -1, windowId: 1 }; },
   },
@@ -130,11 +125,7 @@ const chromeMock = {
 Object.defineProperty(globalThis, "chrome", { value: chromeMock, configurable: true });
 
 const [settingsApi, runtimeApi, backupApi, blocklistApi, revisionApi] = await Promise.all([
-  import("../src/lib/start-page-settings.js"),
-  import("../src/lib/start-page-runtime.js"),
-  import("../src/lib/backup.js"),
-  import("../src/lib/blocklist.js"),
-  import("../src/lib/data-revision.js"),
+  import("../src/lib/start-page-settings.js"), import("../src/lib/start-page-runtime.js"), import("../src/lib/backup.js"), import("../src/lib/blocklist.js"), import("../src/lib/data-revision.js"),
 ]);
 await import("../src/service-worker.js");
 
@@ -149,38 +140,26 @@ async function workerMessage(message: unknown): Promise<{ ok: boolean; error?: s
 const baseSettings = await settingsApi.getStartPageSettings();
 const settingsA = settingsApi.cloneSettings(baseSettings);
 const settingsB = settingsApi.cloneSettings(baseSettings);
-settingsA.layout.gap = 17;
-settingsB.layout.gap = 29;
-const settingsResults = await Promise.allSettled([
-  settingsApi.setStartPageSettings(settingsA),
-  settingsApi.setStartPageSettings(settingsB),
-]);
+settingsA.layout.gap = 17; settingsB.layout.gap = 29;
+const settingsResults = await Promise.allSettled([settingsApi.setStartPageSettings(settingsA), settingsApi.setStartPageSettings(settingsB)]);
 assert.equal(settingsResults.filter((result) => result.status === "fulfilled").length, 1);
 assert.equal(settingsResults.filter((result) => result.status === "rejected").length, 1);
 const persistedSettings = await settingsApi.getStartPageSettings();
 assert.ok(persistedSettings.layout.gap === 17 || persistedSettings.layout.gap === 29);
-const zeroTimestampSettings = settingsApi.cloneSettings(persistedSettings);
-zeroTimestampSettings.updatedAt = 0;
+const zeroTimestampSettings = settingsApi.cloneSettings(persistedSettings); zeroTimestampSettings.updatedAt = 0;
 await assert.rejects(() => settingsApi.setStartPageSettings(zeroTimestampSettings), /changed in another extension context/);
 
 const baseRuntime = await runtimeApi.getStartPageRuntimeState(persistedSettings);
-const runtimeA = structuredClone(baseRuntime);
-const runtimeB = structuredClone(baseRuntime);
-runtimeA.notes.fixture = "A";
-runtimeB.notes.fixture = "B";
-const runtimeResults = await Promise.allSettled([
-  runtimeApi.setStartPageRuntimeState(runtimeA),
-  runtimeApi.setStartPageRuntimeState(runtimeB),
-]);
+const runtimeA = structuredClone(baseRuntime); const runtimeB = structuredClone(baseRuntime);
+runtimeA.notes.fixture = "A"; runtimeB.notes.fixture = "B";
+const runtimeResults = await Promise.allSettled([runtimeApi.setStartPageRuntimeState(runtimeA), runtimeApi.setStartPageRuntimeState(runtimeB)]);
 assert.equal(runtimeResults.filter((result) => result.status === "fulfilled").length, 1);
 assert.equal(runtimeResults.filter((result) => result.status === "rejected").length, 1);
 const currentRuntime = await runtimeApi.getStartPageRuntimeState();
-const zeroTimestampRuntime = structuredClone(currentRuntime);
-zeroTimestampRuntime.updatedAt = 0;
+const zeroTimestampRuntime = structuredClone(currentRuntime); zeroTimestampRuntime.updatedAt = 0;
 await assert.rejects(() => runtimeApi.setStartPageRuntimeState(zeroTimestampRuntime), /changed in another extension context/);
 
-const originalNow = Date.now;
-Date.now = () => 5_000;
+const originalNow = Date.now; Date.now = () => 5_000;
 const revisionBefore = await revisionApi.readStartTabDataRevision();
 const revisions = await Promise.all(Array.from({ length: 12 }, () => revisionApi.markStartTabDataChanged()));
 Date.now = originalNow;
@@ -195,13 +174,11 @@ assert.deepEqual(await workerMessage({ type: "runtime-note", instanceId: noteBlo
 const staleNoteAck = await workerMessage({ type: "runtime-note", instanceId: noteBlock.id, value: "stale", expectedValue: "" });
 assert.equal(staleNoteAck.ok, false);
 assert.equal((await runtimeApi.getStartPageRuntimeState()).notes[noteBlock.id], "first");
-
 const task = { id: "task-1", title: "Keep", done: false, createdAt: 1, updatedAt: 1 };
 assert.deepEqual(await workerMessage({ type: "runtime-tasks", instanceId: tasksBlock.id, tasks: [task], expectedTasks: [] }), { ok: true });
 const staleTasksAck = await workerMessage({ type: "runtime-tasks", instanceId: tasksBlock.id, tasks: [], expectedTasks: [] });
 assert.equal(staleTasksAck.ok, false);
 assert.equal((await runtimeApi.getStartPageRuntimeState()).tasks[tasksBlock.id]?.[0]?.title, "Keep");
-
 assert.deepEqual(await workerMessage({ type: "runtime-link-page", instanceId: linksBlock.id, page: 1, expectedPage: 0 }), { ok: true });
 const stalePageAck = await workerMessage({ type: "runtime-link-page", instanceId: linksBlock.id, page: 2, expectedPage: 0 });
 assert.equal(stalePageAck.ok, false);
@@ -215,59 +192,109 @@ await assert.rejects(() => blocklistApi.blockHost("new.example"), /forced DNR fa
 assert.deepEqual(localState.blockedSites, ["original.example"]);
 assert.deepEqual(dynamicRules, rulesBeforeFailure);
 assert.equal(await revisionApi.readStartTabDataRevision(), revisionBeforeFailure);
+const blocklistBeforeRevisionFailure = structuredClone(localState);
+const rulesBeforeRevisionFailure = structuredClone(dynamicRules);
+failSetAfterApplyForKey = revisionApi.DATA_REVISION_KEY;
+await assert.rejects(() => blocklistApi.blockHost("revision-failure.example"), /forced storage failure/);
+assert.deepEqual(localState, blocklistBeforeRevisionFailure, "Blocklist rollback must restore the exact data revision after a revision write failure");
+assert.deepEqual(dynamicRules, rulesBeforeRevisionFailure, "Blocklist rollback must restore DNR after a revision write failure");
 
 const currentSettingsForBackup = await settingsApi.getStartPageSettings();
 const currentTasksBlock = currentSettingsForBackup.layout.blocks.find((block) => block.type === "localTasks");
 assert.ok(currentTasksBlock);
 delete localState.startPageRuntimeState;
-localState.startTabInstanceState = {
-  localTasks: {
-    [currentTasksBlock.id]: [{ id: "legacy-task", title: "Legacy task", done: false, createdAt: 2, updatedAt: 2 }],
-  },
-};
+localState.startTabInstanceState = { localTasks: { [currentTasksBlock.id]: [{ id: "legacy-task", title: "Legacy task", done: false, createdAt: 2, updatedAt: 2 }] } };
 const exported = await backupApi.exportBackup();
 const exportedRuntime = exported.storage.startPageRuntimeState as { tasks: Record<string, Array<{ title: string }>> };
 assert.equal(exportedRuntime.tasks[currentTasksBlock.id]?.[0]?.title, "Legacy task");
 await backupApi.importBackup(exported);
 assert.equal(Object.prototype.hasOwnProperty.call(localState, "startTabInstanceState"), false);
 
+const activeClockBackup = structuredClone(await backupApi.exportBackup());
+const activeClockSettings = activeClockBackup.storage.startPageSettings as typeof persistedSettings;
+const activeClockTimer = activeClockSettings.layout.blocks.find((block) => block.type === "timer");
+assert.ok(activeClockTimer);
+const activeClockRuntime = activeClockBackup.storage.startPageRuntimeState as Awaited<ReturnType<typeof runtimeApi.getStartPageRuntimeState>>;
+const activeClockNow = Date.now();
+activeClockRuntime.clocks[activeClockTimer.id] = { ...runtimeApi.defaultClockForBlock(activeClockTimer), running: true, startedAt: activeClockNow, targetAt: activeClockNow + 90_000, completionToken: "imported-active-token" };
+setAlarm(`${runtimeApi.CLOCK_ALARM_PREFIX}stale-before-import`, activeClockNow + 10_000);
+await backupApi.importBackup(activeClockBackup);
+const importedAlarmName = runtimeApi.clockAlarmName(activeClockTimer.id, "imported-active-token");
+assert.equal(alarmState.has(importedAlarmName), true, "Backup import must schedule durable alarms for active countdowns");
+assert.equal(alarmState.has(`${runtimeApi.CLOCK_ALARM_PREFIX}stale-before-import`), false, "Backup import must remove stale pre-import clock alarms");
+
 const exactBeforeFailure = structuredClone(localState);
 localState.startTabPreImportBackup = { old: "recovery" };
 const oldRecovery = structuredClone(localState.startTabPreImportBackup);
-const failingBackup = structuredClone(await backupApi.exportBackup());
-failingBackup.storage.blockedSites = ["replacement.example"];
+const failingBackup = structuredClone(await backupApi.exportBackup()); failingBackup.storage.blockedSites = ["replacement.example"];
 failNextDnrUpdate = true;
 await assert.rejects(() => backupApi.importBackup(failingBackup), /forced DNR failure/);
-for (const key of Object.keys(exactBeforeFailure)) {
-  if (key === "startTabPreImportBackup") continue;
-  assert.deepEqual(localState[key], exactBeforeFailure[key], `Rollback must restore ${key}`);
-}
+for (const key of Object.keys(exactBeforeFailure)) { if (key === "startTabPreImportBackup") continue; assert.deepEqual(localState[key], exactBeforeFailure[key], `Rollback must restore ${key}`); }
 assert.deepEqual(localState.startTabPreImportBackup, oldRecovery, "Rollback must preserve the prior recovery backup");
+
+const stateBeforeAlarmFailure = structuredClone(localState);
+const rulesBeforeAlarmFailure = structuredClone(dynamicRules);
+const alarmsBeforeAlarmFailure = structuredClone([...alarmState.values()].sort((left, right) => left.name.localeCompare(right.name)));
+const alarmFailingBackup = structuredClone(await backupApi.exportBackup());
+const alarmFailingRuntime = alarmFailingBackup.storage.startPageRuntimeState as Awaited<ReturnType<typeof runtimeApi.getStartPageRuntimeState>>;
+const alarmFailureToken = "alarm-failure-token";
+alarmFailingRuntime.clocks[activeClockTimer.id] = { ...runtimeApi.defaultClockForBlock(activeClockTimer), running: true, startedAt: activeClockNow, targetAt: activeClockNow + 180_000, completionToken: alarmFailureToken };
+const alarmFailureName = runtimeApi.clockAlarmName(activeClockTimer.id, alarmFailureToken);
+failAlarmCreateAfterApplyForName = alarmFailureName;
+await assert.rejects(() => backupApi.importBackup(alarmFailingBackup), /forced alarm failure/);
+assert.deepEqual(localState, stateBeforeAlarmFailure, "Alarm reconciliation failure must roll imported storage back exactly");
+assert.deepEqual(dynamicRules, rulesBeforeAlarmFailure, "Alarm reconciliation failure must restore DNR rules");
+assert.deepEqual([...alarmState.values()].sort((left, right) => left.name.localeCompare(right.name)), alarmsBeforeAlarmFailure, "Alarm reconciliation failure must restore exact prior alarms");
+
+const stateBeforeRevisionImportFailure = structuredClone(localState);
+const rulesBeforeRevisionImportFailure = structuredClone(dynamicRules);
+const alarmsBeforeRevisionImportFailure = structuredClone([...alarmState.values()].sort((left, right) => left.name.localeCompare(right.name)));
+const revisionFailingBackup = structuredClone(await backupApi.exportBackup()); revisionFailingBackup.storage.blockedSites = ["revision-import.example"];
+failSetAfterApplyForKey = revisionApi.DATA_REVISION_KEY;
+await assert.rejects(() => backupApi.importBackup(revisionFailingBackup), /forced storage failure/);
+assert.deepEqual(localState, stateBeforeRevisionImportFailure, "Backup rollback must restore the exact data revision after a revision write failure");
+assert.deepEqual(dynamicRules, rulesBeforeRevisionImportFailure, "Backup rollback must restore DNR after a revision write failure");
+assert.deepEqual([...alarmState.values()].sort((left, right) => left.name.localeCompare(right.name)), alarmsBeforeRevisionImportFailure, "Backup rollback must restore alarms after a revision write failure");
 
 const timerBlock = persistedSettings.layout.blocks.find((block) => block.type === "timer");
 assert.ok(timerBlock);
+const legacyClockSource = { version: 1, updatedAt: 1, clocks: { timer: { type: "timer", running: true, startedAt: 1_000, accumulatedMs: 5_000, durationMs: 60_000, targetAt: 56_000 } }, notes: {}, tasks: {}, linkPages: {} };
+const normalizedLegacyClockA = runtimeApi.normalizeRuntimeState(legacyClockSource, persistedSettings).clocks[timerBlock.id];
+const normalizedLegacyClockB = runtimeApi.normalizeRuntimeState(legacyClockSource, persistedSettings).clocks[timerBlock.id];
+assert.ok(normalizedLegacyClockA.completionToken?.startsWith("legacy-timer-"), "Running legacy countdowns must receive a completion token");
+assert.equal(normalizedLegacyClockA.completionToken, normalizedLegacyClockB.completionToken, "Legacy completion token migration must be deterministic");
+
+const pomodoroSettings = settingsApi.cloneSettings(await settingsApi.getStartPageSettings());
+const pomodoroBlock = pomodoroSettings.layout.blocks.find((block) => block.type === "pomodoro");
+assert.ok(pomodoroBlock);
+pomodoroBlock.config.autoStartNextPhase = true; pomodoroBlock.config.notifyOnComplete = false;
+await settingsApi.setStartPageSettings(pomodoroSettings);
+const pomodoroRuntime = await runtimeApi.getStartPageRuntimeState();
+const pomodoroNow = Date.now();
+pomodoroRuntime.clocks[pomodoroBlock.id] = { ...runtimeApi.defaultClockForBlock(pomodoroBlock), running: true, startedAt: pomodoroNow - pomodoroBlock.config.workSeconds * 1000, targetAt: pomodoroNow, focusSessionStartedAt: pomodoroNow - pomodoroBlock.config.workSeconds * 1000, completionToken: "work-complete-token" };
+await runtimeApi.setStartPageRuntimeState(pomodoroRuntime);
+assert.deepEqual(await workerMessage({ type: "complete-clock", instanceId: pomodoroBlock.id, token: "work-complete-token" }), { ok: true });
+const nextPomodoro = (await runtimeApi.getStartPageRuntimeState()).clocks[pomodoroBlock.id];
+assert.equal(nextPomodoro.running, true); assert.equal(nextPomodoro.phase, "break");
+assert.ok(nextPomodoro.completionToken && nextPomodoro.completionToken !== "work-complete-token");
+assert.ok(alarmState.has(runtimeApi.clockAlarmName(pomodoroBlock.id, nextPomodoro.completionToken!)), "Auto-started Pomodoro phase must receive a durable alarm");
+
 const resetRuntime = await runtimeApi.getStartPageRuntimeState();
-const resetNow = Date.now();
-const resetToken = "reset-rollback-token";
-resetRuntime.clocks[timerBlock.id] = {
-  ...runtimeApi.defaultClockForBlock(timerBlock),
-  running: true,
-  startedAt: resetNow,
-  targetAt: resetNow + 60_000,
-  completionToken: resetToken,
-};
+const resetNow = Date.now(); const resetToken = "reset-rollback-token";
+resetRuntime.clocks[timerBlock.id] = { ...runtimeApi.defaultClockForBlock(timerBlock), running: true, startedAt: resetNow, targetAt: resetNow + 60_000, completionToken: resetToken };
 await runtimeApi.setStartPageRuntimeState(resetRuntime);
 const resetAlarmName = runtimeApi.clockAlarmName(timerBlock.id, resetToken);
-alarmNames.add(resetAlarmName);
+setAlarm(resetAlarmName, resetNow + 60_000);
+setAlarm(`${runtimeApi.CLOCK_ALARM_PREFIX}periodic-fixture`, resetNow + 120_000, 5);
 localState.startPageOnboarding = { onboarded: true };
 localState.startPageMigrationReport = { marker: "preserve-on-rollback" };
 const beforeFailedReset = structuredClone(localState);
-const alarmsBeforeFailedReset = [...alarmNames].sort();
+const alarmsBeforeFailedReset = structuredClone([...alarmState.values()].sort((left, right) => left.name.localeCompare(right.name)));
 failSetAfterApplyForKey = "startPageSettings";
 const failedResetAck = await workerMessage({ type: "reset-start-page" });
 assert.equal(failedResetAck.ok, false);
 assert.deepEqual(localState, beforeFailedReset, "Failed reset must restore every storage key");
-assert.deepEqual([...alarmNames].sort(), alarmsBeforeFailedReset, "Failed reset must restore durable clock alarms");
+assert.deepEqual([...alarmState.values()].sort((left, right) => left.name.localeCompare(right.name)), alarmsBeforeFailedReset, "Failed reset must restore exact durable clock alarm metadata");
 
 localState.startTabInstanceState = { localTasks: {} };
 const resetAck = await workerMessage({ type: "reset-start-page" });
@@ -276,7 +303,7 @@ assert.equal(Object.prototype.hasOwnProperty.call(localState, "startPageRuntimeS
 assert.equal(Object.prototype.hasOwnProperty.call(localState, "startTabInstanceState"), false);
 assert.equal(Object.prototype.hasOwnProperty.call(localState, "startPageMigrationReport"), false);
 assert.equal(Object.prototype.hasOwnProperty.call(localState, "startPageOnboarding"), false);
-assert.equal(alarmNames.size, 0);
+assert.equal(alarmState.size, 0);
 assert.equal((await settingsApi.getStartPageSettings()).schemaVersion, settingsApi.START_PAGE_SCHEMA_VERSION);
 
 console.log("Round 7 fixtures passed");
