@@ -12,6 +12,7 @@ export interface BlockRenderContext {
   runtime: StartPageRuntimeState;
   setRuntime: (mutation: RuntimeMutation) => Promise<void>;
   requestRender: () => void;
+  reportError: (error: unknown) => void;
   registerCleanup: (cleanup: () => void) => void;
 }
 
