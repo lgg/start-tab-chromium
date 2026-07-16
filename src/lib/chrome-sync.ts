@@ -19,6 +19,7 @@ const LOCAL_META_KEY = "startTabLocalSyncMeta";
 const CHUNK_PREFIX = "startTabSyncChunk";
 const DEVICE_ID_KEY = "startTabDeviceId";
 const DEFAULT_SYNC_ITEM_QUOTA_BYTES = 8192;
+const DEFAULT_SYNC_TOTAL_QUOTA_BYTES = 102_400;
 const MAX_SYNC_CHUNKS = 12;
 const SYNC_META_VERSION = 3;
 
@@ -89,12 +90,21 @@ function syncItemQuotaBytes(): number {
     ? Math.floor(quota)
     : DEFAULT_SYNC_ITEM_QUOTA_BYTES;
 }
+function syncTotalQuotaBytes(): number {
+  const quota = chrome.storage.sync.QUOTA_BYTES;
+  return typeof quota === "number" && Number.isFinite(quota) && quota > 0
+    ? Math.floor(quota)
+    : DEFAULT_SYNC_TOTAL_QUOTA_BYTES;
+}
 function serializedStringCharacterBytes(character: string): number {
   const serialized = JSON.stringify(character);
   return utf8.encode(serialized.slice(1, -1)).byteLength;
 }
-export function chromeSyncItemBytes(key: string, value: string): number {
+export function chromeSyncItemBytes(key: string, value: unknown): number {
   return utf8.encode(key).byteLength + utf8.encode(JSON.stringify(value)).byteLength;
+}
+export function chromeSyncStorageBytes(items: Record<string, unknown>): number {
+  return Object.entries(items).reduce((total, [key, value]) => total + chromeSyncItemBytes(key, value), 0);
 }
 export function chunkForChromeSync(value: string, quotaBytes = DEFAULT_SYNC_ITEM_QUOTA_BYTES): string[] {
   if (!Number.isFinite(quotaBytes) || quotaBytes <= 0) throw new Error("Invalid browser sync item quota");
@@ -203,10 +213,35 @@ async function writeRemoteSnapshot(snapshot: Awaited<ReturnType<typeof prepareSn
     contentChecksum: snapshot.contentChecksum, chunks: snapshot.chunks.length, backupVersion: snapshot.bundle.version };
   const payload: Record<string, unknown> = { [META_KEY]: meta };
   snapshot.chunks.forEach((chunk, index) => { payload[chunkKey(index)] = chunk; });
-  await chrome.storage.sync.set(payload);
   const activeChunkKeys = new Set(snapshot.chunks.map((_, index) => chunkKey(index)));
   const staleKeys = Object.keys(existing).filter((key) => key.startsWith(CHUNK_PREFIX) && !activeChunkKeys.has(key));
-  if (staleKeys.length > 0) await chrome.storage.sync.remove(staleKeys);
+  const finalState = { ...existing, ...payload };
+  for (const key of staleKeys) delete finalState[key];
+  const totalQuota = syncTotalQuotaBytes();
+  if (chromeSyncStorageBytes(finalState) > totalQuota) {
+    throw new Error("Start Tab backup is too large for the browser sync total quota. Use JSON export or Google Drive backup instead.");
+  }
+
+  const writeState = { ...existing, ...payload };
+  let staleRemovedBeforeWrite = false;
+  if (staleKeys.length > 0 && chromeSyncStorageBytes(writeState) > totalQuota) {
+    await chrome.storage.sync.remove(staleKeys);
+    staleRemovedBeforeWrite = true;
+  }
+  try {
+    await chrome.storage.sync.set(payload);
+  } catch (error) {
+    if (staleRemovedBeforeWrite) {
+      const rollback = Object.fromEntries(staleKeys.map((key) => [key, existing[key]]));
+      try {
+        await chrome.storage.sync.set(rollback);
+      } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], "Browser sync upload failed and stale-chunk rollback was incomplete");
+      }
+    }
+    throw error;
+  }
+  if (!staleRemovedBeforeWrite && staleKeys.length > 0) await chrome.storage.sync.remove(staleKeys);
   const committed = await readRemoteMeta();
   if (!committed || committed.legacy || !syncMetaEqual(committed.meta, meta)) {
     throw new Error("Chrome sync backup changed concurrently before the upload commit was confirmed");
