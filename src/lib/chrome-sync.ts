@@ -18,7 +18,7 @@ const META_KEY = "startTabSyncMeta";
 const LOCAL_META_KEY = "startTabLocalSyncMeta";
 const CHUNK_PREFIX = "startTabSyncChunk";
 const DEVICE_ID_KEY = "startTabDeviceId";
-const CHUNK_MAX_BYTES = 7000;
+const DEFAULT_SYNC_ITEM_QUOTA_BYTES = 8192;
 const MAX_SYNC_CHUNKS = 12;
 const SYNC_META_VERSION = 3;
 
@@ -82,20 +82,38 @@ function remoteWins(remote: SyncMeta, local: Awaited<ReturnType<typeof prepareSn
   if (remote.contentUpdatedAt !== local.contentUpdatedAt) return remote.contentUpdatedAt > local.contentUpdatedAt;
   return remote.contentChecksum.localeCompare(local.contentChecksum) > 0;
 }
-function chunkForChromeSync(value: string): string[] {
-  const encoder = new TextEncoder();
+const utf8 = new TextEncoder();
+function syncItemQuotaBytes(): number {
+  const quota = chrome.storage.sync.QUOTA_BYTES_PER_ITEM;
+  return typeof quota === "number" && Number.isFinite(quota) && quota > 0
+    ? Math.floor(quota)
+    : DEFAULT_SYNC_ITEM_QUOTA_BYTES;
+}
+function serializedStringCharacterBytes(character: string): number {
+  const serialized = JSON.stringify(character);
+  return utf8.encode(serialized.slice(1, -1)).byteLength;
+}
+export function chromeSyncItemBytes(key: string, value: string): number {
+  return utf8.encode(key).byteLength + utf8.encode(JSON.stringify(value)).byteLength;
+}
+export function chunkForChromeSync(value: string, quotaBytes = DEFAULT_SYNC_ITEM_QUOTA_BYTES): string[] {
+  if (!Number.isFinite(quotaBytes) || quotaBytes <= 0) throw new Error("Invalid browser sync item quota");
+  const quota = Math.floor(quotaBytes);
   const chunks: string[] = [];
   let current = "";
-  let currentBytes = 0;
+  let currentBytes = chromeSyncItemBytes(chunkKey(0), "");
   for (const character of value) {
-    const bytes = encoder.encode(character).byteLength;
-    if (current && currentBytes + bytes > CHUNK_MAX_BYTES) {
+    const characterBytes = serializedStringCharacterBytes(character);
+    if (current && currentBytes + characterBytes > quota) {
       chunks.push(current);
       current = "";
-      currentBytes = 0;
+      currentBytes = chromeSyncItemBytes(chunkKey(chunks.length), "");
+    }
+    if (currentBytes + characterBytes > quota) {
+      throw new Error("A Start Tab backup character cannot fit into one browser sync item");
     }
     current += character;
-    currentBytes += bytes;
+    currentBytes += characterBytes;
   }
   if (current || value.length === 0) chunks.push(current);
   return chunks;
@@ -172,7 +190,7 @@ async function prepareSnapshot(): Promise<{
   const captured = await exportBackupSnapshot();
   const bundle = captured.bundle;
   const json = JSON.stringify(bundle);
-  const chunks = chunkForChromeSync(json);
+  const chunks = chunkForChromeSync(json, syncItemQuotaBytes());
   if (chunks.length > MAX_SYNC_CHUNKS) throw new Error("Start Tab backup is too large for browser sync. Use JSON export or Google Drive backup instead.");
   return { bundle, json, chunks, checksum: await checksum(json), contentChecksum: await checksum(canonicalBackupContent(bundle)),
     contentUpdatedAt: captured.dataRevision };
