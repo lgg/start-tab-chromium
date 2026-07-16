@@ -29,6 +29,7 @@ interface LayoutEditorOptions {
   requestRender: () => void;
   previewBlock: (card: HTMLElement, block: BlockInstance, settings: StartPageSettings) => void;
   onSaved: (settings: StartPageSettings) => void;
+  onError: (error: unknown) => void;
 }
 
 interface PointerSession {
@@ -192,7 +193,7 @@ export class LayoutEditor {
     const settings = button("⚙", "icon-button");
     settings.title = this.options.i18n.t("editBlock");
     settings.setAttribute("aria-label", settings.title);
-    settings.addEventListener("click", () => void this.configure(block.id));
+    settings.addEventListener("click", () => this.runAsync(() => this.configure(block.id)));
 
     const enabled = button(block.enabled ? "◉" : "○", "icon-button");
     enabled.title = this.options.i18n.t(block.enabled ? "disableBlock" : "enableBlock");
@@ -219,6 +220,10 @@ export class LayoutEditor {
     resize.addEventListener("pointerdown", (event) => this.startPointerSession(event, block.id, card, "resize"));
     card.prepend(controls);
     card.append(resize);
+  }
+
+  private runAsync(action: () => Promise<void>): void {
+    void action().catch(this.options.onError);
   }
 
   private mutate(mutator: (settings: StartPageSettings) => StartPageSettings): void {
@@ -340,7 +345,7 @@ export class LayoutEditor {
       zone: i18n.t(this.draft.layout.zone === "contained" ? "layoutZoneContained" : "layoutZoneFull"),
     }));
     const save = button(i18n.t("saveLayout"), "button button--primary");
-    save.addEventListener("click", () => void this.save());
+    save.addEventListener("click", () => this.runAsync(() => this.save()));
     const cancel = button(i18n.t("cancel"), "button button--secondary");
     cancel.addEventListener("click", () => this.cancel());
     toolbarHost.append(status, mode, zone, cancel, save);
