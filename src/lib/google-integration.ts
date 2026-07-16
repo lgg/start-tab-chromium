@@ -30,6 +30,7 @@ interface CalendarEventsResponse {
 interface DriveFile {
   id: string;
   name: string;
+  modifiedTime?: string;
 }
 
 interface DriveListResponse {
@@ -108,12 +109,18 @@ export async function listCalendarEvents(calendarId = DEFAULT_CALENDAR_ID, maxRe
   }));
 }
 
-async function findDriveBackupFile(interactive = false): Promise<DriveFile | null> {
+export function driveBackupListUrl(): string {
   const url = new URL(GOOGLE_DRIVE_FILES_URL);
   url.searchParams.set("spaces", "appDataFolder");
-  url.searchParams.set("fields", "files(id,name)");
+  url.searchParams.set("fields", "files(id,name,modifiedTime)");
   url.searchParams.set("q", `name='${DRIVE_BACKUP_FILE_NAME}' and trashed=false`);
-  const payload = await googleFetch<DriveListResponse>(url.toString(), {}, interactive);
+  url.searchParams.set("orderBy", "modifiedTime desc");
+  url.searchParams.set("pageSize", "1");
+  return url.toString();
+}
+
+async function findDriveBackupFile(interactive = false): Promise<DriveFile | null> {
+  const payload = await googleFetch<DriveListResponse>(driveBackupListUrl(), {}, interactive);
   return payload.files?.[0] ?? null;
 }
 

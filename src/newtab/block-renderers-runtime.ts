@@ -42,8 +42,8 @@ export function renderClock(
     }
   };
 
-  const startPause = actionButton("", () => runAction("toggle"));
-  const reset = actionButton(context.i18n.t("clockReset"), () => runAction("reset"), "button button--secondary");
+  const startPause = actionButton("", () => runAction("toggle"), "button", context.reportError);
+  const reset = actionButton(context.i18n.t("clockReset"), () => runAction("reset"), "button button--secondary", context.reportError);
   actions.append(startPause, reset);
   if (block.type === "pomodoro") container.append(phase);
   container.append(display, actions);
@@ -70,9 +70,10 @@ export function renderClock(
     reset.disabled = requestPending;
     if (block.type === "pomodoro") phase.textContent = context.i18n.t(clock.phase === "break" ? "pomodoroBreak" : "pomodoroWork");
     if (clock.running && block.type !== "stopwatch" && value <= 0 && clock.completionToken && !requestPending) {
-      void requestCompletion(clock.completionToken).catch(() => {
+      void requestCompletion(clock.completionToken).catch((error: unknown) => {
         requestPending = false;
         update();
+        context.reportError(error);
       });
     }
   };
