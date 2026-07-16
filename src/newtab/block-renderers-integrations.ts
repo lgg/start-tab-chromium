@@ -234,17 +234,17 @@ export function renderBrowserPinned(container: HTMLElement, context: BlockRender
 export function renderCommands(container: HTMLElement, context: BlockRenderContext): void {
   const actions = element("div", "command-list");
   actions.append(
-    actionButton(context.i18n.t("openSettings"), () => chrome.runtime.openOptionsPage()),
-    actionButton(context.i18n.t("exportBackup"), async () => downloadJson(backupFileName(), await exportBackup())),
+    actionButton(context.i18n.t("openSettings"), () => chrome.runtime.openOptionsPage(), "button", context.reportError),
+    actionButton(context.i18n.t("exportBackup"), async () => downloadJson(backupFileName(), await exportBackup()), "button", context.reportError),
     actionButton(context.i18n.t("commandResetClocks"), async () => {
       await sendMessage({ type: "reset-clocks" });
       context.runtime = await getStartPageRuntimeState(context.settings);
       context.requestRender();
-    }),
+    }, "button", context.reportError),
     actionButton(context.i18n.t("commandResetStats"), async () => {
       await sendMessage({ type: "reset-stats" });
       context.requestRender();
-    }),
+    }, "button", context.reportError),
   );
   container.append(actions);
 }
