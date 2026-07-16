@@ -20,6 +20,7 @@ import {
 import { renderBlockContent, type BlockRenderContext } from "./block-renderers.js";
 import { LayoutEditor } from "./layout-editor.js";
 import { RenderScheduler } from "./render-scheduler.js";
+import { planStartPageStorageChange } from "./storage-change-plan.js";
 import { applyTheme } from "./theme-runtime.js";
 
 const ONBOARDING_KEY = "startPageOnboarding";
@@ -233,6 +234,7 @@ function render(): void {
       }
     },
     requestRender: () => queueStateRefresh(),
+    reportError: reportUiError,
     registerCleanup: registerRenderCleanup,
   };
   grid.replaceChildren(...blocks.map((block) => cardFor(block, context)));
@@ -324,11 +326,13 @@ function handleStorageChange(changes: Record<string, chrome.storage.StorageChang
     return;
   }
   if (changes.startPageSettings || changes.startPageRuntimeState || changes.focusStats) {
-    if (editor.hasUnsavedChanges && changes.startPageSettings) {
-      announce(i18n.t("externalSettingsChangeIgnored"));
-      return;
-    }
-    queueStateRefresh();
+    const plan = planStartPageStorageChange(editor.hasUnsavedChanges, {
+      settings: Boolean(changes.startPageSettings),
+      runtime: Boolean(changes.startPageRuntimeState),
+      focusStats: Boolean(changes.focusStats),
+    });
+    if (plan.announceIgnoredSettings) announce(i18n.t("externalSettingsChangeIgnored"));
+    if (plan.refreshState) queueStateRefresh();
   }
 }
 
