@@ -9,10 +9,17 @@ export function element<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-export function actionButton(text: string, action: () => void | Promise<void>, className = "button"): HTMLButtonElement {
+export function actionButton(
+  text: string,
+  action: () => void | Promise<void>,
+  className = "button",
+  onError?: (error: unknown) => void,
+): HTMLButtonElement {
   const button = element("button", className, text);
   button.type = "button";
-  button.addEventListener("click", () => void Promise.resolve(action()).catch(() => undefined));
+  button.addEventListener("click", () => {
+    void Promise.resolve().then(action).catch((error: unknown) => onError?.(error));
+  });
   return button;
 }
 
