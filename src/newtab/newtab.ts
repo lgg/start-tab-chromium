@@ -19,6 +19,7 @@ import {
 } from "../lib/start-page-settings.js";
 import { renderBlockContent, type BlockRenderContext } from "./block-renderers.js";
 import { LayoutEditor } from "./layout-editor.js";
+import { RenderScheduler } from "./render-scheduler.js";
 import { applyTheme } from "./theme-runtime.js";
 
 const ONBOARDING_KEY = "startPageOnboarding";
@@ -60,7 +61,6 @@ let savedSettings: StartPageSettings;
 let runtime: StartPageRuntimeState;
 let editor: LayoutEditor;
 let renderCleanups: Array<() => void> = [];
-let renderQueued = false;
 let disposed = false;
 let runtimeMutationJob: Promise<void> = Promise.resolve();
 
@@ -75,6 +75,14 @@ function registerRenderCleanup(cleanup: () => void): void {
 function announce(message: string): void {
   statusRegion.textContent = "";
   window.requestAnimationFrame(() => { statusRegion.textContent = message; });
+}
+
+function reportUiError(error: unknown): void {
+  announce(error instanceof Error ? error.message : String(error));
+}
+
+function runUiTask(action: () => Promise<unknown>): void {
+  void action().catch(reportUiError);
 }
 
 function blockTitle(block: BlockInstance): string {
@@ -231,24 +239,19 @@ function render(): void {
   if (blocks.length === 0) grid.append(element("p", "empty-layout", i18n.t("emptyLayout")));
 }
 
+const renderScheduler = new RenderScheduler({
+  requestFrame: (callback) => { window.requestAnimationFrame(callback); },
+  refresh: refreshState,
+  render,
+  onError: reportUiError,
+});
+
 function queueRender(): void {
-  if (renderQueued || disposed) return;
-  renderQueued = true;
-  window.requestAnimationFrame(() => {
-    renderQueued = false;
-    render();
-  });
+  renderScheduler.queueRender();
 }
 
 function queueStateRefresh(): void {
-  if (renderQueued || disposed) return;
-  renderQueued = true;
-  window.requestAnimationFrame(() => {
-    void refreshState().finally(() => {
-      renderQueued = false;
-      render();
-    });
-  });
+  renderScheduler.queueRefresh();
 }
 
 async function refreshState(): Promise<void> {
@@ -303,11 +306,11 @@ async function showOnboarding(): Promise<void> {
   const presets = element("div", "onboarding__presets");
   for (const preset of LAYOUT_PRESETS) {
     const item = button(i18n.t(preset.titleKey), "button button--secondary");
-    item.addEventListener("click", () => void finishOnboarding(preset.id));
+    item.addEventListener("click", () => runUiTask(() => finishOnboarding(preset.id)));
     presets.append(item);
   }
   const skip = button(i18n.t("onboardingSkip"), "button button--ghost");
-  skip.addEventListener("click", () => void finishOnboarding(null));
+  skip.addEventListener("click", () => runUiTask(() => finishOnboarding(null)));
   panel.append(title, text, presets, skip);
   overlay.append(panel);
   document.body.append(overlay);
@@ -343,6 +346,7 @@ function dispose(): void {
   if (disposed) return;
   disposed = true;
   clearRenderCleanups();
+  renderScheduler.dispose();
   chrome.storage.onChanged.removeListener(handleStorageChange);
   window.removeEventListener("resize", handleResize);
   window.removeEventListener("beforeunload", handleBeforeUnload);
@@ -366,13 +370,14 @@ async function init(): Promise<void> {
     onSaved: (settings) => {
       savedSettings = settings;
       announce(i18n.t("layoutSaved"));
-      void getStartPageRuntimeState(settings).then((nextRuntime) => {
-        runtime = nextRuntime;
+      runUiTask(async () => {
+        runtime = await getStartPageRuntimeState(settings);
         queueRender();
       });
     },
+    onError: reportUiError,
   });
-  settingsButton.addEventListener("click", () => void chrome.runtime.openOptionsPage());
+  settingsButton.addEventListener("click", () => runUiTask(() => chrome.runtime.openOptionsPage()));
   chrome.storage.onChanged.addListener(handleStorageChange);
   window.addEventListener("resize", handleResize);
   window.addEventListener("beforeunload", handleBeforeUnload);

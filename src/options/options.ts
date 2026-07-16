@@ -176,10 +176,19 @@ let runtime: StartPageRuntimeState;
 let localePreference: LocalePreference;
 let blockedSites: string[];
 let rendering = false;
+let renderGeneration = 0;
 
 function setStatus(message: string, error = false): void {
   status.textContent = message;
   status.dataset.error = String(error);
+}
+
+function reportUiError(error: unknown): void {
+  setStatus(error instanceof Error ? error.message : String(error), true);
+}
+
+function runUiTask(action: () => Promise<unknown>): void {
+  void action().catch(reportUiError);
 }
 
 async function runAction(action: () => Promise<void>, successMessage: string): Promise<void> {
@@ -216,7 +225,7 @@ function renderHeader(): void {
   document.title = i18n.t("optionsTitle");
   headerActions.replaceChildren();
   const openTab = button(i18n.t("openStartTab"), "button button--secondary");
-  openTab.addEventListener("click", () => void chrome.tabs.create({ url: chrome.runtime.getURL("newtab.html") }));
+  openTab.addEventListener("click", () => runUiTask(() => chrome.tabs.create({ url: chrome.runtime.getURL("newtab.html") })));
   const reset = button(i18n.t("resetStartPage"), "button button--danger");
   reset.addEventListener("click", () => {
     if (!window.confirm(i18n.t("resetStartPageConfirm"))) return;
@@ -331,11 +340,11 @@ function blockActions(block: BlockInstance): HTMLElement {
   );
   const actions = element("div", "instance-row__actions");
   const edit = button(i18n.t("edit"), "button button--secondary");
-  edit.addEventListener("click", () => void (async () => {
+  edit.addEventListener("click", () => runUiTask(async () => {
     const edited = await editBlockInstance(block, i18n);
     if (!edited) return;
     await runAction(async () => { await updateBlockInstance(block.id, () => edited); }, i18n.t("instanceUpdated"));
-  })());
+  }));
   const toggle = button(i18n.t(block.enabled ? "disable" : "enable"), "button button--secondary");
   toggle.addEventListener("click", () => void runAction(async () => {
     await updateBlockInstance(block.id, (current) => ({ ...current, enabled: !current.enabled }));
@@ -408,11 +417,11 @@ function themeCard(theme: StartPageTheme): HTMLElement {
   actions.append(choose, duplicate);
   if (!theme.builtIn) {
     const edit = button(i18n.t("edit"), "button button--secondary");
-    edit.addEventListener("click", () => void (async () => {
+    edit.addEventListener("click", () => runUiTask(async () => {
       const edited = await editTheme(theme, i18n);
       if (!edited) return;
       await runAction(async () => { await updateCustomTheme(edited); }, i18n.t("themeUpdated"));
-    })());
+    }));
     const exportButton = button(i18n.t("exportTheme"), "button button--secondary");
     exportButton.addEventListener("click", () => downloadJson(`start-tab-theme-${theme.id}.json`, exportCustomTheme(theme)));
     const remove = button(i18n.t("delete"), "button button--danger");
@@ -429,13 +438,13 @@ function themeCard(theme: StartPageTheme): HTMLElement {
 function renderThemes(): HTMLElement {
   const item = section("themes", i18n.t("sectionThemes"), i18n.t("sectionThemesDescription"));
   const create = button(i18n.t("createTheme"), "button button--primary");
-  create.addEventListener("click", () => void (async () => {
+  create.addEventListener("click", () => runUiTask(async () => {
     const created = await createCustomTheme(i18n.t("newCustomTheme"), settings.themes.selectedThemeId);
     const edited = await editTheme(created, i18n);
     if (edited) await updateCustomTheme(edited);
     await reloadState();
     render();
-  })());
+  }));
   const importButton = button(i18n.t("importTheme"), "button button--secondary");
   importButton.addEventListener("click", () => themeImportInput.click());
   const actions = actionRow(create, importButton);
@@ -563,10 +572,12 @@ async function reloadState(): Promise<void> {
 function render(): void {
   if (rendering) return;
   rendering = true;
+  const generation = ++renderGeneration;
   renderHeader();
   const placeholders = [renderGeneral(), renderBlocks(), renderThemes(), renderBackup(), renderBlocker()];
   sections.replaceChildren(...placeholders);
   void renderStatistics().then((statistics) => {
+    if (generation !== renderGeneration) return;
     sections.append(statistics);
     renderNavigation([
       { id: "general", label: i18n.t("sectionGeneral") },
@@ -576,7 +587,9 @@ function render(): void {
       { id: "blocker", label: i18n.t("sectionBlocker") },
       { id: "statistics", label: i18n.t("sectionStatistics") },
     ]);
-  }).catch((error: unknown) => setStatus(String(error), true));
+  }).catch((error: unknown) => {
+    if (generation === renderGeneration) reportUiError(error);
+  });
   rendering = false;
 }
 
