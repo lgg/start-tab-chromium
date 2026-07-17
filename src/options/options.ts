@@ -44,7 +44,6 @@ import {
   BUILT_IN_THEMES,
   LAYOUT_PRESETS,
   addBlockInstance,
-  applyLayoutPreset,
   canAddBlock,
   cloneSettings,
   createCustomTheme,
@@ -57,9 +56,10 @@ import {
   hasBlockUserData,
   importCustomTheme,
   isSingletonBlockType,
-  removeBlockInstance,
+  layoutReplacementRemovesUserData,
   selectTheme,
-  setStartPageSettings,
+  settingsWithLayoutPreset,
+  settingsWithRemovedBlock,
   updateBlockInstance,
   updateCustomTheme,
   type BlockInstance,
@@ -299,30 +299,38 @@ function renderGeneral(): HTMLElement {
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     if (!form.reportValidity()) return;
+    let next = cloneSettings(settings);
+    if (preset.value !== "custom" && preset.value !== settings.layout.profile) {
+      next = settingsWithLayoutPreset(next, preset.value as LayoutPresetId);
+    }
+    next.startTab.enabled = startTabEnabled.checked;
+    next.settingsButton.visibility = buttonVisibility.value as typeof next.settingsButton.visibility;
+    next.settingsButton.hoverArea = hoverArea.value as typeof next.settingsButton.hoverArea;
+    next.layout.mode = mode.value as LayoutMode;
+    next.layout.zone = zone.value as LayoutZone;
+    next.layout.blocks = next.layout.blocks.map((block) => ({ ...block, zone: next.layout.zone }));
+    next.layout.columns = readNumber(columns, next.layout.columns);
+    next.layout.rowHeight = readNumber(rowHeight, next.layout.rowHeight);
+    next.layout.gap = readNumber(gap, next.layout.gap);
+    next.layout.containedMaxWidth = readNumber(containedMaxWidth, next.layout.containedMaxWidth);
+    next.layout.showBlockTitles = showTitles.checked;
+    next.focusStats.defaultMinutesPerAvoidedVisit = readNumber(defaultMinutes, next.focusStats.defaultMinutesPerAvoidedVisit);
+    next.focusStats.avoidedVisitDedupeSeconds = readNumber(dedupeSeconds, next.focusStats.avoidedVisitDedupeSeconds);
+
+    const removesUserData = layoutReplacementRemovesUserData(settings, next, runtime);
+    if (removesUserData && !window.confirm(i18n.t("applyPresetWithDataConfirm"))) return;
+
     void runAction(async () => {
       if (locale.value !== localePreference) {
         await setLocalePreference(locale.value as LocalePreference);
         localePreference = locale.value as LocalePreference;
       }
-      if (preset.value !== "custom" && preset.value !== settings.layout.profile) {
-        await applyLayoutPreset(preset.value as LayoutPresetId);
-        settings = await getStartPageSettings();
-      }
-      const next = cloneSettings(settings);
-      next.startTab.enabled = startTabEnabled.checked;
-      next.settingsButton.visibility = buttonVisibility.value as typeof next.settingsButton.visibility;
-      next.settingsButton.hoverArea = hoverArea.value as typeof next.settingsButton.hoverArea;
-      next.layout.mode = mode.value as LayoutMode;
-      next.layout.zone = zone.value as LayoutZone;
-      next.layout.blocks = next.layout.blocks.map((block) => ({ ...block, zone: next.layout.zone }));
-      next.layout.columns = readNumber(columns, next.layout.columns);
-      next.layout.rowHeight = readNumber(rowHeight, next.layout.rowHeight);
-      next.layout.gap = readNumber(gap, next.layout.gap);
-      next.layout.containedMaxWidth = readNumber(containedMaxWidth, next.layout.containedMaxWidth);
-      next.layout.showBlockTitles = showTitles.checked;
-      next.focusStats.defaultMinutesPerAvoidedVisit = readNumber(defaultMinutes, next.focusStats.defaultMinutesPerAvoidedVisit);
-      next.focusStats.avoidedVisitDedupeSeconds = readNumber(dedupeSeconds, next.focusStats.avoidedVisitDedupeSeconds);
-      await setStartPageSettings(next);
+      await sendMessage({
+        type: "replace-start-page-settings",
+        settings: next,
+        expectedSettingsUpdatedAt: settings.updatedAt,
+        expectedRuntimeUpdatedAt: runtime.updatedAt,
+      });
       if (locale.value !== i18n.locale && locale.value !== "auto") location.reload();
     }, i18n.t("settingsSaved"));
   });
@@ -366,8 +374,12 @@ function blockActions(block: BlockInstance): HTMLElement {
     const key = withData ? "deleteBlockWithDataConfirm" : "deleteBlockConfirm";
     if (!window.confirm(i18n.t(key, { title: blockName(block, i18n) }))) return;
     void runAction(async () => {
-      await removeBlockInstance(block.id);
-      await deleteInstanceRuntime(block.id);
+      await sendMessage({
+        type: "replace-start-page-settings",
+        settings: settingsWithRemovedBlock(settings, block.id),
+        expectedSettingsUpdatedAt: settings.updatedAt,
+        expectedRuntimeUpdatedAt: runtime.updatedAt,
+      });
     }, i18n.t("instanceDeleted"));
   });
   actions.append(clear, remove);

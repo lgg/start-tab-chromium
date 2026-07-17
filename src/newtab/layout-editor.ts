@@ -12,7 +12,6 @@ import {
   getStartPageSettings,
   hasBlockUserData,
   isSingletonBlockType,
-  setStartPageSettings,
   type BlockInstance,
   type BlockType,
   type LayoutMode,
@@ -111,7 +110,7 @@ export class LayoutEditor {
   private draft: StartPageSettings;
   private active = false;
   private dirty = false;
-  private readonly removedIds = new Set<string>();
+  private destructiveRuntimeUpdatedAt: number | null = null;
   private pointerSession: PointerSession | null = null;
   private readonly options: LayoutEditorOptions;
 
@@ -143,7 +142,7 @@ export class LayoutEditor {
   enter(): void {
     this.active = true;
     this.dirty = false;
-    this.removedIds.clear();
+    this.destructiveRuntimeUpdatedAt = null;
     this.draft = cloneSettings(this.saved);
     this.renderControls();
     this.options.requestRender();
@@ -151,14 +150,18 @@ export class LayoutEditor {
 
   async save(): Promise<void> {
     if (!this.active) return;
-    await setStartPageSettings(this.draft);
-    for (const id of this.removedIds) await sendMessage({ type: "delete-instance-runtime", instanceId: id });
+    await sendMessage({
+      type: "replace-start-page-settings",
+      settings: this.draft,
+      expectedSettingsUpdatedAt: this.saved.updatedAt,
+      expectedRuntimeUpdatedAt: this.destructiveRuntimeUpdatedAt ?? this.options.getRuntime().updatedAt,
+    });
     const persisted = await getStartPageSettings();
     this.saved = cloneSettings(persisted);
     this.draft = cloneSettings(persisted);
     this.active = false;
     this.dirty = false;
-    this.removedIds.clear();
+    this.destructiveRuntimeUpdatedAt = null;
     this.renderControls();
     this.options.onSaved(cloneSettings(this.saved));
     this.options.requestRender();
@@ -170,7 +173,7 @@ export class LayoutEditor {
     this.draft = cloneSettings(this.saved);
     this.active = false;
     this.dirty = false;
-    this.removedIds.clear();
+    this.destructiveRuntimeUpdatedAt = null;
     this.renderControls();
     this.options.requestRender();
   }
@@ -277,7 +280,10 @@ export class LayoutEditor {
     const needsConfirm = hasBlockUserData(block, runtime) || instanceRuntimeHasUserData(id, runtime);
     if (needsConfirm && !window.confirm(this.options.i18n.t("deleteBlockWithDataConfirm", { title: block.title }))) return;
     if (!needsConfirm && !window.confirm(this.options.i18n.t("deleteBlockConfirm", { title: block.title }))) return;
-    this.removedIds.add(id);
+    if (this.destructiveRuntimeUpdatedAt === null
+      && this.saved.layout.blocks.some((candidate) => candidate.id === id)) {
+      this.destructiveRuntimeUpdatedAt = runtime.updatedAt;
+    }
     this.mutate((settings) => ({
       ...settings,
       layout: {

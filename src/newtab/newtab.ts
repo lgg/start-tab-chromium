@@ -8,11 +8,10 @@ import {
 } from "../lib/start-page-runtime.js";
 import {
   LAYOUT_PRESETS,
-  blocksFromPreset,
-  cloneSettings,
   getStartPageSettings,
   getTheme,
-  setStartPageSettings,
+  layoutReplacementRemovesUserData,
+  settingsWithLayoutPreset,
   type BlockInstance,
   type LayoutPresetId,
   type StartPageSettings,
@@ -275,17 +274,18 @@ async function onboardingState(): Promise<boolean> {
 
 async function finishOnboarding(presetId: LayoutPresetId | null): Promise<void> {
   if (presetId) {
-    const preset = LAYOUT_PRESETS.find((candidate) => candidate.id === presetId);
-    if (preset) {
-      const next = cloneSettings(savedSettings);
-      next.layout.columns = preset.columns;
-      next.layout.profile = preset.id;
-      next.layout.blocks = blocksFromPreset(preset, next.layout.zone);
-      await setStartPageSettings(next);
-      savedSettings = await getStartPageSettings();
-      editor.replaceSavedSettings(savedSettings);
-      runtime = await getStartPageRuntimeState(savedSettings);
-    }
+    const next = settingsWithLayoutPreset(savedSettings, presetId);
+    const removesUserData = layoutReplacementRemovesUserData(savedSettings, next, runtime);
+    if (removesUserData && !window.confirm(i18n.t("applyPresetWithDataConfirm"))) return;
+    await sendMessage({
+      type: "replace-start-page-settings",
+      settings: next,
+      expectedSettingsUpdatedAt: savedSettings.updatedAt,
+      expectedRuntimeUpdatedAt: runtime.updatedAt,
+    });
+    savedSettings = await getStartPageSettings();
+    editor.replaceSavedSettings(savedSettings);
+    runtime = await getStartPageRuntimeState(savedSettings);
   }
   await withStorageLock("data-write", async () => {
     await commitStorageMutationWithRevision(

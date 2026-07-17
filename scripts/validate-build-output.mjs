@@ -61,7 +61,7 @@ if (variant === "full") {
     assert.equal(await exists(file), true, `Full build is missing ${file}`);
   }
   const newtabSource = await readFile(path.join(outdir, "newtab.js"), "utf8");
-  for (const marker of ["complete-clock", "clock-action", "reset-clocks", "runtime-note", "runtime-tasks", "runtime-link-page", "delete-instance-runtime", "reset-stats"]) {
+  for (const marker of ["complete-clock", "clock-action", "reset-clocks", "runtime-note", "runtime-tasks", "runtime-link-page", "replace-start-page-settings", "reset-stats"]) {
     assert.ok(newtabSource.includes(marker), `newtab.js must delegate ${marker} to the service worker`);
   }
   assert.doesNotMatch(newtabSource, /notifications\.create/, "newtab.js must not create clock notifications");
@@ -77,7 +77,7 @@ if (variant === "full") {
 }
 
 const serviceWorkerSource = await readFile(path.join(outdir, "service-worker.js"), "utf8");
-for (const marker of ["complete-clock", "clock-action", "reset-clocks", "runtime-note", "runtime-tasks", "runtime-link-page", "delete-instance-runtime", "record-unblock", "reset-stats", "replace-blocked-sites", "open-native-new-tab", "reset-start-page"]) {
+for (const marker of ["complete-clock", "clock-action", "reset-clocks", "runtime-note", "runtime-tasks", "runtime-link-page", "delete-instance-runtime", "record-unblock", "reset-stats", "replace-blocked-sites", "open-native-new-tab", "reset-start-page", "replace-start-page-settings"]) {
   assert.ok(serviceWorkerSource.includes(marker), `service-worker.js must own ${marker}`);
 }
 assert.match(serviceWorkerSource, /notifications\.create/, "service-worker.js must own clock notifications");

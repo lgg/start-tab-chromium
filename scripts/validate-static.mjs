@@ -153,7 +153,7 @@ assert.doesNotMatch(settingsSource, /`\$\{source\.title\} copy`|`\$\{source\.nam
 assert.match(runtimeRendererSource, /type:\s*["']complete-clock["']/, "The new-tab page must delegate clock completion to the service worker");
 assert.match(runtimeRendererSource, /type:\s*["']clock-action["']/, "The new-tab page must delegate clock mutations to the service worker");
 assert.doesNotMatch(runtimeRendererSource, /completeClockInstance|chrome\.notifications\.create|recordFocusSessionCompleted/, "The new-tab page must not own clock completion side effects");
-for (const messageType of ["complete-clock", "clock-action", "reset-clocks", "runtime-note", "runtime-tasks", "runtime-link-page", "delete-instance-runtime", "record-unblock", "reset-stats"]) {
+for (const messageType of ["complete-clock", "clock-action", "reset-clocks", "runtime-note", "runtime-tasks", "runtime-link-page", "delete-instance-runtime", "replace-start-page-settings", "record-unblock", "reset-stats"]) {
   assert.ok(serviceWorkerSource.includes(`case "${messageType}"`) || serviceWorkerSource.includes(`type: "${messageType}"`), `Service worker must handle ${messageType}`);
 }
 
