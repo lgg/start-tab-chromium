@@ -20,6 +20,7 @@ import {
 import { renderBlockContent, type BlockRenderContext } from "./block-renderers.js";
 import { LayoutEditor } from "./layout-editor.js";
 import { RenderScheduler } from "./render-scheduler.js";
+import { recoverRuntimeMutation } from "./runtime-mutation-recovery.js";
 import { planStartPageStorageChange } from "./storage-change-plan.js";
 import { applyTheme } from "./theme-runtime.js";
 
@@ -227,10 +228,12 @@ function render(): void {
       try {
         await next;
       } catch (error) {
-        await refreshState();
-        announce(i18n.t("runtimeMutationConflict"));
-        queueRender();
-        throw error;
+        await recoverRuntimeMutation(error, {
+          refresh: refreshState,
+          announceConflict: () => announce(i18n.t("runtimeMutationConflict")),
+          queueRender,
+          queueRefresh: queueStateRefresh,
+        });
       }
     },
     requestRender: () => queueStateRefresh(),

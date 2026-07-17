@@ -300,6 +300,7 @@ interface RuntimeMutation<T> {
 
 async function runRuntimeMutation<T>(
   mutator: (state: StartPageRuntimeState, settings: StartPageSettings) => RuntimeMutation<T>,
+  reconcileAlarms = false,
 ): Promise<{ result: T; state: StartPageRuntimeState }> {
   return withStorageLock("data-write", async () => {
     const { settings } = await readRuntimeSettingsSnapshot(true);
@@ -312,6 +313,10 @@ async function runRuntimeMutation<T>(
     const mutation = mutator(structuredClone(current), settings);
     if (mutation.state === null) return { result: mutation.result, state: current };
     const next = normalizeRuntimeState(mutation.state, settings);
+    const previousStorage = reconcileAlarms
+      ? await chrome.storage.local.get([...RUNTIME_STORAGE_KEYS])
+      : null;
+    const previousAlarms = reconcileAlarms ? await readClockAlarmSnapshot() : null;
     const saved = await persistRuntimeInTransaction(
       next,
       settings,
@@ -319,6 +324,22 @@ async function runRuntimeMutation<T>(
       current.updatedAt,
       items[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined,
     );
+    if (reconcileAlarms && previousStorage && previousAlarms) {
+      try {
+        await reconcileClockAlarmsForRuntime(saved);
+      } catch (error) {
+        try {
+          await restoreStorageKeysSnapshot(previousStorage, RUNTIME_STORAGE_KEYS);
+          await restoreClockAlarmSnapshot(previousAlarms);
+        } catch (rollbackError) {
+          throw new AggregateError(
+            [error, rollbackError],
+            "Clock runtime mutation failed and its storage/alarm rollback was incomplete",
+          );
+        }
+        throw error;
+      }
+    }
     return { result: mutation.result, state: saved };
   });
 }
@@ -327,6 +348,13 @@ export async function mutateStartPageRuntimeState<T>(
   mutator: (state: StartPageRuntimeState, settings: StartPageSettings) => RuntimeMutation<T>,
 ): Promise<T> {
   return (await runRuntimeMutation(mutator)).result;
+}
+
+/** Commit a clock mutation and its complete durable-alarm set as one recoverable unit. */
+export async function mutateStartPageRuntimeStateWithAlarms<T>(
+  mutator: (state: StartPageRuntimeState, settings: StartPageSettings) => RuntimeMutation<T>,
+): Promise<T> {
+  return (await runRuntimeMutation(mutator, true)).result;
 }
 
 export async function updateStartPageRuntimeState(
@@ -362,7 +390,7 @@ export async function readClockAlarmSnapshot(): Promise<ClockAlarmSnapshot[]> {
 export async function restoreClockAlarmSnapshot(snapshot: ClockAlarmSnapshot[]): Promise<void> {
   await clearClockAlarms();
   for (const alarm of snapshot) {
-    chrome.alarms.create(alarm.name, {
+    await chrome.alarms.create(alarm.name, {
       when: alarm.scheduledTime,
       ...(typeof alarm.periodInMinutes === "number" ? { periodInMinutes: alarm.periodInMinutes } : {}),
     });
@@ -370,16 +398,29 @@ export async function restoreClockAlarmSnapshot(snapshot: ClockAlarmSnapshot[]):
 }
 
 export async function reconcileClockAlarmsForRuntime(runtime: StartPageRuntimeState): Promise<void> {
+  const previous = await readClockAlarmSnapshot();
   const desired = new Map<string, number>();
   for (const [instanceId, clock] of Object.entries(runtime.clocks)) {
     if (!clock.running || clock.type === "stopwatch" || clock.targetAt === null || !clock.completionToken) continue;
     desired.set(clockAlarmName(instanceId, clock.completionToken), Math.max(Date.now() + 100, clock.targetAt));
   }
-  const existing = await chrome.alarms.getAll();
-  await Promise.all(existing
-    .filter((alarm) => alarm.name.startsWith(CLOCK_ALARM_PREFIX) && !desired.has(alarm.name))
-    .map((alarm) => chrome.alarms.clear(alarm.name)));
-  for (const [name, when] of desired) chrome.alarms.create(name, { when });
+  try {
+    const existing = await chrome.alarms.getAll();
+    await Promise.all(existing
+      .filter((alarm) => alarm.name.startsWith(CLOCK_ALARM_PREFIX) && !desired.has(alarm.name))
+      .map((alarm) => chrome.alarms.clear(alarm.name)));
+    for (const [name, when] of desired) await chrome.alarms.create(name, { when });
+  } catch (error) {
+    try {
+      await restoreClockAlarmSnapshot(previous);
+    } catch (rollbackError) {
+      throw new AggregateError(
+        [error, rollbackError],
+        "Clock alarm reconciliation failed and the previous alarm set could not be restored",
+      );
+    }
+    throw error;
+  }
 }
 
 /** Reconcile durable alarms from one compatible storage snapshot under the data-write lock. */
@@ -545,12 +586,8 @@ export async function scheduleClockAlarm(instanceId: string, _clock: ClockRuntim
       settings,
       items[LEGACY_INSTANCE_RUNTIME_KEY],
     );
-    const current = runtime.clocks[instanceId];
-    await clearClockAlarm(instanceId);
-    if (!current?.running || current.targetAt === null || !current.completionToken) return;
-    chrome.alarms.create(clockAlarmName(instanceId, current.completionToken), {
-      when: Math.max(Date.now() + 100, current.targetAt),
-    });
+    void instanceId;
+    await reconcileClockAlarmsForRuntime(runtime);
   });
 }
 
@@ -563,7 +600,7 @@ export interface ClockCompletionResult {
 }
 
 export async function completeClockInstance(instanceId: string, expectedToken: string | null, now = Date.now()): Promise<ClockCompletionResult> {
-  return mutateStartPageRuntimeState<ClockCompletionResult>((runtime, settings) => {
+  return mutateStartPageRuntimeStateWithAlarms<ClockCompletionResult>((runtime, settings) => {
     const block = settings.layout.blocks.find(
       (candidate): candidate is Extract<BlockInstance, { type: ClockBlockType }> => candidate.id === instanceId && isClockBlock(candidate),
     ) ?? null;
@@ -618,6 +655,7 @@ export async function completeClockInstance(instanceId: string, expectedToken: s
   });
 }
 
+// completeClockInstance reconciles any auto-started next phase through the same durable scheduleClockAlarm path.
 function rawRuntimeHasInstance(value: unknown, instanceId: string): boolean {
   if (!isRecord(value)) return false;
   return ["clocks", "notes", "tasks", "linkPages", "localTasks"].some((key) => {
