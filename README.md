@@ -16,6 +16,7 @@ Start Tab is a Manifest V3 extension for Chromium-based browsers. It combines a 
 - Localized UI with English and Russian catalogs.
 - Configurable custom new tab page with date/time, IP, links, search, timer, stopwatch, Pomodoro, notes, local tasks, recent history, browser pinned tabs, Start Tab pinned links, Google Calendar, weather, command, and focus stats blocks.
 - Typed instance-based block records with stable IDs, versioned schemas, independent settings, and per-instance runtime state.
+- Consistent defensive collection limits across UI, runtime messages, local normalization, and backup import: 1,000 block instances, 1,000 custom themes, and 10,000 local tasks per block; oversized backups are rejected before storage changes.
 - Multiple independent instances for repeatable blocks, including date/time, IP, links, search, timers, stopwatches, Pomodoro, notes, local tasks, Google Calendar, weather, and Start Tab pinned links.
 - Singleton enforcement for browser-global blocks such as commands, recent history, browser pinned tabs, and focus statistics.
 - Block creation, duplication, deletion, enable/disable controls, destructive-action protection, and shared per-instance settings from both Options and the inline editor.
@@ -43,6 +44,8 @@ Start Tab is a Manifest V3 extension for Chromium-based browsers. It combines a 
 - Migration from legacy singleton Start Tab settings/runtime and the legacy `blocked` storage key.
 
 ## Development
+
+Validated prerequisite: Node.js 22.x with the bundled npm version used by CI. Other Node.js major versions are not claimed as release baselines.
 
 ```bash
 npm ci

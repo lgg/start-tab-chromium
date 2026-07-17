@@ -1,6 +1,7 @@
 import { editBlockInstance } from "../lib/block-settings-editor.js";
 import type { I18n } from "../lib/i18n.js";
 import { sendMessage } from "../lib/messages.js";
+import { MAX_START_PAGE_BLOCKS } from "../lib/platform-limits.js";
 import { instanceRuntimeHasUserData } from "../lib/start-page-runtime.js";
 import {
   BLOCK_DESCRIPTORS,
@@ -206,7 +207,10 @@ export class LayoutEditor {
     controls.append(drag, settings, enabled);
     if (!isSingletonBlockType(block.type)) {
       const duplicate = button("⧉", "icon-button");
-      duplicate.title = this.options.i18n.t("duplicateBlock");
+      duplicate.disabled = this.draft.layout.blocks.length >= MAX_START_PAGE_BLOCKS;
+      duplicate.title = duplicate.disabled
+        ? this.options.i18n.t("blockCapacityReached", { count: MAX_START_PAGE_BLOCKS })
+        : this.options.i18n.t("duplicateBlock");
       duplicate.setAttribute("aria-label", duplicate.title);
       duplicate.addEventListener("click", () => this.duplicate(block.id));
       controls.append(duplicate);
@@ -256,7 +260,7 @@ export class LayoutEditor {
 
   private duplicate(id: string): void {
     const source = this.draft.layout.blocks.find((block) => block.id === id);
-    if (!source || isSingletonBlockType(source.type)) return;
+    if (!source || isSingletonBlockType(source.type) || this.draft.layout.blocks.length >= MAX_START_PAGE_BLOCKS) return;
     const copy = createBlockInstance(source.type, {
       ...cloneBlock(source),
       id: undefined,
@@ -372,7 +376,9 @@ export class LayoutEditor {
         tile.setAttribute("aria-label", i18n.t("addBlockNamed", { title: i18n.t(descriptor.titleKey) }));
         tile.addEventListener("click", () => this.add(descriptor.type));
       } else {
-        tile.title = i18n.t("singletonAlreadyAdded");
+        tile.title = this.draft.layout.blocks.length >= MAX_START_PAGE_BLOCKS
+          ? i18n.t("blockCapacityReached", { count: MAX_START_PAGE_BLOCKS })
+          : i18n.t("singletonAlreadyAdded");
         tile.setAttribute("aria-label", `${i18n.t(descriptor.titleKey)}. ${tile.title}`);
       }
       list.append(tile);

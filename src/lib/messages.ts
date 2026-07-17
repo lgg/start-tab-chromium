@@ -1,6 +1,11 @@
 /** Messages exchanged between extension pages and the service worker. */
 
-import { MAX_BLOCKED_SITES } from "./platform-limits.js";
+import {
+  MAX_BLOCKED_SITES,
+  MAX_CUSTOM_THEMES,
+  MAX_LOCAL_TASKS_PER_INSTANCE,
+  MAX_START_PAGE_BLOCKS,
+} from "./platform-limits.js";
 import type { LocalTask } from "./start-page-types.js";
 
 export type ClockAction = "toggle" | "reset";
@@ -66,10 +71,10 @@ export function isMessage(value: unknown): value is Message {
       return isRecord(value.settings)
         && isRecord(value.settings.layout)
         && Array.isArray(value.settings.layout.blocks)
-        && value.settings.layout.blocks.length <= 1_000
+        && value.settings.layout.blocks.length <= MAX_START_PAGE_BLOCKS
         && isRecord(value.settings.themes)
         && Array.isArray(value.settings.themes.customThemes)
-        && value.settings.themes.customThemes.length <= 1_000
+        && value.settings.themes.customThemes.length <= MAX_CUSTOM_THEMES
         && typeof value.expectedSettingsUpdatedAt === "number"
         && Number.isInteger(value.expectedSettingsUpdatedAt)
         && value.expectedSettingsUpdatedAt >= 0
@@ -88,8 +93,8 @@ export function isMessage(value: unknown): value is Message {
         && typeof value.expectedValue === "string" && value.expectedValue.length <= 200_000;
     case "runtime-tasks":
       return isSafeIdentifier(value.instanceId)
-        && Array.isArray(value.tasks) && value.tasks.length <= 10_000 && value.tasks.every(isLocalTask)
-        && Array.isArray(value.expectedTasks) && value.expectedTasks.length <= 10_000 && value.expectedTasks.every(isLocalTask);
+        && Array.isArray(value.tasks) && value.tasks.length <= MAX_LOCAL_TASKS_PER_INSTANCE && value.tasks.every(isLocalTask)
+        && Array.isArray(value.expectedTasks) && value.expectedTasks.length <= MAX_LOCAL_TASKS_PER_INSTANCE && value.expectedTasks.every(isLocalTask);
     case "runtime-link-page":
       return isSafeIdentifier(value.instanceId) && typeof value.page === "number"
         && Number.isInteger(value.page) && value.page >= 0 && value.page <= 10_000

@@ -8,6 +8,11 @@ import { DATA_REVISION_KEY, markStartTabDataChanged, readStartTabDataRevision } 
 import { withStorageLock } from "./storage-lock.js";
 import { FOCUS_STATS_KEY, isFutureFocusStatsSchema, normalizeFocusStats } from "./focus-stats.js";
 import {
+  MAX_CUSTOM_THEMES,
+  MAX_LOCAL_TASKS_PER_INSTANCE,
+  MAX_START_PAGE_BLOCKS,
+} from "./platform-limits.js";
+import {
   LEGACY_INSTANCE_RUNTIME_KEY,
   START_PAGE_RUNTIME_KEY,
   isFutureRuntimeSchema,
@@ -126,7 +131,36 @@ function assertSupportedSchemas(storage: Record<string, unknown>): void {
   }
 }
 
+
+function assertArrayCapacity(value: unknown, maximum: number, label: string): void {
+  if (Array.isArray(value) && value.length > maximum) {
+    throw new Error(`Start Tab backup contains more than ${maximum} ${label}`);
+  }
+}
+
+function assertTaskCollectionCapacity(value: unknown, label: string): void {
+  if (!isRecord(value)) return;
+  for (const [instanceId, tasks] of Object.entries(value)) {
+    assertArrayCapacity(tasks, MAX_LOCAL_TASKS_PER_INSTANCE, `${label} tasks for instance ${instanceId}`);
+  }
+}
+
+function assertCollectionCapacity(storage: Record<string, unknown>): void {
+  const settings = isRecord(storage[START_PAGE_SETTINGS_KEY]) ? storage[START_PAGE_SETTINGS_KEY] : {};
+  const layout = isRecord(settings.layout) ? settings.layout : {};
+  const themes = isRecord(settings.themes) ? settings.themes : {};
+  assertArrayCapacity(layout.blocks, MAX_START_PAGE_BLOCKS, "block instances");
+  assertArrayCapacity(themes.customThemes, MAX_CUSTOM_THEMES, "custom themes");
+
+  const runtime = isRecord(storage[START_PAGE_RUNTIME_KEY]) ? storage[START_PAGE_RUNTIME_KEY] : {};
+  const legacyRuntime = isRecord(storage[LEGACY_INSTANCE_RUNTIME_KEY]) ? storage[LEGACY_INSTANCE_RUNTIME_KEY] : {};
+  assertTaskCollectionCapacity(runtime.tasks, "runtime");
+  assertTaskCollectionCapacity(legacyRuntime.localTasks, "legacy runtime");
+  assertArrayCapacity(runtime.localTasks, MAX_LOCAL_TASKS_PER_INSTANCE, "legacy shared local tasks");
+}
+
 function normalizedStorage(source: Record<string, unknown>): Record<string, unknown> {
+  assertCollectionCapacity(source);
   const settings = normalizeStartPageSettings(source[START_PAGE_SETTINGS_KEY]);
   const runtime = normalizeRuntimeState(
     source[START_PAGE_RUNTIME_KEY],

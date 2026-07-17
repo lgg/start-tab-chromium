@@ -1,5 +1,6 @@
 import { commitStorageMutationWithRevision } from "./data-revision.js";
 import { withStorageLock } from "./storage-lock.js";
+import { MAX_CUSTOM_THEMES, MAX_START_PAGE_BLOCKS } from "./platform-limits.js";
 import {
   BLOCK_DESCRIPTORS,
   BUILT_IN_THEMES,
@@ -229,6 +230,18 @@ export async function getStartPageMigrationReport(): Promise<MigrationReport | n
   };
 }
 
+function assertStartPageSettingsCapacity(value: unknown): void {
+  if (!isRecord(value)) return;
+  const layout = isRecord(value.layout) ? value.layout : {};
+  const themes = isRecord(value.themes) ? value.themes : {};
+  if (Array.isArray(layout.blocks) && layout.blocks.length > MAX_START_PAGE_BLOCKS) {
+    throw new Error(`Start Tab supports at most ${MAX_START_PAGE_BLOCKS} block instances`);
+  }
+  if (Array.isArray(themes.customThemes) && themes.customThemes.length > MAX_CUSTOM_THEMES) {
+    throw new Error(`Start Tab supports at most ${MAX_CUSTOM_THEMES} custom themes`);
+  }
+}
+
 export function prepareStartPageSettingsWrite(
   value: unknown,
   raw: unknown,
@@ -241,6 +254,7 @@ export function prepareStartPageSettingsWrite(
   if (previous.updatedAt > 0 && expectedUpdatedAt !== previous.updatedAt) {
     throw new Error("Start Tab settings changed in another extension context; reload before saving");
   }
+  assertStartPageSettingsCapacity(value);
   const validation = validateStartPageSettings(value);
   const stamped = withBlockTimestamps(previous, validation.value, Math.max(Date.now(), previous.updatedAt + 1));
   return { settings: stamped, issues: validation.issues };
@@ -280,6 +294,7 @@ export async function updateStartPageSettings(
 }
 
 export function canAddBlock(settings: StartPageSettings, type: BlockType): boolean {
+  if (settings.layout.blocks.length >= MAX_START_PAGE_BLOCKS) return false;
   return !isSingletonBlockType(type) || !settings.layout.blocks.some((block) => block.type === type);
 }
 
@@ -292,6 +307,9 @@ function nextGridPosition(settings: StartPageSettings): { column: number; row: n
 
 export async function addBlockInstance<T extends BlockType>(type: T): Promise<BlockInstanceFor<T>> {
   const current = await getStartPageSettings();
+  if (current.layout.blocks.length >= MAX_START_PAGE_BLOCKS) {
+    throw new Error(`Start Tab supports at most ${MAX_START_PAGE_BLOCKS} block instances`);
+  }
   if (!canAddBlock(current, type)) throw new Error(`Singleton block already exists: ${type}`);
   const block = createBlockInstance(type, {
     ...nextGridPosition(current),
@@ -336,6 +354,9 @@ export async function duplicateBlockInstance(id: string, title?: string): Promis
   const source = current.layout.blocks.find((block) => block.id === id);
   if (!source) throw new Error(`Block instance not found: ${id}`);
   if (isSingletonBlockType(source.type)) throw new Error(`Singleton block cannot be duplicated: ${source.type}`);
+  if (current.layout.blocks.length >= MAX_START_PAGE_BLOCKS) {
+    throw new Error(`Start Tab supports at most ${MAX_START_PAGE_BLOCKS} block instances`);
+  }
   const now = Date.now();
   const duplicate: BlockInstance = {
     ...cloneBlock(source),

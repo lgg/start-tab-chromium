@@ -1,4 +1,5 @@
 import { BUILT_IN_THEMES, cloneTheme } from "./start-page-defaults.js";
+import { MAX_CUSTOM_THEMES } from "./platform-limits.js";
 import { THEME_SCHEMA_VERSION, type AnimatedEffectConfig, type BackgroundTile, type StartPageTheme, type ThemeBundle, type ValidationIssue, type ValidationResult } from "./start-page-types.js";
 import { booleanValue, finiteNumber, isRecord, oneOf, safeCssToken, safeGradient, safeWebUrl, stringValue, timestampValue, trimmedString } from "./start-page-validation-primitives.js";
 
@@ -65,7 +66,7 @@ export function normalizeCustomThemes(value: unknown, issues: ValidationIssue[])
   if (!Array.isArray(value)) return [];
   const result: StartPageTheme[] = [];
   const seen = new Set(BUILT_IN_THEMES.map((theme) => theme.id));
-  for (const [index, item] of value.entries()) {
+  for (const [index, item] of value.slice(0, MAX_CUSTOM_THEMES).entries()) {
     const fallback = cloneTheme(BUILT_IN_THEMES[0]!);
     fallback.id = `custom-theme-${index + 1}`;
     fallback.name = `Custom theme ${index + 1}`;

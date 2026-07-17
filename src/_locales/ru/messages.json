@@ -247,5 +247,6 @@
   "settingsReset": { "message": "Настройки сброшены." },
   "invalidJson": { "message": "Некорректный JSON в {field}: {error}" }
 ,
-  "applyPresetWithDataConfirm": { "message": "Применение этого пресета безвозвратно удалит сохранённые данные блоков, которых нет в новом макете. Продолжить?" }
+  "applyPresetWithDataConfirm": { "message": "Применение этого пресета безвозвратно удалит сохранённые данные блоков, которых нет в новом макете. Продолжить?" },
+  "blockCapacityReached": { "message": "Достигнут максимум: {count} экземпляров блоков." }
 }

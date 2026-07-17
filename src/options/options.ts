@@ -33,6 +33,7 @@ import {
 } from "../lib/i18n.js";
 import { editBlockInstance } from "../lib/block-settings-editor.js";
 import { sendMessage } from "../lib/messages.js";
+import { MAX_START_PAGE_BLOCKS } from "../lib/platform-limits.js";
 import {
   deleteInstanceRuntime,
   getStartPageRuntimeState,
@@ -360,6 +361,8 @@ function blockActions(block: BlockInstance): HTMLElement {
   actions.append(edit, toggle);
   if (!isSingletonBlockType(block.type)) {
     const duplicate = button(i18n.t("duplicate"), "button button--secondary");
+    duplicate.disabled = settings.layout.blocks.length >= MAX_START_PAGE_BLOCKS;
+    if (duplicate.disabled) duplicate.title = i18n.t("blockCapacityReached", { count: MAX_START_PAGE_BLOCKS });
     duplicate.addEventListener("click", () => void runAction(async () => { await duplicateBlockInstance(block.id); }, i18n.t("instanceDuplicated")));
     actions.append(duplicate);
   }
@@ -394,6 +397,9 @@ function renderBlocks(): HTMLElement {
   const addSelect = select<BlockType>(available[0]?.type ?? "dateTime", available.map((descriptor) => [descriptor.type, i18n.t(descriptor.titleKey)]));
   const add = button(i18n.t("addBlock"), "button button--primary");
   add.disabled = available.length === 0;
+  if (settings.layout.blocks.length >= MAX_START_PAGE_BLOCKS) {
+    add.title = i18n.t("blockCapacityReached", { count: MAX_START_PAGE_BLOCKS });
+  }
   add.addEventListener("click", () => void runAction(async () => {
     const created = await addBlockInstance(addSelect.value as BlockType);
     const configured = await editBlockInstance(created, i18n);
