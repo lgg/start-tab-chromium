@@ -23,6 +23,7 @@ This checklist is designed for a clean Chromium profile. Record browser version,
 - [ ] Confirm returning to the original URL works.
 - [ ] Add several hosts, remove one, and confirm unrelated hosts remain blocked.
 - [ ] Clear the blocklist from Options.
+- [ ] Verify a blocklist at the supported 5,000-site boundary can be validated, while a 5,001-site replacement or backup import is rejected without changing the existing blocklist or DNR rules.
 - [ ] Confirm focus-statistics counters update only once per event.
 
 ## Clean install and onboarding
@@ -221,3 +222,8 @@ For each failed item capture:
 - Console/service-worker logs.
 - Screenshot or short recording.
 - Whether the issue reproduces after a clean profile reset.
+
+## Round 16 targeted interactive checks
+
+- [ ] Start multiple Timer/Pomodoro instances, use **Reset all clocks**, and confirm every configured clock resets together with no delayed completion notification from the previous alarms.
+- [ ] In a Chromium-derived browser that rejects all native-new-tab URLs, use the native-tab escape and confirm the temporary `about:blank` tab and bypass marker are cleaned up after the visible error.

@@ -195,9 +195,22 @@ export async function recordFocusSessionCompleted(focusTimeMs: number, completio
     await writeStatsInTransaction(stats);
   });
 }
-export async function recordFocusSessionInterrupted(focusTimeMs: number): Promise<void> {
+export async function recordFocusSessionsInterrupted(focusTimesMs: readonly number[]): Promise<void> {
+  const normalized = focusTimesMs
+    .filter((value) => typeof value === "number" && Number.isFinite(value) && value > 0)
+    .map((value) => Math.max(0, value));
+  if (normalized.length === 0) return;
+  const totalFocusTimeMs = normalized.reduce((total, value) => total + value, 0);
   await mutateStats((stats) => {
-    addToCounts(stats.totals, { focusSessionsInterrupted: 1, focusTimeMs });
-    addToCounts(ensureDay(stats), { focusSessionsInterrupted: 1, focusTimeMs });
+    const patch = {
+      focusSessionsInterrupted: normalized.length,
+      focusTimeMs: totalFocusTimeMs,
+    };
+    addToCounts(stats.totals, patch);
+    addToCounts(ensureDay(stats), patch);
   });
+}
+
+export async function recordFocusSessionInterrupted(focusTimeMs: number): Promise<void> {
+  await recordFocusSessionsInterrupted([focusTimeMs]);
 }
