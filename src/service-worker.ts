@@ -17,10 +17,8 @@ import {
 } from "./lib/blocklist.js";
 import {
   recordBlockedNavigation,
-  recordFocusSessionCompleted,
-  recordFocusSessionInterrupted,
-  recordFocusSessionsInterrupted,
-  recordFocusSessionStarted,
+  FOCUS_STATS_KEY,
+  applyFocusClockStatsPatchInExistingTransaction,
   recordUnblockAfterCountdown,
   resetFocusStats,
 } from "./lib/focus-stats.js";
@@ -40,7 +38,8 @@ import {
   resetClockState,
   resetStartPageData,
   startClockState,
-  mutateStartPageRuntimeStateWithAlarms,
+  mutateStartPageRuntimeStateWithAlarmsAndStorageEffect,
+  pomodoroFocusElapsedMs,
   updateStartPageRuntimeState,
 } from "./lib/start-page-runtime.js";
 import {
@@ -225,7 +224,7 @@ async function updateRuntimeLinkPage(instanceId: string, page: number, expectedP
 
 async function performClockAction(instanceId: string, action: ClockAction): Promise<void> {
   const now = Date.now();
-  const outcome = await mutateStartPageRuntimeStateWithAlarms<{
+  await mutateStartPageRuntimeStateWithAlarmsAndStorageEffect<{
     next: ClockRuntimeState;
     interruptedMs: number;
     startedWork: boolean;
@@ -241,12 +240,12 @@ async function performClockAction(instanceId: string, action: ClockAction): Prom
 
     if (action === "reset") {
       if (block.type === "pomodoro" && clock.running && clock.phase === "work" && clock.focusSessionStartedAt !== null) {
-        interruptedMs = Math.max(0, now - clock.focusSessionStartedAt);
+        interruptedMs = pomodoroFocusElapsedMs(clock, now);
       }
       next = resetClockState(block);
     } else if (clock.running) {
       if (block.type === "pomodoro" && clock.phase === "work" && clock.focusSessionStartedAt !== null) {
-        interruptedMs = Math.max(0, now - clock.focusSessionStartedAt);
+        interruptedMs = pomodoroFocusElapsedMs(clock, now);
       }
       next = pauseClockState(clock, now);
       if (next.type === "pomodoro") next.focusSessionStartedAt = null;
@@ -257,17 +256,18 @@ async function performClockAction(instanceId: string, action: ClockAction): Prom
 
     runtime.clocks[instanceId] = next;
     return { state: runtime, result: { next, interruptedMs, startedWork } };
+  }, [FOCUS_STATS_KEY], async (outcome) => {
+    if (!outcome || (!outcome.startedWork && outcome.interruptedMs <= 0)) return;
+    await applyFocusClockStatsPatchInExistingTransaction({
+      startedSessions: outcome.startedWork ? 1 : 0,
+      interruptedFocusTimesMs: outcome.interruptedMs > 0 ? [outcome.interruptedMs] : [],
+      occurredAt: now,
+    });
   });
-  if (!outcome) return;
-  if (outcome.startedWork) await runStatsJob(recordFocusSessionStarted);
-  if (outcome.interruptedMs > 0) await runStatsJob(() => recordFocusSessionInterrupted(outcome.interruptedMs));
 }
 
 async function resetAllClocks(): Promise<void> {
-  const interruptedFocusTimes = await resetAllClockRuntimeWithAlarms();
-  if (interruptedFocusTimes.length > 0) {
-    await runStatsJob(() => recordFocusSessionsInterrupted(interruptedFocusTimes));
-  }
+  await resetAllClockRuntimeWithAlarms();
 }
 
 async function finishClockCompletion(instanceId: string, token: string): Promise<void> {
@@ -275,11 +275,7 @@ async function finishClockCompletion(instanceId: string, token: string): Promise
   // completeClockInstance performs the same durable scheduleClockAlarm reconciliation atomically.
   if (!result.completed || !result.block || !result.clock) return;
   const block = result.block;
-  const completionId = `${instanceId}:${token}`;
   const effects: Array<() => Promise<void>> = [];
-  if (result.focusTimeMs > 0) {
-    effects.push(() => runStatsJob(() => recordFocusSessionCompleted(result.focusTimeMs, completionId)));
-  }
   if (result.notify) {
     const messageKey = block.type === "pomodoro" ? "pomodoroDone" : "timerDone";
     effects.push(async () => {

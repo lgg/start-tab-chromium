@@ -114,6 +114,10 @@ Also verify:
 - [ ] Start at least two Timer instances with different durations.
 - [ ] Start at least two Stopwatch instances.
 - [ ] Start at least two Pomodoro instances with different work/break durations.
+- [ ] Enable automatic next phases, complete a break, and confirm the next work phase starts and the focus-session-start counter advances exactly once.
+- [ ] Suspend the device or browser past a Pomodoro work deadline, resume it, and confirm total focus time increases only by the configured work duration rather than the suspend delay.
+- [ ] Pause, reset, and use **Reset all clocks** on an already overdue Pomodoro; confirm interrupted focus time is capped at the original deadline.
+- [ ] Force a focus-statistics storage failure during a Pomodoro transition and confirm clock runtime, statistics, data revision, and alarms all remain at their exact previous values.
 - [ ] Close all new-tab pages and allow a timer to complete.
 - [ ] Restart the service worker and confirm running clocks recover from timestamps.
 - [ ] Pause, resume, and reset each type independently.

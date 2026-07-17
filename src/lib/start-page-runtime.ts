@@ -2,6 +2,10 @@ import { commitStorageMutationWithRevision, DATA_REVISION_KEY, markStartTabDataC
 import { withStorageLock } from "./storage-lock.js";
 import { sendMessage } from "./messages.js";
 import {
+  FOCUS_STATS_KEY,
+  applyFocusClockStatsPatchInExistingTransaction,
+} from "./focus-stats.js";
+import {
   RUNTIME_SCHEMA_VERSION,
   type BlockInstance,
   type ClockBlockType,
@@ -299,9 +303,19 @@ interface RuntimeMutation<T> {
   result: T;
 }
 
+interface RuntimeStorageEffect<T> {
+  keys: readonly string[];
+  apply: (result: T) => Promise<void>;
+}
+
+function uniqueStorageKeys(...groups: readonly (readonly string[])[]): string[] {
+  return [...new Set(groups.flatMap((group) => [...group]))];
+}
+
 async function runRuntimeMutation<T>(
   mutator: (state: StartPageRuntimeState, settings: StartPageSettings) => RuntimeMutation<T>,
   reconcileAlarms = false,
+  storageEffect: RuntimeStorageEffect<T> | null = null,
 ): Promise<{ result: T; state: StartPageRuntimeState }> {
   return withStorageLock("data-write", async () => {
     const { settings } = await readRuntimeSettingsSnapshot(true);
@@ -314,8 +328,13 @@ async function runRuntimeMutation<T>(
     const mutation = mutator(structuredClone(current), settings);
     if (mutation.state === null) return { result: mutation.result, state: current };
     const next = normalizeRuntimeState(mutation.state, settings);
-    const previousStorage = reconcileAlarms
-      ? await chrome.storage.local.get([...RUNTIME_STORAGE_KEYS])
+    const rollbackKeys = uniqueStorageKeys(
+      RUNTIME_STORAGE_KEYS,
+      storageEffect?.keys ?? [],
+    );
+    const needsRollbackSnapshot = reconcileAlarms || storageEffect !== null;
+    const previousStorage = needsRollbackSnapshot
+      ? await chrome.storage.local.get(rollbackKeys)
       : null;
     const previousAlarms = reconcileAlarms ? await readClockAlarmSnapshot() : null;
     const saved = await persistRuntimeInTransaction(
@@ -325,13 +344,14 @@ async function runRuntimeMutation<T>(
       current.updatedAt,
       items[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined,
     );
-    if (reconcileAlarms && previousStorage && previousAlarms) {
+    if (needsRollbackSnapshot && previousStorage) {
       try {
-        await reconcileClockAlarmsForRuntime(saved);
+        if (storageEffect) await storageEffect.apply(mutation.result);
+        if (reconcileAlarms) await reconcileClockAlarmsForRuntime(saved);
       } catch (error) {
         try {
-          await restoreStorageKeysSnapshot(previousStorage, RUNTIME_STORAGE_KEYS);
-          await restoreClockAlarmSnapshot(previousAlarms);
+          await restoreStorageKeysSnapshot(previousStorage, rollbackKeys);
+          if (previousAlarms) await restoreClockAlarmSnapshot(previousAlarms);
         } catch (rollbackError) {
           throw new AggregateError(
             [error, rollbackError],
@@ -356,6 +376,18 @@ export async function mutateStartPageRuntimeStateWithAlarms<T>(
   mutator: (state: StartPageRuntimeState, settings: StartPageSettings) => RuntimeMutation<T>,
 ): Promise<T> {
   return (await runRuntimeMutation(mutator, true)).result;
+}
+
+/**
+ * Commit runtime, a related storage effect, the data revision, and the complete
+ * durable alarm set as one rollback-safe transaction.
+ */
+export async function mutateStartPageRuntimeStateWithAlarmsAndStorageEffect<T>(
+  mutator: (state: StartPageRuntimeState, settings: StartPageSettings) => RuntimeMutation<T>,
+  storageKeys: readonly string[],
+  storageEffect: (result: T) => Promise<void>,
+): Promise<T> {
+  return (await runRuntimeMutation(mutator, true, { keys: storageKeys, apply: storageEffect })).result;
 }
 
 export async function updateStartPageRuntimeState(
@@ -623,23 +655,39 @@ export function resetClockState(block: Extract<BlockInstance, { type: ClockBlock
   return { ...fallback, phase, durationMs: (phase === "break" ? block.config.breakSeconds : block.config.workSeconds) * 1000 };
 }
 
+/** Return active Pomodoro work time without counting alarm/suspend delay past its deadline. */
+export function pomodoroFocusElapsedMs(clock: ClockRuntimeState, now = Date.now()): number {
+  if (clock.type !== "pomodoro"
+    || !clock.running
+    || clock.phase !== "work"
+    || clock.focusSessionStartedAt === null) return 0;
+  const effectiveEnd = clock.targetAt === null ? now : Math.min(now, clock.targetAt);
+  return Math.max(0, effectiveEnd - clock.focusSessionStartedAt);
+}
+
 /** Reset every configured clock and its complete alarm set as one recoverable transaction. */
 export async function resetAllClockRuntimeWithAlarms(now = Date.now()): Promise<number[]> {
-  return mutateStartPageRuntimeStateWithAlarms<number[]>((runtime, settings) => {
-    const interruptedFocusTimes: number[] = [];
-    for (const block of settings.layout.blocks) {
-      if (!isClockBlock(block)) continue;
-      const current = runtime.clocks[block.id] ?? defaultClockForBlock(block);
-      if (block.type === "pomodoro"
-        && current.running
-        && current.phase === "work"
-        && current.focusSessionStartedAt !== null) {
-        interruptedFocusTimes.push(Math.max(0, now - current.focusSessionStartedAt));
+  return mutateStartPageRuntimeStateWithAlarmsAndStorageEffect<number[]>(
+    (runtime, settings) => {
+      const interruptedFocusTimes: number[] = [];
+      for (const block of settings.layout.blocks) {
+        if (!isClockBlock(block)) continue;
+        const current = runtime.clocks[block.id] ?? defaultClockForBlock(block);
+        const interruptedMs = pomodoroFocusElapsedMs(current, now);
+        if (interruptedMs > 0) interruptedFocusTimes.push(interruptedMs);
+        runtime.clocks[block.id] = resetClockState(block);
       }
-      runtime.clocks[block.id] = resetClockState(block);
-    }
-    return { state: runtime, result: interruptedFocusTimes };
-  });
+      return { state: runtime, result: interruptedFocusTimes };
+    },
+    [FOCUS_STATS_KEY],
+    async (interruptedFocusTimes) => {
+      if (interruptedFocusTimes.length === 0) return;
+      await applyFocusClockStatsPatchInExistingTransaction({
+        interruptedFocusTimesMs: interruptedFocusTimes,
+        occurredAt: now,
+      });
+    },
+  );
 }
 
 export function clockAlarmName(instanceId: string, token: string): string {
@@ -688,26 +736,28 @@ export interface ClockCompletionResult {
   clock: ClockRuntimeState | null;
   notify: boolean;
   focusTimeMs: number;
+  startedWork: boolean;
+  completedToken: string | null;
 }
 
 export async function completeClockInstance(instanceId: string, expectedToken: string | null, now = Date.now()): Promise<ClockCompletionResult> {
-  return mutateStartPageRuntimeStateWithAlarms<ClockCompletionResult>((runtime, settings) => {
+  return mutateStartPageRuntimeStateWithAlarmsAndStorageEffect<ClockCompletionResult>((runtime, settings) => {
     const block = settings.layout.blocks.find(
       (candidate): candidate is Extract<BlockInstance, { type: ClockBlockType }> => candidate.id === instanceId && isClockBlock(candidate),
     ) ?? null;
     if (!block) {
-      return { state: null, result: { completed: false, block: null, clock: null, notify: false, focusTimeMs: 0 } };
+      return { state: null, result: { completed: false, block: null, clock: null, notify: false, focusTimeMs: 0, startedWork: false, completedToken: null } };
     }
     const current = runtime.clocks[instanceId] ?? defaultClockForBlock(block);
     const token = current.completionToken;
     if (!current.running || current.type === "stopwatch" || current.targetAt === null || current.targetAt > now + 1000) {
-      return { state: null, result: { completed: false, block, clock: current, notify: false, focusTimeMs: 0 } };
+      return { state: null, result: { completed: false, block, clock: current, notify: false, focusTimeMs: 0, startedWork: false, completedToken: null } };
     }
     if (expectedToken && token !== expectedToken) {
-      return { state: null, result: { completed: false, block, clock: current, notify: false, focusTimeMs: 0 } };
+      return { state: null, result: { completed: false, block, clock: current, notify: false, focusTimeMs: 0, startedWork: false, completedToken: null } };
     }
     if (token && current.lastCompletedToken === token) {
-      return { state: null, result: { completed: false, block, clock: current, notify: false, focusTimeMs: 0 } };
+      return { state: null, result: { completed: false, block, clock: current, notify: false, focusTimeMs: 0, startedWork: false, completedToken: null } };
     }
 
     let next: ClockRuntimeState;
@@ -717,7 +767,7 @@ export async function completeClockInstance(instanceId: string, expectedToken: s
     } else if (block.type === "pomodoro") {
       const completedPhase = current.phase ?? "work";
       if (completedPhase === "work" && current.focusSessionStartedAt !== null) {
-        focusTimeMs = Math.max(0, now - current.focusSessionStartedAt);
+        focusTimeMs = pomodoroFocusElapsedMs(current, now);
       }
       const nextPhase: PomodoroPhase = completedPhase === "work" ? "break" : "work";
       const nextDuration = (nextPhase === "work" ? block.config.workSeconds : block.config.breakSeconds) * 1000;
@@ -735,14 +785,30 @@ export async function completeClockInstance(instanceId: string, expectedToken: s
         completionToken: autoStart ? clockToken() : null,
       };
     } else {
-      return { state: null, result: { completed: false, block, clock: current, notify: false, focusTimeMs: 0 } };
+      return { state: null, result: { completed: false, block, clock: current, notify: false, focusTimeMs: 0, startedWork: false, completedToken: null } };
     }
 
     runtime.clocks[instanceId] = next;
     return {
       state: runtime,
-      result: { completed: true, block, clock: next, notify: block.config.notifyOnComplete, focusTimeMs },
+      result: {
+        completed: true,
+        block,
+        clock: next,
+        notify: block.config.notifyOnComplete,
+        focusTimeMs,
+        startedWork: block.type === "pomodoro" && next.running && next.phase === "work",
+        completedToken: token,
+      },
     };
+  }, [FOCUS_STATS_KEY], async (result) => {
+    if (!result.completed || (!result.startedWork && result.focusTimeMs <= 0)) return;
+    await applyFocusClockStatsPatchInExistingTransaction({
+      startedSessions: result.startedWork ? 1 : 0,
+      completedFocusTimeMs: result.focusTimeMs > 0 ? result.focusTimeMs : undefined,
+      completionId: result.completedToken ? `${instanceId}:${result.completedToken}` : undefined,
+      occurredAt: now,
+    });
   });
 }
 
