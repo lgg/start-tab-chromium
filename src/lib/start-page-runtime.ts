@@ -1,5 +1,6 @@
 import { commitStorageMutationWithRevision, DATA_REVISION_KEY, markStartTabDataChanged } from "./data-revision.js";
 import { withStorageLock } from "./storage-lock.js";
+import { MAX_LOCAL_TASKS_PER_INSTANCE } from "./platform-limits.js";
 import { sendMessage } from "./messages.js";
 import {
   FOCUS_STATS_KEY,
@@ -148,7 +149,7 @@ function normalizeTask(value: unknown, index: number): LocalTask | null {
 function normalizeTaskList(value: unknown): LocalTask[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
-  return value.flatMap((item, index) => {
+  return value.slice(0, MAX_LOCAL_TASKS_PER_INSTANCE).flatMap((item, index) => {
     const task = normalizeTask(item, index);
     if (!task) return [];
     const baseId = task.id;

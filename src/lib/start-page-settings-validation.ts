@@ -22,6 +22,7 @@ import {
   isSingletonBlockType,
 } from "./start-page-defaults.js";
 import { normalizeBlockConfig } from "./start-page-block-validation.js";
+import { MAX_START_PAGE_BLOCKS } from "./platform-limits.js";
 import { migrateLegacyTheme, normalizeCustomThemes } from "./start-page-theme-validation.js";
 import {
   booleanValue,
@@ -118,7 +119,7 @@ function normalizeGridCollisions(blocks: BlockInstance[]): BlockInstance[] {
 }
 
 function normalizeBlocks(value: unknown, root: Record<string, unknown>, columns: number, zone: LayoutZone, mode: LayoutMode, issues: ValidationIssue[], migrationIssues: MigrationIssue[]): BlockInstance[] {
-  const source = Array.isArray(value) ? value : cloneBlocks(DEFAULT_LAYOUT_BLOCKS);
+  const source = Array.isArray(value) ? value.slice(0, MAX_START_PAGE_BLOCKS) : cloneBlocks(DEFAULT_LAYOUT_BLOCKS);
   const seenIds = new Set<string>();
   const seenSingletons = new Set<BlockType>();
   const blocks = source.flatMap((candidate, index) => {

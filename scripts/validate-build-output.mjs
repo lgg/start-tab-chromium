@@ -76,6 +76,12 @@ if (variant === "full") {
   }
 }
 
+const optionsSource = await readFile(path.join(outdir, "options.js"), "utf8");
+assert.match(optionsSource, /Start Tab supports at most \$\{[^}]+\} block instances/,
+  "options.js must reject settings above the shared block capacity");
+assert.ok(optionsSource.includes("Start Tab backup contains more than"),
+  "options.js must reject oversized imported collections before normalization");
+
 const serviceWorkerSource = await readFile(path.join(outdir, "service-worker.js"), "utf8");
 for (const marker of ["complete-clock", "clock-action", "reset-clocks", "runtime-note", "runtime-tasks", "runtime-link-page", "delete-instance-runtime", "record-unblock", "reset-stats", "replace-blocked-sites", "open-native-new-tab", "reset-start-page", "replace-start-page-settings"]) {
   assert.ok(serviceWorkerSource.includes(marker), `service-worker.js must own ${marker}`);

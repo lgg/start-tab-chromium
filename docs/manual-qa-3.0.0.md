@@ -231,3 +231,11 @@ For each failed item capture:
 
 - [ ] Start multiple Timer/Pomodoro instances, use **Reset all clocks**, and confirm every configured clock resets together with no delayed completion notification from the previous alarms.
 - [ ] In a Chromium-derived browser that rejects all native-new-tab URLs, use the native-tab escape and confirm the temporary `about:blank` tab and bypass marker are cleaned up after the visible error.
+
+## Round 18 collection-capacity checks
+
+- [ ] Confirm the Layout Editor and Options stop offering new or duplicate blocks at the supported 1,000-instance boundary and display a clear capacity message.
+- [ ] Import a backup with 1,001 blocks and confirm it is rejected without changing current settings, runtime, DNR rules, or alarms.
+- [ ] Import a backup with 1,001 custom themes and confirm it is rejected before any storage mutation.
+- [ ] Import a backup containing 10,001 tasks in one Local Tasks instance and confirm it is rejected instead of creating a task list that cannot later be edited.
+- [ ] Confirm backups exactly at 1,000 blocks, 1,000 custom themes, and 10,000 tasks remain valid.
