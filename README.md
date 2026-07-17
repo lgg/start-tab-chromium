@@ -28,7 +28,7 @@ Start Tab is a Manifest V3 extension for Chromium-based browsers. It combines a 
 - Animated backgrounds with effect-specific controls and `prefers-reduced-motion` handling.
 - Settings button visibility and hover-area controls.
 - Link grid rows, columns, icon size, font size, and horizontal or vertical paged navigation.
-- Independent Timer, Stopwatch, and Pomodoro state persistence across new tabs and service-worker restarts, with durable alarms and optional completion notifications.
+- Independent Timer, Stopwatch, and Pomodoro state persistence across new tabs and service-worker restarts, with durable alarms, deadline-capped focus accounting, atomic clock/statistics updates, and optional completion notifications.
 - Tabbed options page with General, Start Tab, Blocklist, Backup, and About sections.
 - Centralized validation for numeric settings, URLs, coordinates, provider endpoints, search templates, clocks, themes, and imported data.
 - Versioned JSON export/import with legacy migration, pre-import recovery, rollback, and corrupted-element isolation.

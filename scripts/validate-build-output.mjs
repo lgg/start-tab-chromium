@@ -85,6 +85,10 @@ assert.ok(serviceWorkerSource.includes("Opening the native new tab failed and cl
   "service-worker.js must include temporary native-tab cleanup");
 assert.ok(serviceWorkerSource.includes("Start Tab supports at most"),
   "service-worker.js must enforce the Chrome DNR redirect-rule capacity");
+assert.ok(serviceWorkerSource.includes("Clock runtime mutation failed and its storage/alarm rollback was incomplete"),
+  "service-worker.js must contain rollback-safe clock/statistics transactions");
+assert.ok(serviceWorkerSource.includes("focusSessionsStarted"),
+  "service-worker.js must contain Pomodoro start/completion statistics accounting");
 
 for (const file of ["service-worker.js", "popup.js", "blocked.js", "options.js", ...(variant === "full" ? ["newtab.js"] : [])]) {
   const source = await readFile(path.join(outdir, file), "utf8");

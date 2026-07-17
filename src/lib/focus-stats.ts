@@ -42,8 +42,8 @@ function emptyStats(): FocusStats {
   return { version: 1, totals: { ...EMPTY_COUNTS }, byDay: {}, byDomain: {}, processedClockCompletions: {} };
 }
 function dayKey(date = new Date()): string { return date.toISOString().slice(0, 10); }
-function ensureDay(stats: FocusStats): CountSet {
-  const key = dayKey();
+function ensureDay(stats: FocusStats, occurredAt = Date.now()): CountSet {
+  const key = dayKey(new Date(occurredAt));
   const existing = stats.byDay[key];
   if (existing) return existing;
   const created = { ...EMPTY_COUNTS };
@@ -134,6 +134,69 @@ function addToCounts(counts: CountSet, patch: Partial<CountSet>): void {
   counts.focusSessionsInterrupted += patch.focusSessionsInterrupted ?? 0;
   counts.focusTimeMs += patch.focusTimeMs ?? 0;
 }
+
+export interface FocusClockStatsPatch {
+  startedSessions?: number;
+  completedFocusTimeMs?: number;
+  interruptedFocusTimesMs?: readonly number[];
+  completionId?: string;
+  occurredAt?: number;
+}
+
+function normalizedFocusTimes(values: readonly number[] | undefined): number[] {
+  return (values ?? [])
+    .filter((value) => typeof value === "number" && Number.isFinite(value) && value > 0)
+    .map((value) => Math.max(0, value));
+}
+
+function applyFocusClockStatsPatch(stats: FocusStats, patch: FocusClockStatsPatch): boolean {
+  const completionId = typeof patch.completionId === "string" && patch.completionId.length <= 520
+    ? patch.completionId
+    : undefined;
+  if (completionId && stats.processedClockCompletions[completionId]) return false;
+
+  const startedSessions = typeof patch.startedSessions === "number" && Number.isFinite(patch.startedSessions)
+    ? Math.max(0, Math.round(patch.startedSessions))
+    : 0;
+  const completedFocusTimeMs = typeof patch.completedFocusTimeMs === "number"
+    && Number.isFinite(patch.completedFocusTimeMs)
+    && patch.completedFocusTimeMs > 0
+    ? Math.max(0, patch.completedFocusTimeMs)
+    : 0;
+  const interrupted = normalizedFocusTimes(patch.interruptedFocusTimesMs);
+  const interruptedFocusTimeMs = interrupted.reduce((total, value) => total + value, 0);
+  if (startedSessions === 0 && completedFocusTimeMs === 0 && interrupted.length === 0) return false;
+
+  const countsPatch: Partial<CountSet> = {
+    focusSessionsStarted: startedSessions,
+    focusSessionsCompleted: completedFocusTimeMs > 0 ? 1 : 0,
+    focusSessionsInterrupted: interrupted.length,
+    focusTimeMs: completedFocusTimeMs + interruptedFocusTimeMs,
+  };
+  addToCounts(stats.totals, countsPatch);
+  addToCounts(ensureDay(stats, patch.occurredAt), countsPatch);
+
+  if (completionId) {
+    stats.processedClockCompletions[completionId] = Math.max(1, patch.occurredAt ?? Date.now());
+    const newest = Object.entries(stats.processedClockCompletions)
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, 512);
+    stats.processedClockCompletions = Object.fromEntries(newest);
+  }
+  return true;
+}
+
+/**
+ * Apply clock statistics while the caller already owns the shared data-write
+ * lock and the surrounding storage/revision transaction. This intentionally
+ * writes no separate data revision.
+ */
+export async function applyFocusClockStatsPatchInExistingTransaction(patch: FocusClockStatsPatch): Promise<void> {
+  const stats = await readStats(true);
+  if (!applyFocusClockStatsPatch(stats, patch)) return;
+  await chrome.storage.local.set({ [FOCUS_STATS_KEY]: stats });
+}
+
 function domainMinutes(host: string, settings: StartPageSettings): number {
   return settings.focusStats.domainMinutes[host] ?? settings.focusStats.defaultMinutesPerAvoidedVisit;
 }
@@ -184,30 +247,15 @@ export async function recordFocusSessionStarted(): Promise<void> {
 export async function recordFocusSessionCompleted(focusTimeMs: number, completionId?: string): Promise<void> {
   await withStorageLock("data-write", async () => {
     const stats = await readStats(true);
-    if (completionId && stats.processedClockCompletions[completionId]) return;
-    addToCounts(stats.totals, { focusSessionsCompleted: 1, focusTimeMs });
-    addToCounts(ensureDay(stats), { focusSessionsCompleted: 1, focusTimeMs });
-    if (completionId) {
-      stats.processedClockCompletions[completionId] = Date.now();
-      const newest = Object.entries(stats.processedClockCompletions).sort((left, right) => right[1] - left[1]).slice(0, 512);
-      stats.processedClockCompletions = Object.fromEntries(newest);
-    }
+    if (!applyFocusClockStatsPatch(stats, { completedFocusTimeMs: focusTimeMs, completionId })) return;
     await writeStatsInTransaction(stats);
   });
 }
 export async function recordFocusSessionsInterrupted(focusTimesMs: readonly number[]): Promise<void> {
-  const normalized = focusTimesMs
-    .filter((value) => typeof value === "number" && Number.isFinite(value) && value > 0)
-    .map((value) => Math.max(0, value));
-  if (normalized.length === 0) return;
-  const totalFocusTimeMs = normalized.reduce((total, value) => total + value, 0);
-  await mutateStats((stats) => {
-    const patch = {
-      focusSessionsInterrupted: normalized.length,
-      focusTimeMs: totalFocusTimeMs,
-    };
-    addToCounts(stats.totals, patch);
-    addToCounts(ensureDay(stats), patch);
+  await withStorageLock("data-write", async () => {
+    const stats = await readStats(true);
+    if (!applyFocusClockStatsPatch(stats, { interruptedFocusTimesMs: focusTimesMs })) return;
+    await writeStatsInTransaction(stats);
   });
 }
 

@@ -20,8 +20,8 @@ assert.match(worker, /case "reset-clocks": await runRuntimeJob\(resetAllClocks\)
   "The complete reset-all command must be serialized as one runtime job");
 assert.doesNotMatch(worker, /for \(const instanceId of clockIds\)/,
   "Reset-all must not regress to per-instance partial commits");
-assert.match(worker, /recordFocusSessionsInterrupted\(interruptedFocusTimes\)/,
-  "Reset-all must record all interruption durations with one batch stats mutation");
+assert.match(runtime, /resetAllClockRuntimeWithAlarms[\s\S]*\[FOCUS_STATS_KEY\][\s\S]*applyFocusClockStatsPatchInExistingTransaction/,
+  "Reset-all must record all interruption durations inside its atomic runtime transaction");
 assert.match(focus, /export async function recordFocusSessionsInterrupted/,
   "Batch interruption accounting must remain available");
 assert.match(worker, /consumeNativeNewTabBypass, openNativeNewTab/,
