@@ -18,6 +18,7 @@ import {
   isFutureStartPageSchema,
   isRecord,
   normalizeStartPageSettings,
+  prepareStartPageSettingsWrite,
 } from "./start-page-settings.js";
 
 export type { StartPageRuntimeState } from "./start-page-types.js";
@@ -440,6 +441,77 @@ export async function reconcileStoredClockAlarms(): Promise<void> {
       items[LEGACY_INSTANCE_RUNTIME_KEY],
     );
     await reconcileClockAlarmsForRuntime(runtime);
+  });
+}
+
+/**
+ * Replace settings and normalize per-instance runtime/alarms as one recoverable
+ * transaction. This is the only safe path for layout operations that can remove
+ * or replace block IDs.
+ */
+export async function replaceStartPageSettingsWithRuntime(
+  value: unknown,
+  expectedSettingsUpdatedAt: number,
+  expectedRuntimeUpdatedAt: number,
+): Promise<StartPageSettings> {
+  return withStorageLock("data-write", async () => {
+    const items = await chrome.storage.local.get([
+      START_PAGE_SETTINGS_KEY,
+      START_PAGE_RUNTIME_KEY,
+      LEGACY_INSTANCE_RUNTIME_KEY,
+    ]);
+    const prepared = prepareStartPageSettingsWrite(
+      value,
+      items[START_PAGE_SETTINGS_KEY],
+      expectedSettingsUpdatedAt,
+    );
+    if (isFutureRuntimeSchema(items[START_PAGE_RUNTIME_KEY])) {
+      throw new Error("Start Tab runtime data was created by a newer extension version and cannot be modified safely");
+    }
+    const previousSettings = normalizeStartPageSettings(items[START_PAGE_SETTINGS_KEY]);
+    const previousRuntime = normalizeRuntimeState(
+      items[START_PAGE_RUNTIME_KEY],
+      previousSettings,
+      items[LEGACY_INSTANCE_RUNTIME_KEY],
+    );
+    const retainedIds = new Set(prepared.settings.layout.blocks.map((block) => block.id));
+    const removesBlockIds = previousSettings.layout.blocks.some((block) => !retainedIds.has(block.id));
+    if (removesBlockIds
+      && previousRuntime.updatedAt > 0
+      && expectedRuntimeUpdatedAt !== previousRuntime.updatedAt) {
+      throw new Error("Start Tab runtime changed in another extension context; reload before replacing the layout");
+    }
+    const prunedRuntime = normalizeRuntimeState(previousRuntime, prepared.settings);
+    const runtime: StartPageRuntimeState = {
+      ...prunedRuntime,
+      updatedAt: Math.max(Date.now(), previousRuntime.updatedAt + 1),
+    };
+    const previousAlarms = await readClockAlarmSnapshot();
+    try {
+      await commitStorageMutationWithRevision(
+        [START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY],
+        async () => {
+          await chrome.storage.local.set({
+            [START_PAGE_SETTINGS_KEY]: prepared.settings,
+            [START_PAGE_RUNTIME_KEY]: runtime,
+          });
+          await chrome.storage.local.remove(LEGACY_INSTANCE_RUNTIME_KEY);
+          await reconcileClockAlarmsForRuntime(runtime);
+        },
+        Math.max(prepared.settings.updatedAt, runtime.updatedAt),
+      );
+      return prepared.settings;
+    } catch (error) {
+      try {
+        await restoreClockAlarmSnapshot(previousAlarms);
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          "Start Tab settings/runtime replacement failed and its alarm rollback was incomplete",
+        );
+      }
+      throw error;
+    }
   });
 }
 

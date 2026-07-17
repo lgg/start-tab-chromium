@@ -30,6 +30,9 @@ This checklist is designed for a clean Chromium profile. Record browser version,
 - [ ] Open the full build new-tab page on a clean profile.
 - [ ] Confirm onboarding is keyboard accessible.
 - [ ] Apply each layout preset in a separate reset cycle.
+- [ ] Customize a retained block, apply a preset that keeps its type, and confirm its ID, configuration, and runtime survive.
+- [ ] Start a Timer, apply a preset that removes it, confirm the destructive-data warning, and verify no later background completion notification appears.
+- [ ] Force or simulate a storage/alarm failure during preset save and confirm the previous layout and running clocks remain intact.
 - [ ] Skip onboarding and confirm the default layout remains usable.
 - [ ] Reload the page and confirm onboarding does not reappear.
 

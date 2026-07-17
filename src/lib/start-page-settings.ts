@@ -229,21 +229,34 @@ export async function getStartPageMigrationReport(): Promise<MigrationReport | n
   };
 }
 
-async function validateAndPersistSettingsInTransaction(
-  value: StartPageSettings,
+export function prepareStartPageSettingsWrite(
+  value: unknown,
   raw: unknown,
-): Promise<{ settings: StartPageSettings; issues: ValidationIssue[] }> {
+  expectedUpdatedAt: number,
+): { settings: StartPageSettings; issues: ValidationIssue[] } {
   if (isFutureStartPageSchema(raw)) {
     throw new Error("Start Tab settings were created by a newer extension version and cannot be modified safely");
   }
   const previous = normalizeStartPageSettings(raw);
-  if (previous.updatedAt > 0 && value.updatedAt !== previous.updatedAt) {
+  if (previous.updatedAt > 0 && expectedUpdatedAt !== previous.updatedAt) {
     throw new Error("Start Tab settings changed in another extension context; reload before saving");
   }
   const validation = validateStartPageSettings(value);
   const stamped = withBlockTimestamps(previous, validation.value, Math.max(Date.now(), previous.updatedAt + 1));
-  await persistSettingsInTransaction(stamped);
   return { settings: stamped, issues: validation.issues };
+}
+
+async function validateAndPersistSettingsInTransaction(
+  value: StartPageSettings,
+  raw: unknown,
+): Promise<{ settings: StartPageSettings; issues: ValidationIssue[] }> {
+  const previous = normalizeStartPageSettings(raw);
+  if (previous.updatedAt > 0 && value.updatedAt !== previous.updatedAt) {
+    throw new Error("Start Tab settings changed in another extension context; reload before saving");
+  }
+  const prepared = prepareStartPageSettingsWrite(value, raw, value.updatedAt);
+  await persistSettingsInTransaction(prepared.settings);
+  return prepared;
 }
 
 export async function setStartPageSettings(value: StartPageSettings): Promise<ValidationIssue[]> {
@@ -263,14 +276,6 @@ export async function updateStartPageSettings(
     }
     const current = normalizeStartPageSettings(raw);
     return validateAndPersistSettingsInTransaction(updater(cloneSettings(current)), raw);
-  });
-}
-
-export async function resetStartPageSettings(): Promise<StartPageSettings> {
-  return withStorageLock("data-write", async () => {
-    const settings = createDefaultStartPageSettings();
-    await persistSettingsInTransaction(settings, undefined, true);
-    return settings;
   });
 }
 
@@ -350,35 +355,72 @@ export async function duplicateBlockInstance(id: string, title?: string): Promis
   return duplicate;
 }
 
-export async function removeBlockInstance(id: string): Promise<BlockInstance> {
-  const current = await getStartPageSettings();
-  const removed = current.layout.blocks.find((block) => block.id === id);
-  if (!removed) throw new Error(`Block instance not found: ${id}`);
-  await setStartPageSettings({
-    ...current,
-    layout: {
-      ...current.layout,
-      profile: "custom",
-      blocks: current.layout.blocks.filter((block) => block.id !== id).map((block, order) => ({ ...block, order })),
-    },
+export function layoutReplacementRemovesUserData(
+  current: StartPageSettings,
+  next: StartPageSettings,
+  runtime: StartPageRuntimeState,
+): boolean {
+  const retainedIds = new Set(next.layout.blocks.map((block) => block.id));
+  return current.layout.blocks.filter((block) => !retainedIds.has(block.id)).some((block) => {
+    if (block.type === "note" && Boolean(runtime.notes[block.id]?.trim())) return true;
+    if (block.type === "localTasks" && (runtime.tasks[block.id]?.length ?? 0) > 0) return true;
+    if (block.type === "timer" || block.type === "stopwatch" || block.type === "pomodoro") {
+      const clock = runtime.clocks[block.id];
+      if (clock && (clock.running || clock.accumulatedMs > 0)) return true;
+    }
+    const defaultBlock = DEFAULT_LAYOUT_BLOCKS.find((candidate) => candidate.type === block.type);
+    return !defaultBlock
+      || block.title !== defaultBlock.title
+      || !jsonEqual(block.config, defaultBlock.config);
   });
-  return removed;
 }
 
-export async function applyLayoutPreset(presetId: LayoutPresetId): Promise<StartPageSettings> {
-  const current = await getStartPageSettings();
+export function settingsWithRemovedBlock(current: StartPageSettings, id: string): StartPageSettings {
+  if (!current.layout.blocks.some((block) => block.id === id)) throw new Error(`Block instance not found: ${id}`);
+  const next = cloneSettings(current);
+  next.layout.profile = "custom";
+  next.layout.blocks = next.layout.blocks
+    .filter((block) => block.id !== id)
+    .map((block, order) => ({ ...block, order }));
+  return next;
+}
+
+/**
+ * Apply preset geometry while reusing the first existing instance of each type.
+ * Stable IDs preserve per-instance settings/runtime whenever a preset keeps that type.
+ */
+export function settingsWithLayoutPreset(current: StartPageSettings, presetId: LayoutPresetId): StartPageSettings {
   const preset = LAYOUT_PRESETS.find((item) => item.id === presetId);
   if (!preset) throw new Error(`Unknown layout preset: ${presetId}`);
-  await setStartPageSettings({
-    ...current,
-    layout: {
-      ...current.layout,
-      columns: preset.columns,
-      profile: preset.id,
-      blocks: blocksFromPreset(preset, current.layout.zone),
-    },
+  const available = current.layout.blocks.map(cloneBlock);
+  const blocks = preset.blocks.map((spec, order): BlockInstance => {
+    const existingIndex = available.findIndex((block) => block.type === spec.type);
+    if (existingIndex < 0) {
+      return createBlockInstance(spec.type, {
+        ...spec,
+        enabled: spec.enabled ?? true,
+        zone: current.layout.zone,
+        order,
+      });
+    }
+    const [existing] = available.splice(existingIndex, 1);
+    if (!existing) throw new Error(`Failed to reuse preset block: ${spec.type}`);
+    return {
+      ...existing,
+      column: spec.column,
+      row: spec.row,
+      width: spec.width,
+      height: spec.height,
+      enabled: spec.enabled ?? true,
+      zone: current.layout.zone,
+      order,
+    };
   });
-  return getStartPageSettings();
+  const next = cloneSettings(current);
+  next.layout.columns = preset.columns;
+  next.layout.profile = preset.id;
+  next.layout.blocks = blocks;
+  return next;
 }
 
 export async function setLayoutMode(mode: LayoutMode): Promise<StartPageSettings> {

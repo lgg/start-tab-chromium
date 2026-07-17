@@ -13,7 +13,7 @@
     "build:google": "node scripts/require-google-oauth.mjs && node build.mjs --outdir=build-google && node scripts/validate-build-output.mjs build-google full",
     "watch": "node build.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/validate-static.mjs && node scripts/validate-round6-static.mjs && node scripts/validate-round7-static.mjs && node scripts/validate-round11-static.mjs && node scripts/validate-release-docs.mjs && node scripts/run-round12-fixtures.mjs && node scripts/validate-round12-static.mjs && node scripts/run-round13-fixtures.mjs && node scripts/validate-round13-static.mjs && node scripts/run-round14-fixtures.mjs && node scripts/validate-round14-static.mjs",
+    "test": "node scripts/validate-static.mjs && node scripts/validate-round6-static.mjs && node scripts/validate-round7-static.mjs && node scripts/validate-round11-static.mjs && node scripts/validate-release-docs.mjs && node scripts/run-round12-fixtures.mjs && node scripts/validate-round12-static.mjs && node scripts/run-round13-fixtures.mjs && node scripts/validate-round13-static.mjs && node scripts/run-round14-fixtures.mjs && node scripts/validate-round14-static.mjs && node scripts/run-round15-fixtures.mjs && node scripts/validate-round15-static.mjs",
     "clean": "rm -rf build build-blocker-only build-google"
   },
   "devDependencies": {

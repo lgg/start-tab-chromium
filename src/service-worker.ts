@@ -33,6 +33,7 @@ import {
   parseClockAlarmName,
   pauseClockState,
   reconcileStoredClockAlarms,
+  replaceStartPageSettingsWithRuntime,
   resetClockState,
   resetStartPageData,
   startClockState,
@@ -197,6 +198,13 @@ async function handle(message: Message): Promise<void> {
     case "replace-blocked-sites": await replaceBlockedSites(message.sites); break;
     case "open-native-new-tab": await runNativeTabJob(openNativeNewTab); break;
     case "reset-start-page": await runRuntimeJob(async () => { await resetStartPageData(); }); break;
+    case "replace-start-page-settings": await runRuntimeJob(async () => {
+      await replaceStartPageSettingsWithRuntime(
+        message.settings,
+        message.expectedSettingsUpdatedAt,
+        message.expectedRuntimeUpdatedAt,
+      );
+    }); break;
     case "clock-action": await runRuntimeJob(() => performClockAction(message.instanceId, message.action)); break;
     case "complete-clock": await runRuntimeJob(() => finishClockCompletion(message.instanceId, message.token)); break;
     case "reset-clocks": await resetAllClocks(); break;
