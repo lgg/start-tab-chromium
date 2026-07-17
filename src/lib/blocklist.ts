@@ -10,6 +10,7 @@
 
 import { commitStorageMutationWithRevision, DATA_REVISION_KEY, markStartTabDataChanged } from "./data-revision.js";
 import { sendMessage } from "./messages.js";
+import { MAX_BLOCKED_SITES } from "./platform-limits.js";
 import { withStorageLock } from "./storage-lock.js";
 
 const STORAGE_KEY = "blockedSites";
@@ -72,6 +73,12 @@ export function normalizeBlockedSites(value: unknown): string[] {
   return normalizeSites(value.filter((site): site is string => typeof site === "string"));
 }
 
+export function assertBlockedSiteCapacity(sites: readonly string[]): void {
+  if (sites.length > MAX_BLOCKED_SITES) {
+    throw new Error(`Start Tab supports at most ${MAX_BLOCKED_SITES} blocked sites because each redirect uses one Chrome dynamic rule`);
+  }
+}
+
 export function normalizeLastBlockedUrls(value: unknown): Record<string, string> {
   const normalized: Record<string, string> = {};
   if (!value || typeof value !== "object" || Array.isArray(value)) return normalized;
@@ -113,6 +120,7 @@ export async function migrateLegacyStorage(): Promise<void> {
     const legacy = Array.isArray(items[LEGACY_STORAGE_KEY]) ? (items[LEGACY_STORAGE_KEY] as string[]) : [];
     if (legacy.length === 0) return;
     const normalized = normalizeBlockedSites([...current, ...legacy]);
+    assertBlockedSiteCapacity(normalized);
     await commitStorageMutationWithRevision(
       [STORAGE_KEY, LEGACY_STORAGE_KEY],
       async () => {
@@ -134,6 +142,7 @@ async function getLastBlockedUrls(): Promise<Record<string, string>> {
 
 export async function replaceBlockedSites(sites: string[]): Promise<string[]> {
   const normalized = normalizeBlockedSites(sites);
+  assertBlockedSiteCapacity(normalized);
   if (isPageContext()) {
     await sendMessage({ type: "replace-blocked-sites", sites: normalized });
     return normalized;
@@ -193,7 +202,9 @@ export async function clearLastBlockedUrl(host: string): Promise<void> {
 }
 
 function buildRules(sites: string[]): chrome.declarativeNetRequest.Rule[] {
-  return normalizeBlockedSites(sites).map((host, index) => ({
+  const normalized = normalizeBlockedSites(sites);
+  assertBlockedSiteCapacity(normalized);
+  return normalized.map((host, index) => ({
     id: index + 1,
     priority: 1,
     action: {
@@ -248,6 +259,7 @@ async function applyBlocklistMutation(
   const current = { sites: previousSites, lastBlockedUrls: normalizeLastBlockedUrls(original[LAST_BLOCKED_URLS_KEY]) };
   const requested = transform(structuredClone(current));
   const nextSites = normalizeBlockedSites(requested.sites);
+  assertBlockedSiteCapacity(nextSites);
   const nextUrls = requested.lastBlockedUrls === null ? null : normalizeLastBlockedUrls(requested.lastBlockedUrls);
   try {
     await chrome.storage.local.set({ [STORAGE_KEY]: nextSites });

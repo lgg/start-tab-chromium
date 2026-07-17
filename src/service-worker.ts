@@ -19,12 +19,14 @@ import {
   recordBlockedNavigation,
   recordFocusSessionCompleted,
   recordFocusSessionInterrupted,
+  recordFocusSessionsInterrupted,
   recordFocusSessionStarted,
   recordUnblockAfterCountdown,
   resetFocusStats,
 } from "./lib/focus-stats.js";
 import { runIndependentEffects } from "./lib/independent-effects.js";
 import { isMessage, type Ack, type ClockAction, type Message } from "./lib/messages.js";
+import { consumeNativeNewTabBypass, openNativeNewTab } from "./lib/native-new-tab.js";
 import {
   completeClockInstance,
   defaultClockForBlock,
@@ -34,6 +36,7 @@ import {
   pauseClockState,
   reconcileStoredClockAlarms,
   replaceStartPageSettingsWithRuntime,
+  resetAllClockRuntimeWithAlarms,
   resetClockState,
   resetStartPageData,
   startClockState,
@@ -48,7 +51,6 @@ import {
 } from "./lib/start-page-settings.js";
 
 const START_TAB_PAGE = "newtab.html";
-const NATIVE_NEW_TAB_BYPASS_KEY = "startTabNativeNewTabBypass";
 const LOCALE_OVERRIDE_KEY = "localeOverride";
 const NEW_TAB_INTERNAL_SCHEMES = new Set([
   "chrome:",
@@ -80,10 +82,6 @@ const SPLIT_VIEW_MARKERS = [
   "pane",
 ];
 
-interface NativeNewTabBypass {
-  tabId?: number;
-  expiresAt?: number;
-}
 
 interface LocaleCatalog {
   [key: string]: { message?: string };
@@ -161,35 +159,6 @@ function runNativeTabJob(operation: () => Promise<void>): Promise<void> {
   return next;
 }
 
-async function waitForNativeBypassConsumption(tabId: number): Promise<boolean> {
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    const items = await chrome.storage.local.get(NATIVE_NEW_TAB_BYPASS_KEY);
-    const value = items[NATIVE_NEW_TAB_BYPASS_KEY] as NativeNewTabBypass | undefined;
-    if (value?.tabId !== tabId) return true;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  return false;
-}
-
-async function openNativeNewTab(): Promise<void> {
-  const tab = await chrome.tabs.create({ active: true, url: "about:blank" });
-  if (typeof tab.id !== "number") throw new Error("The browser did not return a tab id");
-  for (const url of ["chrome://new-tab-page/", "chrome-search://local-ntp/local-ntp.html", "about:newtab"]) {
-    try {
-      await chrome.storage.local.set({
-        [NATIVE_NEW_TAB_BYPASS_KEY]: { tabId: tab.id, expiresAt: Date.now() + 5000 },
-      });
-      await chrome.tabs.update(tab.id, { url });
-      if (await waitForNativeBypassConsumption(tab.id)) return;
-    } catch {
-      // Try the next browser-specific URL.
-    }
-  }
-  await chrome.storage.local.remove(NATIVE_NEW_TAB_BYPASS_KEY);
-  throw new Error("The browser rejected every native new-tab URL");
-}
-
 async function handle(message: Message): Promise<void> {
   switch (message.type) {
     case "block": await blockHost(message.host); break;
@@ -207,7 +176,7 @@ async function handle(message: Message): Promise<void> {
     }); break;
     case "clock-action": await runRuntimeJob(() => performClockAction(message.instanceId, message.action)); break;
     case "complete-clock": await runRuntimeJob(() => finishClockCompletion(message.instanceId, message.token)); break;
-    case "reset-clocks": await resetAllClocks(); break;
+    case "reset-clocks": await runRuntimeJob(resetAllClocks); break;
     case "runtime-note": await runRuntimeJob(() => updateRuntimeNote(message.instanceId, message.value, message.expectedValue)); break;
     case "runtime-tasks": await runRuntimeJob(() => updateRuntimeTasks(message.instanceId, message.tasks, message.expectedTasks)); break;
     case "runtime-link-page": await runRuntimeJob(() => updateRuntimeLinkPage(message.instanceId, message.page, message.expectedPage)); break;
@@ -295,10 +264,9 @@ async function performClockAction(instanceId: string, action: ClockAction): Prom
 }
 
 async function resetAllClocks(): Promise<void> {
-  const settings = await getStartPageSettings();
-  const clockIds = settings.layout.blocks.filter(isClockBlock).map((block) => block.id);
-  for (const instanceId of clockIds) {
-    await runRuntimeJob(() => performClockAction(instanceId, "reset"));
+  const interruptedFocusTimes = await resetAllClockRuntimeWithAlarms();
+  if (interruptedFocusTimes.length > 0) {
+    await runStatsJob(() => recordFocusSessionsInterrupted(interruptedFocusTimes));
   }
 }
 
@@ -365,16 +333,7 @@ async function shouldRedirectBrowserNewTabs(): Promise<boolean> {
 }
 
 async function shouldBypassNativeNewTab(tabId: number): Promise<boolean> {
-  const items = await chrome.storage.local.get(NATIVE_NEW_TAB_BYPASS_KEY);
-  const value = items[NATIVE_NEW_TAB_BYPASS_KEY] as NativeNewTabBypass | undefined;
-  if (typeof value?.tabId !== "number" || typeof value.expiresAt !== "number") return false;
-  if (value.expiresAt < Date.now()) {
-    await chrome.storage.local.remove(NATIVE_NEW_TAB_BYPASS_KEY);
-    return false;
-  }
-  if (value.tabId !== tabId) return false;
-  await chrome.storage.local.remove(NATIVE_NEW_TAB_BYPASS_KEY);
-  return true;
+  return consumeNativeNewTabBypass(tabId);
 }
 
 function isStartTabUrl(url: string): boolean {

@@ -1,5 +1,6 @@
 /** Messages exchanged between extension pages and the service worker. */
 
+import { MAX_BLOCKED_SITES } from "./platform-limits.js";
 import type { LocalTask } from "./start-page-types.js";
 
 export type ClockAction = "toggle" | "reset";
@@ -59,7 +60,7 @@ export function isMessage(value: unknown): value is Message {
       return true;
     case "replace-blocked-sites":
       return Array.isArray(value.sites)
-        && value.sites.length <= 10_000
+        && value.sites.length <= MAX_BLOCKED_SITES
         && value.sites.every((site) => typeof site === "string" && site.length <= 2048);
     case "replace-start-page-settings":
       return isRecord(value.settings)

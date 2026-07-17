@@ -623,6 +623,25 @@ export function resetClockState(block: Extract<BlockInstance, { type: ClockBlock
   return { ...fallback, phase, durationMs: (phase === "break" ? block.config.breakSeconds : block.config.workSeconds) * 1000 };
 }
 
+/** Reset every configured clock and its complete alarm set as one recoverable transaction. */
+export async function resetAllClockRuntimeWithAlarms(now = Date.now()): Promise<number[]> {
+  return mutateStartPageRuntimeStateWithAlarms<number[]>((runtime, settings) => {
+    const interruptedFocusTimes: number[] = [];
+    for (const block of settings.layout.blocks) {
+      if (!isClockBlock(block)) continue;
+      const current = runtime.clocks[block.id] ?? defaultClockForBlock(block);
+      if (block.type === "pomodoro"
+        && current.running
+        && current.phase === "work"
+        && current.focusSessionStartedAt !== null) {
+        interruptedFocusTimes.push(Math.max(0, now - current.focusSessionStartedAt));
+      }
+      runtime.clocks[block.id] = resetClockState(block);
+    }
+    return { state: runtime, result: interruptedFocusTimes };
+  });
+}
+
 export function clockAlarmName(instanceId: string, token: string): string {
   return `${CLOCK_ALARM_PREFIX}${encodeURIComponent(instanceId)}:${encodeURIComponent(token)}`;
 }

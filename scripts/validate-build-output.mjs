@@ -81,6 +81,10 @@ for (const marker of ["complete-clock", "clock-action", "reset-clocks", "runtime
   assert.ok(serviceWorkerSource.includes(marker), `service-worker.js must own ${marker}`);
 }
 assert.match(serviceWorkerSource, /notifications\.create/, "service-worker.js must own clock notifications");
+assert.ok(serviceWorkerSource.includes("Opening the native new tab failed and cleanup of its temporary tab was incomplete"),
+  "service-worker.js must include temporary native-tab cleanup");
+assert.ok(serviceWorkerSource.includes("Start Tab supports at most"),
+  "service-worker.js must enforce the Chrome DNR redirect-rule capacity");
 
 for (const file of ["service-worker.js", "popup.js", "blocked.js", "options.js", ...(variant === "full" ? ["newtab.js"] : [])]) {
   const source = await readFile(path.join(outdir, file), "utf8");

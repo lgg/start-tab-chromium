@@ -8,7 +8,7 @@ Start Tab is a Manifest V3 extension for Chromium-based browsers. It combines a 
 
 - Block or unblock the current site from the browser action popup.
 - Store the blocklist locally with `chrome.storage.local`.
-- Edit the full blocklist from the options page.
+- Edit the full blocklist from the options page, with an explicit 5,000-site Chrome DNR redirect-rule capacity guard.
 - Enforce blocking with Manifest V3 `declarativeNetRequest` dynamic rules.
 - Redirect blocked navigations to an extension-owned blocked page.
 - Delay unblocking from the blocked page with a countdown.

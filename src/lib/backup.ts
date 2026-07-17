@@ -1,4 +1,9 @@
-import { normalizeBlockedSites, normalizeLastBlockedUrls, syncRulesInCurrentTransaction } from "./blocklist.js";
+import {
+  assertBlockedSiteCapacity,
+  normalizeBlockedSites,
+  normalizeLastBlockedUrls,
+  syncRulesInCurrentTransaction,
+} from "./blocklist.js";
 import { DATA_REVISION_KEY, markStartTabDataChanged, readStartTabDataRevision } from "./data-revision.js";
 import { withStorageLock } from "./storage-lock.js";
 import { FOCUS_STATS_KEY, isFutureFocusStatsSchema, normalizeFocusStats } from "./focus-stats.js";
@@ -104,7 +109,9 @@ function normalizeLocale(value: unknown): "en" | "ru" | null {
 function normalizeBackupBlockedSites(source: Record<string, unknown>): string[] {
   const current = Array.isArray(source.blockedSites) ? source.blockedSites : [];
   const legacy = Array.isArray(source[LEGACY_BLOCKED_SITES_KEY]) ? source[LEGACY_BLOCKED_SITES_KEY] : [];
-  return normalizeBlockedSites([...current, ...legacy]);
+  const normalized = normalizeBlockedSites([...current, ...legacy]);
+  assertBlockedSiteCapacity(normalized);
+  return normalized;
 }
 
 function assertSupportedSchemas(storage: Record<string, unknown>): void {
