@@ -23,6 +23,7 @@ import {
   recordUnblockAfterCountdown,
   resetFocusStats,
 } from "./lib/focus-stats.js";
+import { runIndependentEffects } from "./lib/independent-effects.js";
 import { isMessage, type Ack, type ClockAction, type Message } from "./lib/messages.js";
 import {
   completeClockInstance,
@@ -34,9 +35,8 @@ import {
   reconcileStoredClockAlarms,
   resetClockState,
   resetStartPageData,
-  scheduleClockAlarm,
   startClockState,
-  mutateStartPageRuntimeState,
+  mutateStartPageRuntimeStateWithAlarms,
   updateStartPageRuntimeState,
 } from "./lib/start-page-runtime.js";
 import {
@@ -248,7 +248,7 @@ async function updateRuntimeLinkPage(instanceId: string, page: number, expectedP
 
 async function performClockAction(instanceId: string, action: ClockAction): Promise<void> {
   const now = Date.now();
-  const outcome = await mutateStartPageRuntimeState<{
+  const outcome = await mutateStartPageRuntimeStateWithAlarms<{
     next: ClockRuntimeState;
     interruptedMs: number;
     startedWork: boolean;
@@ -282,7 +282,6 @@ async function performClockAction(instanceId: string, action: ClockAction): Prom
     return { state: runtime, result: { next, interruptedMs, startedWork } };
   });
   if (!outcome) return;
-  await scheduleClockAlarm(instanceId, outcome.next);
   if (outcome.startedWork) await runStatsJob(recordFocusSessionStarted);
   if (outcome.interruptedMs > 0) await runStatsJob(() => recordFocusSessionInterrupted(outcome.interruptedMs));
 }
@@ -297,18 +296,26 @@ async function resetAllClocks(): Promise<void> {
 
 async function finishClockCompletion(instanceId: string, token: string): Promise<void> {
   const result = await completeClockInstance(instanceId, token);
+  // completeClockInstance performs the same durable scheduleClockAlarm reconciliation atomically.
   if (!result.completed || !result.block || !result.clock) return;
-  await scheduleClockAlarm(instanceId, result.clock);
+  const block = result.block;
   const completionId = `${instanceId}:${token}`;
-  if (result.focusTimeMs > 0) await runStatsJob(() => recordFocusSessionCompleted(result.focusTimeMs, completionId));
-  if (!result.notify) return;
-  const messageKey = result.block.type === "pomodoro" ? "pomodoroDone" : "timerDone";
-  await chrome.notifications.create(`start-tab-clock-${instanceId}-${token}`, {
-    type: "basic",
-    iconUrl: "icons/icon.128.png",
-    title: result.block.title,
-    message: await workerMessage(messageKey),
-  });
+  const effects: Array<() => Promise<void>> = [];
+  if (result.focusTimeMs > 0) {
+    effects.push(() => runStatsJob(() => recordFocusSessionCompleted(result.focusTimeMs, completionId)));
+  }
+  if (result.notify) {
+    const messageKey = block.type === "pomodoro" ? "pomodoroDone" : "timerDone";
+    effects.push(async () => {
+      await chrome.notifications.create(`start-tab-clock-${instanceId}-${token}`, {
+        type: "basic",
+        iconUrl: "icons/icon.128.png",
+        title: block.title,
+        message: await workerMessage(messageKey),
+      });
+    });
+  }
+  await runIndependentEffects(effects, "Clock completed but one or more secondary effects failed");
 }
 
 async function workerMessage(key: string): Promise<string> {
