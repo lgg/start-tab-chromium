@@ -6,7 +6,19 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (relativePath) => readFile(path.join(root, relativePath), "utf8");
 
-const [packageSource, readme, releaseNotes, deployment, manualQa, ci, googleGuard, googleValidator, cleanScript] = await Promise.all([
+const [
+  packageSource,
+  readme,
+  releaseNotes,
+  deployment,
+  manualQa,
+  ci,
+  googleGuard,
+  googleValidator,
+  cleanScript,
+  cleanCiScript,
+  pathSafety,
+] = await Promise.all([
   read("package.json"),
   read("README.md"),
   read("docs/release.md"),
@@ -16,6 +28,8 @@ const [packageSource, readme, releaseNotes, deployment, manualQa, ci, googleGuar
   read("scripts/require-google-oauth.mjs"),
   read("scripts/google-oauth-client.mjs"),
   read("scripts/clean.mjs"),
+  read("scripts/clean-ci.mjs"),
+  read("scripts/path-safety.mjs"),
 ]);
 
 const packageJson = JSON.parse(packageSource);
@@ -25,10 +39,21 @@ assert.match(googleBuild, /require-google-oauth\.mjs/, "build:google must reject
 assert.match(googleBuild, /node build\.mjs --google/, "build:google must select the explicit Google profile");
 assert.match(googleBuild, /--outdir=build-google\b/, "build:google must write build-google/");
 assert.match(googleBuild, /validate-build-output\.mjs build-google google/, "build:google must validate the generated Google profile");
+
 assert.equal(packageJson.scripts?.clean, "node scripts/clean.mjs", "clean must use the portable Node cleanup entrypoint");
+assert.match(cleanScript, /removePathWithinBoundary/,
+  "Local cleanup must delegate to the shared bounded remover");
+assert.match(cleanCiScript, /removePathWithinBoundary/,
+  "Self-hosted CI cleanup must delegate to the shared bounded remover");
+assert.match(pathSafety, /lstat/,
+  "Shared cleanup safety must inspect links without following them");
+assert.match(pathSafety, /intermediate symbolic link or junction/,
+  "Shared cleanup safety must reject intermediate links");
 for (const directory of ["build", "build-blocker-only", "build-google"]) {
   assert.ok(cleanScript.includes(`"${directory}"`), `clean.mjs must remove ${directory}/`);
+  assert.ok(cleanCiScript.includes(`"${directory}"`), `clean-ci.mjs must remove ${directory}/`);
 }
+
 assert.match(googleGuard, /requireGoogleOAuthClientId\(\)/,
   "Google build guard must delegate to the shared strict OAuth validator");
 assert.match(googleValidator, /GOOGLE_OAUTH_CLIENT_ID is required/,
