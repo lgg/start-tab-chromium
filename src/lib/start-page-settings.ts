@@ -1,4 +1,5 @@
 import { commitStorageMutationWithRevision } from "./data-revision.js";
+import { ownValue } from "./dictionary.js";
 import { withStorageLock } from "./storage-lock.js";
 import { MAX_CUSTOM_THEMES, MAX_START_PAGE_BLOCKS } from "./platform-limits.js";
 import {
@@ -383,10 +384,10 @@ export function layoutReplacementRemovesUserData(
 ): boolean {
   const retainedIds = new Set(next.layout.blocks.map((block) => block.id));
   return current.layout.blocks.filter((block) => !retainedIds.has(block.id)).some((block) => {
-    if (block.type === "note" && Boolean(runtime.notes[block.id]?.trim())) return true;
-    if (block.type === "localTasks" && (runtime.tasks[block.id]?.length ?? 0) > 0) return true;
+    if (block.type === "note" && Boolean(ownValue(runtime.notes, block.id)?.trim())) return true;
+    if (block.type === "localTasks" && (ownValue(runtime.tasks, block.id)?.length ?? 0) > 0) return true;
     if (block.type === "timer" || block.type === "stopwatch" || block.type === "pomodoro") {
-      const clock = runtime.clocks[block.id];
+      const clock = ownValue(runtime.clocks, block.id);
       if (clock && (clock.running || clock.accumulatedMs > 0)) return true;
     }
     const defaultBlock = DEFAULT_LAYOUT_BLOCKS.find((candidate) => candidate.type === block.type);

@@ -8,6 +8,7 @@ import { DATA_REVISION_KEY, markStartTabDataChanged, readStartTabDataRevision } 
 import { withStorageLock } from "./storage-lock.js";
 import { FOCUS_STATS_KEY, isFutureFocusStatsSchema, normalizeFocusStats } from "./focus-stats.js";
 import {
+  MAX_BLOCKED_SITES,
   MAX_CUSTOM_THEMES,
   MAX_LOCAL_TASKS_PER_INSTANCE,
   MAX_START_PAGE_BLOCKS,
@@ -111,12 +112,20 @@ function normalizeLocale(value: unknown): "en" | "ru" | null {
   return value === "en" || value === "ru" ? value : null;
 }
 
-function normalizeBackupBlockedSites(source: Record<string, unknown>): string[] {
+type StorageNormalizationMode = "strict-import" | "local-recovery";
+
+function normalizeBackupBlockedSites(
+  source: Record<string, unknown>,
+  mode: StorageNormalizationMode,
+): string[] {
   const current = Array.isArray(source.blockedSites) ? source.blockedSites : [];
   const legacy = Array.isArray(source[LEGACY_BLOCKED_SITES_KEY]) ? source[LEGACY_BLOCKED_SITES_KEY] : [];
   const normalized = normalizeBlockedSites([...current, ...legacy]);
-  assertBlockedSiteCapacity(normalized);
-  return normalized;
+  if (mode === "strict-import") {
+    assertBlockedSiteCapacity(normalized);
+    return normalized;
+  }
+  return normalized.slice(0, MAX_BLOCKED_SITES);
 }
 
 function assertSupportedSchemas(storage: Record<string, unknown>): void {
@@ -159,8 +168,11 @@ function assertCollectionCapacity(storage: Record<string, unknown>): void {
   assertArrayCapacity(runtime.localTasks, MAX_LOCAL_TASKS_PER_INSTANCE, "legacy shared local tasks");
 }
 
-function normalizedStorage(source: Record<string, unknown>): Record<string, unknown> {
-  assertCollectionCapacity(source);
+function normalizedStorage(
+  source: Record<string, unknown>,
+  mode: StorageNormalizationMode = "strict-import",
+): Record<string, unknown> {
+  if (mode === "strict-import") assertCollectionCapacity(source);
   const settings = normalizeStartPageSettings(source[START_PAGE_SETTINGS_KEY]);
   const runtime = normalizeRuntimeState(
     source[START_PAGE_RUNTIME_KEY],
@@ -169,7 +181,7 @@ function normalizedStorage(source: Record<string, unknown>): Record<string, unkn
   );
   const locale = normalizeLocale(source.localeOverride);
   const storage: Record<string, unknown> = {
-    blockedSites: normalizeBackupBlockedSites(source),
+    blockedSites: normalizeBackupBlockedSites(source, mode),
     lastBlockedUrls: normalizeLastBlockedUrls(source.lastBlockedUrls),
     [START_PAGE_SETTINGS_KEY]: settings,
     [START_PAGE_RUNTIME_KEY]: runtime,
@@ -206,7 +218,7 @@ export function migrateBackup(value: unknown): BackupBundle {
 async function exportBackupInCurrentTransaction(): Promise<BackupBundle> {
   const snapshot = await chrome.storage.local.get([...SNAPSHOT_KEYS]);
   assertSupportedSchemas(snapshot);
-  return currentSchema(normalizedStorage(snapshot), new Date().toISOString(), backupId());
+  return currentSchema(normalizedStorage(snapshot, "local-recovery"), new Date().toISOString(), backupId());
 }
 
 /** Capture backup content and its conflict-resolution revision from one data-write snapshot. */
@@ -242,7 +254,7 @@ export async function importBackup(value: unknown, options: BackupImportOptions 
     assertSupportedSchemas(current);
     const next = { ...migrated.storage };
     const removals = keysAbsentFrom(next, SNAPSHOT_KEYS);
-    const recovery = currentSchema(normalizedStorage(current), new Date().toISOString(), backupId());
+    const recovery = currentSchema(normalizedStorage(current, "local-recovery"), new Date().toISOString(), backupId());
     await chrome.storage.local.set({ [PRE_IMPORT_BACKUP_KEY]: recovery });
 
     try {

@@ -1,3 +1,4 @@
+import { ownValue } from "../lib/dictionary.js";
 import { sendMessage, type ClockAction } from "../lib/messages.js";
 import {
   defaultClockForBlock,
@@ -14,7 +15,7 @@ async function refreshClock(
   context: BlockRenderContext,
 ): Promise<void> {
   context.runtime = await getStartPageRuntimeState(context.settings);
-  if (!context.runtime.clocks[block.id]) context.runtime.clocks[block.id] = defaultClockForBlock(block);
+  if (!ownValue(context.runtime.clocks, block.id)) context.runtime.clocks[block.id] = defaultClockForBlock(block);
   context.requestRender();
 }
 
@@ -23,7 +24,7 @@ export function renderClock(
   container: HTMLElement,
   context: BlockRenderContext,
 ): void {
-  let clock = context.runtime.clocks[block.id] ?? defaultClockForBlock(block);
+  let clock = ownValue(context.runtime.clocks, block.id) ?? defaultClockForBlock(block);
   context.runtime.clocks[block.id] = clock;
   const phase = element("div", "clock__phase");
   const display = element("div", "clock__display");
@@ -61,7 +62,7 @@ export function renderClock(
   };
 
   const update = (): void => {
-    clock = context.runtime.clocks[block.id] ?? clock;
+    clock = ownValue(context.runtime.clocks, block.id) ?? clock;
     const now = Date.now();
     const value = block.type === "stopwatch" ? elapsedClockMs(clock, now) : remainingClockMs(clock, now);
     display.textContent = formatDuration(value, block.type === "stopwatch");
@@ -89,7 +90,7 @@ export function renderNote(
   context: BlockRenderContext,
 ): void {
   const textarea = element("textarea", "note");
-  let persistedValue = context.runtime.notes[block.id] ?? "";
+  let persistedValue = ownValue(context.runtime.notes, block.id) ?? "";
   textarea.value = persistedValue;
   textarea.placeholder = block.config.placeholder || context.i18n.t("notePlaceholder");
   textarea.setAttribute("aria-label", block.title);
@@ -136,7 +137,7 @@ async function saveTasks(
   context: BlockRenderContext,
   nextTasks: LocalTask[],
 ): Promise<void> {
-  const expectedTasks = cloneTasks(context.runtime.tasks[block.id] ?? []);
+  const expectedTasks = cloneTasks(ownValue(context.runtime.tasks, block.id) ?? []);
   context.runtime.tasks[block.id] = cloneTasks(nextTasks);
   await context.setRuntime({
     kind: "tasks",
@@ -159,7 +160,7 @@ function taskRow(
   checkbox.setAttribute("aria-label", context.i18n.t("toggleTask", { title: task.title }));
   const title = element("span", task.done ? "task__title task__title--done" : "task__title", task.title);
   const remove = actionButton("×", async () => {
-    const nextTasks = (context.runtime.tasks[block.id] ?? []).filter((candidate) => candidate.id !== task.id);
+    const nextTasks = (ownValue(context.runtime.tasks, block.id) ?? []).filter((candidate) => candidate.id !== task.id);
     await saveTasks(block, context, nextTasks);
     redraw();
   }, "icon-button");
@@ -167,7 +168,7 @@ function taskRow(
   remove.setAttribute("aria-label", context.i18n.t("removeTask"));
   checkbox.addEventListener("change", () => {
     const now = Date.now();
-    const nextTasks = (context.runtime.tasks[block.id] ?? []).map((candidate) => candidate.id === task.id
+    const nextTasks = (ownValue(context.runtime.tasks, block.id) ?? []).map((candidate) => candidate.id === task.id
       ? { ...candidate, done: checkbox.checked, updatedAt: now }
       : { ...candidate });
     void saveTasks(block, context, nextTasks).then(redraw).catch(() => undefined);
@@ -189,7 +190,7 @@ export function renderLocalTasks(
   add.type = "submit";
   const list = element("div", "task-list");
   const redraw = (): void => {
-    const tasks = (context.runtime.tasks[block.id] ?? []).filter((task) => block.config.showCompleted || !task.done);
+    const tasks = (ownValue(context.runtime.tasks, block.id) ?? []).filter((task) => block.config.showCompleted || !task.done);
     list.replaceChildren(...tasks.map((task) => taskRow(block, task, context, redraw)));
     if (tasks.length === 0) list.append(element("p", "empty-state", context.i18n.t("emptyList")));
   };
@@ -206,7 +207,7 @@ export function renderLocalTasks(
       createdAt: now,
       updatedAt: now,
     };
-    const nextTasks = [...(context.runtime.tasks[block.id] ?? []).map((item) => ({ ...item })), task];
+    const nextTasks = [...(ownValue(context.runtime.tasks, block.id) ?? []).map((item) => ({ ...item })), task];
     input.value = "";
     void saveTasks(block, context, nextTasks).then(redraw).catch(() => undefined);
   });

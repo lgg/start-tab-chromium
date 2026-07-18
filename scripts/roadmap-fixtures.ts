@@ -188,7 +188,7 @@ const runtimeUnderFutureSettings = normalizeRuntimeState(undefined, futureSettin
 storageState[START_PAGE_RUNTIME_KEY] = structuredClone(runtimeUnderFutureSettings);
 storageState.startTabInstanceState = { preserveWithFutureSettings: true };
 await getStartPageRuntimeState(futureSettingsView);
-assert.deepEqual(storageState[START_PAGE_RUNTIME_KEY], runtimeUnderFutureSettings, "Future settings reads must not rewrite related runtime data");
+assert.deepEqual(storageState[START_PAGE_RUNTIME_KEY], structuredClone(runtimeUnderFutureSettings), "Future settings reads must not rewrite related runtime data");
 assert.deepEqual(storageState.startTabInstanceState, { preserveWithFutureSettings: true }, "Future settings reads must not delete legacy runtime side data");
 await assert.rejects(() => setStartPageRuntimeState(runtimeUnderFutureSettings), /newer extension version/);
 await assert.rejects(() => setStartPageSettings(cloneSettings(DEFAULT_SETTINGS)), /newer extension version/);

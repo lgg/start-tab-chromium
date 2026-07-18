@@ -1,4 +1,5 @@
 import { commitStorageMutationWithRevision, DATA_REVISION_KEY, markStartTabDataChanged } from "./data-revision.js";
+import { cloneDictionary, createDictionary, ownValue } from "./dictionary.js";
 import { withStorageLock } from "./storage-lock.js";
 import { MAX_LOCAL_TASKS_PER_INSTANCE } from "./platform-limits.js";
 import { sendMessage } from "./messages.js";
@@ -171,7 +172,10 @@ function firstBlockOfType(settings: StartPageSettings, type: BlockInstance["type
 function legacyClockValue(block: Extract<BlockInstance, { type: ClockBlockType }>, primary: Record<string, unknown>, secondary: Record<string, unknown>): unknown {
   const primaryClocks = isRecord(primary.clocks) ? primary.clocks : {};
   const secondaryClocks = isRecord(secondary.clocks) ? secondary.clocks : {};
-  return primaryClocks[block.id] ?? secondaryClocks[block.id] ?? primaryClocks[block.type] ?? secondaryClocks[block.type];
+  return ownValue(primaryClocks, block.id)
+    ?? ownValue(secondaryClocks, block.id)
+    ?? ownValue(primaryClocks, block.type)
+    ?? ownValue(secondaryClocks, block.type);
 }
 
 export function isFutureRuntimeSchema(value: unknown): boolean {
@@ -191,29 +195,29 @@ export function normalizeRuntimeState(value: unknown, settings: StartPageSetting
   const sourceLinkPages = isRecord(source.linkPages) ? source.linkPages : {};
   const legacyTasks = isRecord(legacy.localTasks) ? legacy.localTasks : {};
   const legacyLinkPages = isRecord(legacy.linkPages) ? legacy.linkPages : {};
-  const clocks: Record<string, ClockRuntimeState> = {};
-  const notes: Record<string, string> = {};
-  const tasks: Record<string, LocalTask[]> = {};
-  const linkPages: Record<string, number> = {};
+  const clocks = createDictionary<ClockRuntimeState>();
+  const notes = createDictionary<string>();
+  const tasks = createDictionary<LocalTask[]>();
+  const linkPages = createDictionary<number>();
 
   for (const block of settings.layout.blocks) {
     if (isClockBlock(block)) {
-      const candidate = version === RUNTIME_SCHEMA_VERSION ? sourceClocks[block.id] : legacyClockValue(block, source, legacy);
+      const candidate = version === RUNTIME_SCHEMA_VERSION ? ownValue(sourceClocks, block.id) : legacyClockValue(block, source, legacy);
       clocks[block.id] = normalizeClock(block, candidate);
     }
     if (block.type === "note") {
-      const candidate = sourceNotes[block.id] ?? sourceNotes[block.type];
+      const candidate = ownValue(sourceNotes, block.id) ?? ownValue(sourceNotes, block.type);
       if (typeof candidate === "string") notes[block.id] = candidate.slice(0, 200_000);
     }
     if (block.type === "localTasks") {
       const oldSharedTasks = Array.isArray(source.localTasks) && firstBlockOfType(settings, "localTasks")?.id === block.id ? source.localTasks : undefined;
-      tasks[block.id] = normalizeTaskList(sourceTasks[block.id] ?? legacyTasks[block.id] ?? oldSharedTasks);
+      tasks[block.id] = normalizeTaskList(ownValue(sourceTasks, block.id) ?? ownValue(legacyTasks, block.id) ?? oldSharedTasks);
     }
     if (block.type === "links" || block.type === "startPinned") {
-      const candidate = sourceLinkPages[block.id]
-        ?? legacyLinkPages[block.id]
-        ?? (firstBlockOfType(settings, block.type)?.id === block.id ? sourceLinkPages[block.type] : undefined)
-        ?? (block.type === "links" && firstBlockOfType(settings, "links")?.id === block.id ? sourceLinkPages.links : undefined);
+      const candidate = ownValue(sourceLinkPages, block.id)
+        ?? ownValue(legacyLinkPages, block.id)
+        ?? (firstBlockOfType(settings, block.type)?.id === block.id ? ownValue(sourceLinkPages, block.type) : undefined)
+        ?? (block.type === "links" && firstBlockOfType(settings, "links")?.id === block.id ? ownValue(sourceLinkPages, "links") : undefined);
       linkPages[block.id] = finiteInteger(candidate, 0, 0, 10_000);
     }
   }
@@ -304,6 +308,16 @@ interface RuntimeMutation<T> {
   result: T;
 }
 
+function cloneRuntimeStateForMutation(state: StartPageRuntimeState): StartPageRuntimeState {
+  return {
+    ...state,
+    clocks: cloneDictionary(state.clocks),
+    notes: cloneDictionary(state.notes),
+    tasks: cloneDictionary(state.tasks),
+    linkPages: cloneDictionary(state.linkPages),
+  };
+}
+
 interface RuntimeStorageEffect<T> {
   keys: readonly string[];
   apply: (result: T) => Promise<void>;
@@ -326,7 +340,7 @@ async function runRuntimeMutation<T>(
       throw new Error("Start Tab runtime data was created by a newer extension version and cannot be modified safely");
     }
     const current = normalizeRuntimeState(raw, settings, items[LEGACY_INSTANCE_RUNTIME_KEY]);
-    const mutation = mutator(structuredClone(current), settings);
+    const mutation = mutator(cloneRuntimeStateForMutation(current), settings);
     if (mutation.state === null) return { result: mutation.result, state: current };
     const next = normalizeRuntimeState(mutation.state, settings);
     const rollbackKeys = uniqueStorageKeys(
@@ -673,7 +687,7 @@ export async function resetAllClockRuntimeWithAlarms(now = Date.now()): Promise<
       const interruptedFocusTimes: number[] = [];
       for (const block of settings.layout.blocks) {
         if (!isClockBlock(block)) continue;
-        const current = runtime.clocks[block.id] ?? defaultClockForBlock(block);
+        const current = ownValue(runtime.clocks, block.id) ?? defaultClockForBlock(block);
         const interruptedMs = pomodoroFocusElapsedMs(current, now);
         if (interruptedMs > 0) interruptedFocusTimes.push(interruptedMs);
         runtime.clocks[block.id] = resetClockState(block);
@@ -749,7 +763,7 @@ export async function completeClockInstance(instanceId: string, expectedToken: s
     if (!block) {
       return { state: null, result: { completed: false, block: null, clock: null, notify: false, focusTimeMs: 0, startedWork: false, completedToken: null } };
     }
-    const current = runtime.clocks[instanceId] ?? defaultClockForBlock(block);
+    const current = ownValue(runtime.clocks, instanceId) ?? defaultClockForBlock(block);
     const token = current.completionToken;
     if (!current.running || current.type === "stopwatch" || current.targetAt === null || current.targetAt > now + 1000) {
       return { state: null, result: { completed: false, block, clock: current, notify: false, focusTimeMs: 0, startedWork: false, completedToken: null } };
@@ -875,5 +889,5 @@ export async function deleteInstanceRuntime(instanceId: string): Promise<void> {
 }
 
 export function instanceRuntimeHasUserData(instanceId: string, runtime: StartPageRuntimeState): boolean {
-  return Boolean(runtime.notes[instanceId]?.trim()) || (runtime.tasks[instanceId]?.length ?? 0) > 0;
+  return Boolean(ownValue(runtime.notes, instanceId)?.trim()) || (ownValue(runtime.tasks, instanceId)?.length ?? 0) > 0;
 }
