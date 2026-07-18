@@ -1,5 +1,6 @@
 import { ownValue } from "../lib/dictionary.js";
 import { sendMessage, type ClockAction } from "../lib/messages.js";
+import { MAX_LOCAL_TASKS_PER_INSTANCE, MAX_LOCAL_TASK_TITLE_LENGTH } from "../lib/platform-limits.js";
 import {
   defaultClockForBlock,
   elapsedClockMs,
@@ -184,20 +185,30 @@ export function renderLocalTasks(
 ): void {
   const form = element("form", "task-form");
   const input = element("input", "input");
+  input.maxLength = MAX_LOCAL_TASK_TITLE_LENGTH;
   input.placeholder = block.config.placeholder || context.i18n.t("localTaskPlaceholder");
   input.setAttribute("aria-label", context.i18n.t("localTaskPlaceholder"));
   const add = element("button", "button button--primary", context.i18n.t("addTask"));
   add.type = "submit";
   const list = element("div", "task-list");
   const redraw = (): void => {
-    const tasks = (ownValue(context.runtime.tasks, block.id) ?? []).filter((task) => block.config.showCompleted || !task.done);
+    const allTasks = ownValue(context.runtime.tasks, block.id) ?? [];
+    const atCapacity = allTasks.length >= MAX_LOCAL_TASKS_PER_INSTANCE;
+    input.disabled = atCapacity;
+    add.disabled = atCapacity;
+    const tasks = allTasks.filter((task) => block.config.showCompleted || !task.done);
     list.replaceChildren(...tasks.map((task) => taskRow(block, task, context, redraw)));
     if (tasks.length === 0) list.append(element("p", "empty-state", context.i18n.t("emptyList")));
   };
   form.append(input, add);
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    const title = input.value.trim();
+    const currentTasks = ownValue(context.runtime.tasks, block.id) ?? [];
+    if (currentTasks.length >= MAX_LOCAL_TASKS_PER_INSTANCE) {
+      redraw();
+      return;
+    }
+    const title = input.value.trim().slice(0, MAX_LOCAL_TASK_TITLE_LENGTH);
     if (!title) return;
     const now = Date.now();
     const task: LocalTask = {
@@ -207,9 +218,11 @@ export function renderLocalTasks(
       createdAt: now,
       updatedAt: now,
     };
-    const nextTasks = [...(ownValue(context.runtime.tasks, block.id) ?? []).map((item) => ({ ...item })), task];
-    input.value = "";
-    void saveTasks(block, context, nextTasks).then(redraw).catch(() => undefined);
+    const nextTasks = [...currentTasks.map((item) => ({ ...item })), task];
+    void saveTasks(block, context, nextTasks).then(() => {
+      input.value = "";
+      redraw();
+    }).catch(() => undefined);
   });
   container.append(form, list);
   redraw();
