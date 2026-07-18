@@ -9,6 +9,7 @@
  */
 
 import { commitStorageMutationWithRevision, DATA_REVISION_KEY, markStartTabDataChanged } from "./data-revision.js";
+import { cloneDictionary, createDictionary, ownValue } from "./dictionary.js";
 import { sendMessage } from "./messages.js";
 import { MAX_BLOCKED_SITES } from "./platform-limits.js";
 import { withStorageLock } from "./storage-lock.js";
@@ -80,7 +81,7 @@ export function assertBlockedSiteCapacity(sites: readonly string[]): void {
 }
 
 export function normalizeLastBlockedUrls(value: unknown): Record<string, string> {
-  const normalized: Record<string, string> = {};
+  const normalized = createDictionary<string>();
   if (!value || typeof value !== "object" || Array.isArray(value)) return normalized;
   for (const [host, url] of Object.entries(value)) {
     if (typeof url !== "string") continue;
@@ -183,8 +184,7 @@ export async function getLastBlockedUrl(host: string): Promise<string | null> {
   const normalized = normalizeStoredHost(host);
   if (!normalized) return null;
   const urls = await getLastBlockedUrls();
-  const url = urls[normalized];
-  return typeof url === "string" ? url : null;
+  return ownValue(urls, normalized) ?? null;
 }
 
 export async function clearLastBlockedUrl(host: string): Promise<void> {
@@ -257,7 +257,10 @@ async function applyBlocklistMutation(
   const original = await chrome.storage.local.get([STORAGE_KEY, LAST_BLOCKED_URLS_KEY, DATA_REVISION_KEY]);
   const previousSites = normalizeBlockedSites(original[STORAGE_KEY]);
   const current = { sites: previousSites, lastBlockedUrls: normalizeLastBlockedUrls(original[LAST_BLOCKED_URLS_KEY]) };
-  const requested = transform(structuredClone(current));
+  const requested = transform({
+    sites: structuredClone(current.sites),
+    lastBlockedUrls: cloneDictionary(current.lastBlockedUrls),
+  });
   const nextSites = normalizeBlockedSites(requested.sites);
   assertBlockedSiteCapacity(nextSites);
   const nextUrls = requested.lastBlockedUrls === null ? null : normalizeLastBlockedUrls(requested.lastBlockedUrls);

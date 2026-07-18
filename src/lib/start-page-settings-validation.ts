@@ -22,6 +22,7 @@ import {
   isSingletonBlockType,
 } from "./start-page-defaults.js";
 import { normalizeBlockConfig } from "./start-page-block-validation.js";
+import { ownValue } from "./dictionary.js";
 import { MAX_START_PAGE_BLOCKS } from "./platform-limits.js";
 import { migrateLegacyTheme, normalizeCustomThemes } from "./start-page-theme-validation.js";
 import {
@@ -175,8 +176,8 @@ export function validateStartPageSettings(value: unknown): ValidationResult<Star
 
 export function hasBlockUserData(block: BlockInstance, runtime: { notes?: Record<string, string>; tasks?: Record<string, unknown[]> }): boolean {
   if (block.type === "links" || block.type === "startPinned") return block.config.items.length > 0;
-  if (block.type === "note") return Boolean(runtime.notes?.[block.id]?.trim());
-  if (block.type === "localTasks") return (runtime.tasks?.[block.id]?.length ?? 0) > 0;
+  if (block.type === "note") return Boolean(ownValue(runtime.notes, block.id)?.trim());
+  if (block.type === "localTasks") return (ownValue(runtime.tasks, block.id)?.length ?? 0) > 0;
   return BLOCK_DESCRIPTORS.find((descriptor) => descriptor.type === block.type)?.containsUserData === true;
 }
 

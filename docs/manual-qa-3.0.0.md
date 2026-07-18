@@ -239,3 +239,12 @@ For each failed item capture:
 - [ ] Import a backup with 1,001 custom themes and confirm it is rejected before any storage mutation.
 - [ ] Import a backup containing 10,001 tasks in one Local Tasks instance and confirm it is rejected instead of creating a task list that cannot later be edited.
 - [ ] Confirm backups exactly at 1,000 blocks, 1,000 custom themes, and 10,000 tasks remain valid.
+
+
+## Round 19 prototype-safety and recovery checks
+
+- [ ] Import a valid schema-4 fixture whose block IDs include `__proto__`, `constructor`, `toString`, and `hasOwnProperty`; confirm notes, tasks, clocks, and link-page positions remain independent and editable after reload.
+- [ ] Import focus-stat/domain fixtures using the same special names and confirm values remain visible without unrelated settings or browser-page behavior changing.
+- [ ] Seed local storage above the supported block/task/blocklist capacities, then export; confirm export succeeds with a bounded recoverable snapshot instead of becoming unavailable.
+- [ ] From the same oversized local state, import a valid backup and confirm the valid backup applies while the pre-import recovery snapshot is retained at supported limits.
+- [ ] Import an externally supplied backup above any supported capacity and confirm rejection still happens before storage, DNR, revision, or alarm changes.

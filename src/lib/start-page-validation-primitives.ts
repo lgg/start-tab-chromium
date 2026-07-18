@@ -1,3 +1,4 @@
+import { createDictionary } from "./dictionary.js";
 import { BLOCK_TYPES, type BlockType, type SearchProvider, type StartLink, type ValidationIssue } from "./start-page-types.js";
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -124,7 +125,7 @@ export function normalizeSearchProviders(value: unknown, fallback: readonly Sear
 }
 
 export function normalizeDomainMinutes(value: unknown): Record<string, number> {
-  const result: Record<string, number> = {};
+  const result = createDictionary<number>();
   if (!isRecord(value)) return result;
   for (const [domain, minutes] of Object.entries(value)) {
     const normalizedDomain = domain.trim().toLowerCase();

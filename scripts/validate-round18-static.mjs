@@ -33,8 +33,8 @@ assert.match(themeValidation, /value\.slice\(0, MAX_CUSTOM_THEMES\)/,
   "Corrupted local custom-theme collections must normalize to an editable count");
 assert.match(runtime, /value\.slice\(0, MAX_LOCAL_TASKS_PER_INSTANCE\)/,
   "Corrupted local task collections must normalize to an editable count");
-assert.match(backup, /assertCollectionCapacity\(source\)[\s\S]*normalizeStartPageSettings/,
-  "Backup migration must reject oversized collections before normalization can discard data");
+assert.match(backup, /mode === "strict-import"\) assertCollectionCapacity\(source\)[\s\S]*normalizeStartPageSettings/,
+  "Backup migration must reject oversized external collections before normalization can discard data");
 assert.match(backup, /assertTaskCollectionCapacity\(runtime\.tasks/,
   "Current runtime task collections must be checked during backup migration");
 assert.match(backup, /assertTaskCollectionCapacity\(legacyRuntime\.localTasks/,

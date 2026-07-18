@@ -22,6 +22,7 @@ import {
   recordUnblockAfterCountdown,
   resetFocusStats,
 } from "./lib/focus-stats.js";
+import { ownValue } from "./lib/dictionary.js";
 import { runIndependentEffects } from "./lib/independent-effects.js";
 import { isMessage, type Ack, type ClockAction, type Message } from "./lib/messages.js";
 import { consumeNativeNewTabBypass, openNativeNewTab } from "./lib/native-new-tab.js";
@@ -191,7 +192,7 @@ function sameTasks(left: readonly LocalTask[], right: readonly LocalTask[]): boo
 
 async function updateRuntimeNote(instanceId: string, value: string, expectedValue: string): Promise<void> {
   await updateStartPageRuntimeState((runtime) => {
-    const current = runtime.notes[instanceId] ?? "";
+    const current = ownValue(runtime.notes, instanceId) ?? "";
     if (current !== expectedValue) {
       throw new Error("Start Tab note changed in another extension context; latest data was kept");
     }
@@ -202,7 +203,7 @@ async function updateRuntimeNote(instanceId: string, value: string, expectedValu
 
 async function updateRuntimeTasks(instanceId: string, tasks: LocalTask[], expectedTasks: LocalTask[]): Promise<void> {
   await updateStartPageRuntimeState((runtime) => {
-    const current = runtime.tasks[instanceId] ?? [];
+    const current = ownValue(runtime.tasks, instanceId) ?? [];
     if (!sameTasks(current, expectedTasks)) {
       throw new Error("Start Tab tasks changed in another extension context; latest data was kept");
     }
@@ -213,7 +214,7 @@ async function updateRuntimeTasks(instanceId: string, tasks: LocalTask[], expect
 
 async function updateRuntimeLinkPage(instanceId: string, page: number, expectedPage: number): Promise<void> {
   await updateStartPageRuntimeState((runtime) => {
-    const current = runtime.linkPages[instanceId] ?? 0;
+    const current = ownValue(runtime.linkPages, instanceId) ?? 0;
     if (current !== expectedPage) {
       throw new Error("Start Tab link page changed in another extension context; latest data was kept");
     }
@@ -233,7 +234,7 @@ async function performClockAction(instanceId: string, action: ClockAction): Prom
       (candidate): candidate is ClockBlock => candidate.id === instanceId && isClockBlock(candidate),
     ) ?? null;
     if (!block) return { state: null, result: null };
-    const clock = runtime.clocks[instanceId] ?? defaultClockForBlock(block);
+    const clock = ownValue(runtime.clocks, instanceId) ?? defaultClockForBlock(block);
     let next: ClockRuntimeState;
     let interruptedMs = 0;
     let startedWork = false;

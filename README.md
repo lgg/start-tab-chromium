@@ -16,7 +16,8 @@ Start Tab is a Manifest V3 extension for Chromium-based browsers. It combines a 
 - Localized UI with English and Russian catalogs.
 - Configurable custom new tab page with date/time, IP, links, search, timer, stopwatch, Pomodoro, notes, local tasks, recent history, browser pinned tabs, Start Tab pinned links, Google Calendar, weather, command, and focus stats blocks.
 - Typed instance-based block records with stable IDs, versioned schemas, independent settings, and per-instance runtime state.
-- Consistent defensive collection limits across UI, runtime messages, local normalization, and backup import: 1,000 block instances, 1,000 custom themes, and 10,000 local tasks per block; oversized backups are rejected before storage changes.
+- Prototype-safe user-keyed dictionaries preserve block IDs, domains, and completion tokens such as `__proto__`, `constructor`, and `toString` as ordinary data without inherited-property collisions.
+- Consistent defensive collection limits across UI, runtime messages, local normalization, and backup import: 1,000 block instances, 1,000 custom themes, and 10,000 local tasks per block; oversized externally supplied backups are rejected before storage changes.
 - Multiple independent instances for repeatable blocks, including date/time, IP, links, search, timers, stopwatches, Pomodoro, notes, local tasks, Google Calendar, weather, and Start Tab pinned links.
 - Singleton enforcement for browser-global blocks such as commands, recent history, browser pinned tabs, and focus statistics.
 - Block creation, duplication, deletion, enable/disable controls, destructive-action protection, and shared per-instance settings from both Options and the inline editor.
@@ -32,7 +33,7 @@ Start Tab is a Manifest V3 extension for Chromium-based browsers. It combines a 
 - Independent Timer, Stopwatch, and Pomodoro state persistence across new tabs and service-worker restarts, with durable alarms, deadline-capped focus accounting, atomic clock/statistics updates, and optional completion notifications.
 - Tabbed options page with General, Start Tab, Blocklist, Backup, and About sections.
 - Centralized validation for numeric settings, URLs, coordinates, provider endpoints, search templates, clocks, themes, and imported data.
-- Versioned JSON export/import with legacy migration, pre-import recovery, rollback, and corrupted-element isolation.
+- Versioned JSON export/import with legacy migration, pre-import recovery, rollback, and corrupted-element isolation. Strict external capacity rejection is separated from bounded local recovery, so a valid backup can still repair already-corrupted oversized local state.
 - Browser backup through chunked `chrome.storage.sync`, checksum validation, device metadata, deterministic conflict handling, and latest-wins smart sync.
 - Google Drive backup/restore through Drive `appDataFolder` when OAuth is configured.
 - Google Calendar event blocks with independent calendar IDs and filters when OAuth is configured.

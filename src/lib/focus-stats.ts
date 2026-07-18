@@ -1,4 +1,5 @@
 import { commitStorageMutationWithRevision } from "./data-revision.js";
+import { createDictionary, ownValue } from "./dictionary.js";
 import { sendMessage } from "./messages.js";
 import { withStorageLock } from "./storage-lock.js";
 import { readStartPageSettingsSnapshot, type StartPageSettings } from "./start-page-settings.js";
@@ -39,25 +40,31 @@ const EMPTY_COUNTS: CountSet = {
 };
 
 function emptyStats(): FocusStats {
-  return { version: 1, totals: { ...EMPTY_COUNTS }, byDay: {}, byDomain: {}, processedClockCompletions: {} };
+  return {
+    version: 1,
+    totals: { ...EMPTY_COUNTS },
+    byDay: createDictionary<CountSet>(),
+    byDomain: createDictionary<DomainStats>(),
+    processedClockCompletions: createDictionary<number>(),
+  };
 }
 function dayKey(date = new Date()): string { return date.toISOString().slice(0, 10); }
 function ensureDay(stats: FocusStats, occurredAt = Date.now()): CountSet {
   const key = dayKey(new Date(occurredAt));
-  const existing = stats.byDay[key];
+  const existing = ownValue(stats.byDay, key);
   if (existing) return existing;
   const created = { ...EMPTY_COUNTS };
   stats.byDay[key] = created;
   return created;
 }
 function ensureDomain(stats: FocusStats, host: string): DomainStats {
-  const existing = stats.byDomain[host];
+  const existing = ownValue(stats.byDomain, host);
   if (existing) return existing;
   const created = { blockHits: 0, avoidedVisits: 0, estimatedMinutesSaved: 0, unblocksAfterCountdown: 0, lastAvoidedAt: 0 };
   stats.byDomain[host] = created;
   return created;
 }
-function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null; }
+function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function nonNegativeNumber(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallback;
 }
@@ -91,14 +98,22 @@ export function isFutureFocusStatsSchema(value: unknown): boolean {
 
 export function normalizeFocusStats(value: unknown): FocusStats {
   if (!isRecord(value) || value.version !== FOCUS_STATS_SCHEMA_VERSION) return emptyStats();
-  const stats: FocusStats = { version: 1, totals: normalizeCounts(value.totals), byDay: {}, byDomain: {}, processedClockCompletions: {} };
+  const stats: FocusStats = {
+    version: 1,
+    totals: normalizeCounts(value.totals),
+    byDay: createDictionary<CountSet>(),
+    byDomain: createDictionary<DomainStats>(),
+    processedClockCompletions: createDictionary<number>(),
+  };
   if (isRecord(value.byDay)) for (const [key, counts] of Object.entries(value.byDay)) if (key) stats.byDay[key] = normalizeCounts(counts);
   if (isRecord(value.byDomain)) for (const [host, domainStats] of Object.entries(value.byDomain)) if (host) stats.byDomain[host] = normalizeDomainStats(domainStats);
   if (isRecord(value.processedClockCompletions)) {
     const entries = Object.entries(value.processedClockCompletions)
       .flatMap(([token, completedAt]) => typeof token === "string" && token.length <= 520 ? [[token, nonNegativeNumber(completedAt)] as const] : [])
       .filter((entry) => entry[1] > 0).sort((left, right) => right[1] - left[1]).slice(0, 512);
-    stats.processedClockCompletions = Object.fromEntries(entries);
+    const completions = createDictionary<number>();
+    for (const [token, completedAt] of entries) completions[token] = completedAt;
+    stats.processedClockCompletions = completions;
   }
   return stats;
 }
@@ -153,7 +168,7 @@ function applyFocusClockStatsPatch(stats: FocusStats, patch: FocusClockStatsPatc
   const completionId = typeof patch.completionId === "string" && patch.completionId.length <= 520
     ? patch.completionId
     : undefined;
-  if (completionId && stats.processedClockCompletions[completionId]) return false;
+  if (completionId && ownValue(stats.processedClockCompletions, completionId)) return false;
 
   const startedSessions = typeof patch.startedSessions === "number" && Number.isFinite(patch.startedSessions)
     ? Math.max(0, Math.round(patch.startedSessions))
@@ -181,7 +196,9 @@ function applyFocusClockStatsPatch(stats: FocusStats, patch: FocusClockStatsPatc
     const newest = Object.entries(stats.processedClockCompletions)
       .sort((left, right) => right[1] - left[1])
       .slice(0, 512);
-    stats.processedClockCompletions = Object.fromEntries(newest);
+    const completions = createDictionary<number>();
+    for (const [token, completedAt] of newest) completions[token] = completedAt;
+    stats.processedClockCompletions = completions;
   }
   return true;
 }
@@ -198,7 +215,7 @@ export async function applyFocusClockStatsPatchInExistingTransaction(patch: Focu
 }
 
 function domainMinutes(host: string, settings: StartPageSettings): number {
-  return settings.focusStats.domainMinutes[host] ?? settings.focusStats.defaultMinutesPerAvoidedVisit;
+  return ownValue(settings.focusStats.domainMinutes, host) ?? settings.focusStats.defaultMinutesPerAvoidedVisit;
 }
 
 export async function getFocusStats(): Promise<FocusStats> { return readStats(); }

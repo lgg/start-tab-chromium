@@ -65,6 +65,10 @@ if (variant === "full") {
     assert.ok(newtabSource.includes(marker), `newtab.js must delegate ${marker} to the service worker`);
   }
   assert.doesNotMatch(newtabSource, /notifications\.create/, "newtab.js must not create clock notifications");
+  assert.ok(newtabSource.includes("Object.create(null)"),
+    "newtab.js must consume prototype-free per-instance runtime dictionaries");
+  assert.ok(newtabSource.includes("hasOwnProperty.call"),
+    "newtab.js must ignore inherited runtime values for user-controlled block IDs");
   const gateSource = await readFile(path.join(outdir, "newtab-gate.js"), "utf8");
   assert.ok(gateSource.includes("open-native-new-tab"), "newtab-gate.js must delegate native-tab creation");
   assert.doesNotMatch(gateSource, /startTabNativeNewTabBypass|chrome:\/\/new-tab-page|chrome-search:\/\/local-ntp/, "newtab-gate.js must not mutate bypass state or navigate tabs directly");
@@ -81,6 +85,10 @@ assert.match(optionsSource, /Start Tab supports at most \$\{[^}]+\} block instan
   "options.js must reject settings above the shared block capacity");
 assert.ok(optionsSource.includes("Start Tab backup contains more than"),
   "options.js must reject oversized imported collections before normalization");
+assert.ok(optionsSource.includes("Object.create(null)"),
+  "options.js must preserve user-keyed backup/settings dictionaries without Object.prototype inheritance");
+assert.ok(optionsSource.includes("hasOwnProperty.call"),
+  "options.js must use own-property reads for user-controlled dictionary keys");
 
 const serviceWorkerSource = await readFile(path.join(outdir, "service-worker.js"), "utf8");
 for (const marker of ["complete-clock", "clock-action", "reset-clocks", "runtime-note", "runtime-tasks", "runtime-link-page", "delete-instance-runtime", "record-unblock", "reset-stats", "replace-blocked-sites", "open-native-new-tab", "reset-start-page", "replace-start-page-settings"]) {
@@ -95,6 +103,10 @@ assert.ok(serviceWorkerSource.includes("Clock runtime mutation failed and its st
   "service-worker.js must contain rollback-safe clock/statistics transactions");
 assert.ok(serviceWorkerSource.includes("focusSessionsStarted"),
   "service-worker.js must contain Pomodoro start/completion statistics accounting");
+assert.ok(serviceWorkerSource.includes("Object.create(null)"),
+  "service-worker.js must persist prototype-free runtime/domain dictionaries");
+assert.ok(serviceWorkerSource.includes("hasOwnProperty.call"),
+  "service-worker.js must ignore inherited values for user-controlled IDs and domains");
 
 for (const file of ["service-worker.js", "popup.js", "blocked.js", "options.js", ...(variant === "full" ? ["newtab.js"] : [])]) {
   const source = await readFile(path.join(outdir, file), "utf8");

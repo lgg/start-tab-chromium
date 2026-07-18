@@ -1,3 +1,4 @@
+import { ownValue } from "../lib/dictionary.js";
 import type { I18n } from "../lib/i18n.js";
 import type { BlockInstance, StartLink } from "../lib/start-page-settings.js";
 import { actionButton, element } from "./block-renderer-common.js";
@@ -195,11 +196,11 @@ export function renderLinkCollection(
   container.style.setProperty("--link-icon-size", `${config.iconSize}px`);
   const perPage = Math.max(1, config.columns * config.rows);
   const totalPages = Math.max(1, Math.ceil(config.items.length / perPage));
-  let page = Math.min(context.runtime.linkPages[block.id] ?? 0, totalPages - 1);
+  let page = Math.min(ownValue(context.runtime.linkPages, block.id) ?? 0, totalPages - 1);
   const list = element("div", `links links--${config.pageDirection}`);
   const pager = element("div", "pager");
   const changePage = async (nextPage: number): Promise<void> => {
-    const expectedPage = context.runtime.linkPages[block.id] ?? 0;
+    const expectedPage = ownValue(context.runtime.linkPages, block.id) ?? 0;
     page = nextPage;
     context.runtime.linkPages[block.id] = page;
     await context.setRuntime({ kind: "linkPage", instanceId: block.id, page, expectedPage });
