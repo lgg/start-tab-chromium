@@ -23,7 +23,8 @@ import {
 } from "./start-page-defaults.js";
 import { normalizeBlockConfig } from "./start-page-block-validation.js";
 import { ownValue } from "./dictionary.js";
-import { MAX_START_PAGE_BLOCKS } from "./platform-limits.js";
+import { placeGridBlocks } from "./grid-layout.js";
+import { MAX_GRID_BLOCK_HEIGHT, MAX_GRID_ROW, MAX_START_PAGE_BLOCKS } from "./platform-limits.js";
 import { migrateLegacyTheme, normalizeCustomThemes } from "./start-page-theme-validation.js";
 import {
   booleanValue,
@@ -67,7 +68,7 @@ function normalizeBlock(value: unknown, index: number, root: Record<string, unkn
   const id = normalizeBlockId(value.id, type, seenIds);
   const minimumWidth = Math.min(descriptor.minGridWidth, columns);
   const width = finiteInteger(value.width, Math.min(descriptor.defaultGridWidth, columns), minimumWidth, columns);
-  const height = finiteInteger(value.height, descriptor.defaultGridHeight, descriptor.minGridHeight, 80);
+  const height = finiteInteger(value.height, descriptor.defaultGridHeight, descriptor.minGridHeight, MAX_GRID_BLOCK_HEIGHT);
   const blockZone = oneOf(value.zone, LAYOUT_ZONES, zone);
   const free = isRecord(value.free) ? value.free : {};
   const createdAt = timestampValue(value.createdAt, 0);
@@ -80,13 +81,13 @@ function normalizeBlock(value: unknown, index: number, root: Record<string, unkn
     enabled: booleanValue(value.enabled, true),
     zone: blockZone,
     column: finiteInteger(value.column, 1, 1, Math.max(1, columns - width + 1)),
-    row: finiteInteger(value.row, index + 1, 1, 500),
+    row: finiteInteger(value.row, index + 1, 1, MAX_GRID_ROW),
     width,
     height,
     order: finiteInteger(value.order, index, 0, 10000),
     free: {
       x: finiteNumber(free.x, Math.max(0, (finiteInteger(value.column, 1, 1, columns) - 1) * 92), 0, 100000),
-      y: finiteNumber(free.y, Math.max(0, (finiteInteger(value.row, index + 1, 1, 500) - 1) * 76), 0, 100000),
+      y: finiteNumber(free.y, Math.max(0, (finiteInteger(value.row, index + 1, 1, MAX_GRID_ROW) - 1) * 76), 0, 100000),
       width: finiteNumber(free.width, Math.max(descriptor.minFreeWidth, width * 90), descriptor.minFreeWidth, 100000),
       height: finiteNumber(free.height, Math.max(descriptor.minFreeHeight, height * 72), descriptor.minFreeHeight, 100000),
     },
@@ -99,26 +100,6 @@ function normalizeBlock(value: unknown, index: number, root: Record<string, unkn
   return block;
 }
 
-function overlaps(left: BlockInstance, right: BlockInstance): boolean {
-  return left.zone === right.zone && left.column < right.column + right.width && left.column + left.width > right.column && left.row < right.row + right.height && left.row + left.height > right.row;
-}
-
-function normalizeGridCollisions(blocks: BlockInstance[]): BlockInstance[] {
-  const placed: BlockInstance[] = [];
-  for (const block of blocks) {
-    let next = block;
-    if (next.enabled) {
-      let attempts = 0;
-      while (placed.some((candidate) => candidate.enabled && overlaps(next, candidate)) && attempts < 500) {
-        next = { ...next, row: next.row + 1 };
-        attempts += 1;
-      }
-    }
-    placed.push(next);
-  }
-  return placed;
-}
-
 function normalizeBlocks(value: unknown, root: Record<string, unknown>, columns: number, zone: LayoutZone, mode: LayoutMode, issues: ValidationIssue[], migrationIssues: MigrationIssue[]): BlockInstance[] {
   const source = Array.isArray(value) ? value.slice(0, MAX_START_PAGE_BLOCKS) : cloneBlocks(DEFAULT_LAYOUT_BLOCKS);
   const seenIds = new Set<string>();
@@ -127,7 +108,7 @@ function normalizeBlocks(value: unknown, root: Record<string, unknown>, columns:
     const block = normalizeBlock(candidate, index, root, columns, zone, seenIds, seenSingletons, issues, migrationIssues);
     return block ? [block] : [];
   }).map((block, order) => ({ ...block, order }));
-  return mode === "grid" ? normalizeGridCollisions(blocks) : blocks;
+  return mode === "grid" ? placeGridBlocks(blocks, columns) : blocks;
 }
 
 export function normalizeStartPageSettingsWithReport(value: unknown): { settings: StartPageSettings; report: MigrationReport; validation: ValidationIssue[] } {
