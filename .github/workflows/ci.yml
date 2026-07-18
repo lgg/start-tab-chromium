@@ -71,6 +71,7 @@ jobs:
             'build',
             'build-blocker-only',
             'build-google',
+            'build-round24-link',
             'locale-parity-report.json'
           )
 
@@ -222,6 +223,12 @@ jobs:
       - name: Validate round 23
         run: node scripts/validate-round23-static.mjs
 
+      - name: Run round 24 fixtures
+        run: node scripts/run-round24-fixtures.mjs
+
+      - name: Validate round 24
+        run: node scripts/validate-round24-static.mjs
+
       - name: Validate self-hosted CI contract
         run: node scripts/validate-self-hosted-ci.mjs
 
@@ -265,6 +272,7 @@ jobs:
                 'build',
                 'build-blocker-only',
                 'build-google',
+                'build-round24-link',
                 'locale-parity-report.json'
               )
 
