@@ -7,7 +7,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const directory = process.argv[2];
 const variant = process.argv[3];
 assert.ok(directory, "Build directory argument is required");
-assert.ok(variant === "full" || variant === "blocker-only", "Variant must be full or blocker-only");
+assert.ok(variant === "full" || variant === "blocker-only" || variant === "google", "Variant must be full, blocker-only, or google");
+const googleEnabled = variant === "google";
+const fullLike = variant !== "blocker-only";
 const outdir = path.resolve(root, directory);
 
 async function exists(relativePath) {
@@ -24,12 +26,12 @@ assert.equal(manifest.manifest_version, 3, "Build manifest must remain Manifest 
 assert.equal(manifest.version, "3.0.0", "Build manifest version must match release version");
 assert.equal(manifest.background?.service_worker, "service-worker.js", "Service worker output must be wired");
 const configuredGoogleClientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() ?? "";
-if (configuredGoogleClientId) {
-  assert.match(configuredGoogleClientId, /^[a-zA-Z0-9._-]+\.apps\.googleusercontent\.com$/, "Configured Google OAuth client ID must use the expected Chrome client format");
-  assert.equal(manifest.oauth2?.client_id, configuredGoogleClientId, "Configured Google OAuth client ID must reach the build manifest");
+if (googleEnabled) {
+  assert.match(configuredGoogleClientId, /^[a-zA-Z0-9._-]+\.apps\.googleusercontent\.com$/, "Google profile requires the expected Chrome OAuth client format");
+  assert.equal(manifest.oauth2?.client_id, configuredGoogleClientId, "Explicit Google profile must inject the configured OAuth client ID");
   assert.ok(manifest.permissions?.includes("identity"), "Google-enabled builds require the identity permission");
 } else {
-  assert.equal(manifest.oauth2, undefined, "Default deployable builds must not contain a placeholder OAuth client ID");
+  assert.equal(manifest.oauth2, undefined, "Default and blocker-only builds must omit OAuth even when the environment contains a client ID");
   assert.equal(manifest.permissions?.includes("identity"), false, "Google-disabled builds must omit the identity permission");
 }
 
@@ -54,11 +56,11 @@ for (const file of [
   assert.equal(await exists(file), true, `${variant} build is missing ${file}`);
 }
 
-if (variant === "full") {
-  assert.equal(manifest.chrome_url_overrides?.newtab, "newtab.html", "Full build must own the new tab page");
-  assert.ok(manifest.permissions?.includes("history"), "Full builds require history for the Recent History block");
+if (fullLike) {
+  assert.equal(manifest.chrome_url_overrides?.newtab, "newtab.html", "Full profiles must own the new tab page");
+  assert.ok(manifest.permissions?.includes("history"), "Full profiles require history for the Recent History block");
   for (const file of ["newtab.js", "newtab.html", "newtab.css", "newtab-gate.js"]) {
-    assert.equal(await exists(file), true, `Full build is missing ${file}`);
+    assert.equal(await exists(file), true, `${variant} build is missing ${file}`);
   }
   const newtabSource = await readFile(path.join(outdir, "newtab.js"), "utf8");
   for (const marker of ["complete-clock", "clock-action", "reset-clocks", "runtime-note", "runtime-tasks", "runtime-link-page", "replace-start-page-settings", "reset-stats"]) {
@@ -89,6 +91,8 @@ assert.ok(optionsSource.includes("Object.create(null)"),
   "options.js must preserve user-keyed backup/settings dictionaries without Object.prototype inheritance");
 assert.ok(optionsSource.includes("hasOwnProperty.call"),
   "options.js must use own-property reads for user-controlled dictionary keys");
+assert.ok(optionsSource.includes("chrome_url_overrides"),
+  "options.js must detect whether the selected build actually contains the Start Tab page");
 
 const serviceWorkerSource = await readFile(path.join(outdir, "service-worker.js"), "utf8");
 for (const marker of ["complete-clock", "clock-action", "reset-clocks", "runtime-note", "runtime-tasks", "runtime-link-page", "delete-instance-runtime", "record-unblock", "reset-stats", "replace-blocked-sites", "open-native-new-tab", "reset-start-page", "replace-start-page-settings"]) {
@@ -108,7 +112,7 @@ assert.ok(serviceWorkerSource.includes("Object.create(null)"),
 assert.ok(serviceWorkerSource.includes("hasOwnProperty.call"),
   "service-worker.js must ignore inherited values for user-controlled IDs and domains");
 
-for (const file of ["service-worker.js", "popup.js", "blocked.js", "options.js", ...(variant === "full" ? ["newtab.js"] : [])]) {
+for (const file of ["service-worker.js", "popup.js", "blocked.js", "options.js", ...(fullLike ? ["newtab.js"] : [])]) {
   const source = await readFile(path.join(outdir, file), "utf8");
   assert.doesNotMatch(source, /\beval\s*\(/, `${file} must not contain eval`);
   assert.doesNotMatch(source, /\bnew\s+Function\s*\(/, `${file} must not construct code dynamically`);
