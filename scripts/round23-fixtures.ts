@@ -4,13 +4,12 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promise
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
 
 import { resolveSafeBuildOutput } from "./build-output-path.mjs";
 import { isValidGoogleOAuthClientId, requireGoogleOAuthClientId } from "./google-oauth-client.mjs";
 
 const execute = promisify(execFile);
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const root = path.resolve(process.cwd());
 const temporary = await mkdtemp(path.join(tmpdir(), "start-tab-round23-"));
 
 const storage: Record<string, unknown> = {
