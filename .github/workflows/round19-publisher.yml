@@ -1,0 +1,96 @@
+name: Round 19 clean publisher
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: round19-publisher-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  publish-clean-tree:
+    if: >-
+      github.event.pull_request.base.ref == 'master' &&
+      github.event.pull_request.head.ref == 'codex/deep-audit-round-19-complete-20260718' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout staging branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/deep-audit-round-19-complete-20260718
+          fetch-depth: 0
+          show-progress: false
+
+      - name: Assemble exact audited patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/round19/patch.part* > /tmp/round19.patch
+          echo 'ed79c2a1db706dd86c1be4b38eb7a643b79539a851293ad7efd75ac5c14ca626  /tmp/round19.patch' | sha256sum -c -
+          git apply --index /tmp/round19.patch
+          git rm .github/round19/patch.part* .github/workflows/round19-publisher.yml
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Deep audit round 19: prototype-safe dictionaries and recoverable backups'
+
+      - name: Verify final source inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check 5605de786f0b232ccced5046ac69e803ec75dfc2..HEAD
+          git diff --name-only 5605de786f0b232ccced5046ac69e803ec75dfc2..HEAD | sort > /tmp/actual-files
+          cat > /tmp/expected-files <<'FILES'
+          README.md
+          docs/audit-2026-07-18-round-19.md
+          docs/manual-qa-3.0.0.md
+          package.json
+          scripts/roadmap-fixtures.ts
+          scripts/round19-fixtures.ts
+          scripts/run-round19-fixtures.mjs
+          scripts/validate-build-output.mjs
+          scripts/validate-round18-static.mjs
+          scripts/validate-round19-static.mjs
+          src/lib/backup.ts
+          src/lib/blocklist.ts
+          src/lib/dictionary.ts
+          src/lib/focus-stats.ts
+          src/lib/start-page-runtime.ts
+          src/lib/start-page-settings-validation.ts
+          src/lib/start-page-settings.ts
+          src/lib/start-page-validation-primitives.ts
+          src/newtab/block-renderers-runtime.ts
+          src/newtab/block-renderers-static.ts
+          src/service-worker.ts
+          FILES
+          sort -o /tmp/expected-files /tmp/expected-files
+          diff -u /tmp/expected-files /tmp/actual-files
+          test "$(wc -l < /tmp/actual-files)" -eq 21
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate audited tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund --loglevel=error
+          npm test
+          npm run typecheck
+          npm run build
+          npm run build:blocker-only
+          GOOGLE_OAUTH_CLIENT_ID=ci-validation.apps.googleusercontent.com npm run build:google
+          npm audit --omit=dev
+          npm ls --all
+
+      - name: Publish final source tree
+        shell: bash
+        run: git push origin HEAD:codex/deep-audit-round-19-complete-20260718
