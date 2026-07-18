@@ -2,99 +2,209 @@ name: CI
 
 on:
   pull_request:
+    branches:
+      - master
   push:
     branches:
       - master
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
+# Intentionally no concurrency group: the dedicated single runner preserves every
+# queued job instead of replacing older pending runs.
 jobs:
-  typecheck-build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  validate-package:
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on:
+      - self-hosted
+      - windows
+      - x64
+      - start-tab-chromium-ci
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: powershell
+    env:
+      CI: "true"
+      NPM_CONFIG_CACHE: ${{ github.workspace }}/.ci-cache/npm
+
     steps:
+      - name: Remove stale project outputs
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:GITHUB_WORKSPACE)) {
+            throw 'GITHUB_WORKSPACE is empty'
+          }
+
+          $workspace = [System.IO.Path]::GetFullPath($env:GITHUB_WORKSPACE).TrimEnd('\', '/')
+          $volumeRoot = [System.IO.Path]::GetPathRoot($workspace).TrimEnd('\', '/')
+          if ([string]::IsNullOrWhiteSpace($workspace) -or $workspace -eq $volumeRoot) {
+            throw "Unsafe GITHUB_WORKSPACE: $workspace"
+          }
+
+          $workspacePrefix = $workspace + [System.IO.Path]::DirectorySeparatorChar
+          $targets = @(
+            'node_modules',
+            '.ci-cache',
+            'build',
+            'build-blocker-only',
+            'build-google',
+            'ci-artifacts',
+            'validation-logs',
+            'locale-parity-report.json'
+          )
+
+          foreach ($relativePath in $targets) {
+            $target = [System.IO.Path]::GetFullPath((Join-Path $workspace $relativePath)).TrimEnd('\', '/')
+            if (-not $target.StartsWith($workspacePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+              throw "Refusing to remove a path outside GITHUB_WORKSPACE: $target"
+            }
+            if (Test-Path -LiteralPath $target) {
+              Remove-Item -LiteralPath $target -Recurse -Force
+            }
+          }
+
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
+          clean: true
+          fetch-depth: 1
+          persist-credentials: false
           show-progress: false
-      - name: Setup Node
-        uses: actions/setup-node@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
         with:
           node-version: 22
+          architecture: x64
+          package-manager-cache: false
+
+      - name: Restore npm download cache
+        id: npm-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ env.NPM_CONFIG_CACHE }}
+          key: start-tab-chromium-npm-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json') }}
+
       - name: Install dependencies
         run: npm ci --no-audit --no-fund --loglevel=error
-      - name: Locale parity report
+
+      - name: Save npm download cache
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ env.NPM_CONFIG_CACHE }}
+          key: ${{ steps.npm-cache.outputs.cache-primary-key }}
+
+      - name: Generate locale parity report
         run: node scripts/report-locale-parity.mjs
-      - name: Upload locale parity report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: locale-parity-report
-          path: |
-            locale-parity-report.json
-            src/_locales/en/messages.json
-            src/_locales/ru/messages.json
-            src/_locales/ru/roadmap-messages.json
-          retention-days: 1
-      - name: Complete validation suite
+
+      - name: Run tests
+        run: npm run test
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build full extension
+        run: npm run build
+
+      - name: Build blocker-only extension
+        run: npm run build:blocker-only
+
+      - name: Validate Google-enabled build
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: ci-validation.apps.googleusercontent.com
+        run: npm run build:google
+
+      - name: Package deployable extension builds
         run: |
-          mkdir -p validation-logs
-          status=0
-          run_check() {
-            name="$1"
-            shift
-            echo "::group::$name"
-            if "$@" >"validation-logs/$name.log" 2>&1; then
-              echo "$name passed"
-            else
-              echo "$name failed"
-              status=1
-            fi
-            cat "validation-logs/$name.log"
-            echo "::endgroup::"
+          $ErrorActionPreference = 'Stop'
+          $artifactDirectory = Join-Path $env:GITHUB_WORKSPACE 'ci-artifacts'
+          New-Item -ItemType Directory -Force -Path $artifactDirectory | Out-Null
+          $shortSha = $env:GITHUB_SHA.Substring(0, [Math]::Min(12, $env:GITHUB_SHA.Length))
+
+          $packages = @(
+            @{
+              Source = 'build'
+              File = "start-tab-chromium-full-$shortSha.zip"
+            },
+            @{
+              Source = 'build-blocker-only'
+              File = "start-tab-chromium-blocker-only-$shortSha.zip"
+            }
+          )
+
+          foreach ($package in $packages) {
+            $source = Join-Path $env:GITHUB_WORKSPACE $package.Source
+            if (-not (Test-Path -LiteralPath (Join-Path $source 'manifest.json') -PathType Leaf)) {
+              throw "Missing deployable extension output: $source"
+            }
+            $items = @(Get-ChildItem -LiteralPath $source -Force)
+            if ($items.Count -eq 0) {
+              throw "Deployable extension output is empty: $source"
+            }
+            $destination = Join-Path $artifactDirectory $package.File
+            Compress-Archive -Path $items.FullName -DestinationPath $destination -CompressionLevel Optimal -Force
           }
-          run_check test npm run test
-          run_check typecheck npm run typecheck
-          run_check build-full npm run build
-          run_check build-blocker-only npm run build:blocker-only
-          run_check build-google env GOOGLE_OAUTH_CLIENT_ID=ci-validation.apps.googleusercontent.com npm run build:google
-          exit "$status"
-      - name: Upload validation logs
-        if: always()
-        uses: actions/upload-artifact@v4
+
+      - name: Upload deployable extension packages
+        uses: actions/upload-artifact@v7
         with:
-          name: validation-logs
-          path: |
-            validation-logs
-            package-lock.json
-            src/lib/chrome-sync.ts
-            src/lib/start-page-runtime.ts
-            src/lib/start-page-validation.ts
-            src/lib/theme-editor.ts
-            src/newtab/block-renderers.ts
+          name: start-tab-chromium-packages-${{ github.run_number }}
+          path: ci-artifacts/*.zip
+          if-no-files-found: error
           retention-days: 1
-      - name: Upload complete audit snapshot
+
+      - name: Clean project workspace
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: complete-audit-snapshot
-          path: |
-            .github/workflows/ci.yml
-            README.md
-            build.mjs
-            package.json
-            package-lock.json
-            tsconfig.json
-            src
-            scripts
-            docs
-            icons
-            build
-            build-blocker-only
-            build-google
-          retention-days: 1
+        run: |
+          $ErrorActionPreference = 'Continue'
+          if ([string]::IsNullOrWhiteSpace($env:GITHUB_WORKSPACE)) {
+            Write-Error 'GITHUB_WORKSPACE is empty; cleanup was not attempted'
+            exit 1
+          }
+
+          $workspace = [System.IO.Path]::GetFullPath($env:GITHUB_WORKSPACE).TrimEnd('\', '/')
+          $volumeRoot = [System.IO.Path]::GetPathRoot($workspace).TrimEnd('\', '/')
+          if ([string]::IsNullOrWhiteSpace($workspace) -or $workspace -eq $volumeRoot) {
+            Write-Error "Unsafe GITHUB_WORKSPACE: $workspace"
+            exit 1
+          }
+
+          $workspacePrefix = $workspace + [System.IO.Path]::DirectorySeparatorChar
+          $targets = @(
+            'node_modules',
+            '.ci-cache',
+            'build',
+            'build-blocker-only',
+            'build-google',
+            'ci-artifacts',
+            'validation-logs',
+            'locale-parity-report.json'
+          )
+          $cleanupFailed = $false
+
+          foreach ($relativePath in $targets) {
+            $target = [System.IO.Path]::GetFullPath((Join-Path $workspace $relativePath)).TrimEnd('\', '/')
+            if (-not $target.StartsWith($workspacePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+              Write-Error "Refusing to remove a path outside GITHUB_WORKSPACE: $target"
+              $cleanupFailed = $true
+              continue
+            }
+            if (Test-Path -LiteralPath $target) {
+              try {
+                Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop
+              } catch {
+                Write-Error "Failed to remove $target`: $($_.Exception.Message)"
+                $cleanupFailed = $true
+              }
+            }
+          }
+
+          if ($cleanupFailed) {
+            exit 1
+          }

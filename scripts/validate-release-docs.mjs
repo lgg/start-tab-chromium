@@ -41,7 +41,11 @@ assert.match(readme, /Roadmap Status — Completed In 3\.0\.0/, "README must mar
 assert.doesNotMatch(readme, /real OAuth client ID in `src\/manifest\.json`/, "README must not instruct users to edit the source manifest");
 assert.match(releaseNotes, /Start Page settings schema: version 4|Start Page schema 4/, "Release notes must document the current settings schema");
 assert.match(manualQa, /npm run build:google/, "Manual QA must include the Google-enabled profile");
-assert.match(ci, /GOOGLE_OAUTH_CLIENT_ID=ci-validation\.apps\.googleusercontent\.com npm run build:google/, "CI must execute the Google-enabled build with a non-production validation ID");
+assert.match(
+  ci,
+  /GOOGLE_OAUTH_CLIENT_ID:\s*ci-validation\.apps\.googleusercontent\.com[\s\S]*run: npm run build:google/,
+  "CI must execute the Google-enabled build with a non-production validation ID",
+);
 assert.match(ci, /build-google/, "CI audit artifacts must include build-google/");
 
 console.log("Release documentation and build-profile validation passed");
