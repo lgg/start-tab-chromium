@@ -283,10 +283,11 @@ function dynamicRulesEqual(
 
 async function replaceDynamicRules(
   sites: string[],
-  existing = await chrome.declarativeNetRequest.getDynamicRules(),
+  existing?: chrome.declarativeNetRequest.Rule[],
 ): Promise<void> {
+  const currentRules = existing ?? await chrome.declarativeNetRequest.getDynamicRules();
   await chrome.declarativeNetRequest.updateDynamicRules({
-    removeRuleIds: existing.map((rule) => rule.id),
+    removeRuleIds: currentRules.map((rule) => rule.id),
     addRules: buildRules(sites),
   });
 }
