@@ -1,0 +1,127 @@
++- scans for TODO/FIXME/HACK/XXX, skipped/only tests, debug statements, unsafe dynamic code, remote scripts, unsafe HTML sinks, generated artifacts, and broken relative documentation links.
++
++A second independent source-only clean-room directory was then created without dependencies or prior build output. Dependencies were installed again and the complete test, typecheck, three-build, generated-output, dependency-tree, and vulnerability checks passed there as well.
++
++## External boundary
++
++Repository automation cannot prove Chrome Web Store approval, production Google OAuth with a live packaged extension ID/account, real cross-device Sync propagation and throttling, every Chromium-derived browser's native-new-tab behavior, or physical pointer/touch/high-DPI/screen-reader interaction. These remain explicit manual release checks and are not represented as automated proof.
+diff --git a/scripts/round19-fixtures.ts b/scripts/round19-fixtures.ts
+new file mode 100644
+index 0000000..acd3ac0
+--- /dev/null
++++ b/scripts/round19-fixtures.ts
+@@ -0,0 +1,277 @@
++import assert from "node:assert/strict";
++
++import { exportBackup, importBackup, migrateBackup, PRE_IMPORT_BACKUP_KEY } from "../src/lib/backup.js";
++import { normalizeLastBlockedUrls } from "../src/lib/blocklist.js";
++import { FOCUS_STATS_KEY, normalizeFocusStats, recordBlockedNavigation } from "../src/lib/focus-stats.js";
++import { MAX_BLOCKED_SITES, MAX_LOCAL_TASKS_PER_INSTANCE, MAX_START_PAGE_BLOCKS } from "../src/lib/platform-limits.js";
++import { mutateStartPageRuntimeState, normalizeRuntimeState } from "../src/lib/start-page-runtime.js";
++import { cloneSettings, DEFAULT_SETTINGS, normalizeStartPageSettings } from "../src/lib/start-page-settings.js";
++import type { BlockInstance, LocalTask, StartPageSettings } from "../src/lib/start-page-types.js";
++import { normalizeDomainMinutes } from "../src/lib/start-page-validation-primitives.js";
++
++function nullDictionary<T>(entries: readonly (readonly [string, T])[]): Record<string, T> {
++  const dictionary = Object.create(null) as Record<string, T>;
++  for (const [key, value] of entries) dictionary[key] = value;
++  return dictionary;
++}
++
++function own(record: object, key: string): boolean {
++  return Object.prototype.hasOwnProperty.call(record, key);
++}
++
++const specialSettings = cloneSettings(DEFAULT_SETTINGS);
++const note = specialSettings.layout.blocks.find((block) => block.type === "note");
++const localTasks = specialSettings.layout.blocks.find((block) => block.type === "localTasks");
++const timer = specialSettings.layout.blocks.find((block) => block.type === "timer");
++const links = specialSettings.layout.blocks.find((block) => block.type === "links");
++assert.ok(note && localTasks && timer && links, "Default settings must expose all special-key fixture block types");
++note.id = "__proto__";
++localTasks.id = "constructor";
++timer.id = "toString";
++links.id = "hasOwnProperty";
++specialSettings.focusStats.domainMinutes = nullDictionary([
++  ["__proto__", 17],
++  ["constructor", 19],
++  ["toString", 23],
++]);
++const normalizedSpecialSettings = normalizeStartPageSettings(specialSettings);
++const normalizedSpecialIds = new Set(normalizedSpecialSettings.layout.blocks.map((block) => block.id));
++for (const id of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {
++  assert.equal(normalizedSpecialIds.has(id), true, `Block ID ${id} must remain user data`);
++}
++
++const runtimeSource = {
++  version: 2,
++  updatedAt: 123,
++  notes: nullDictionary([["__proto__", "prototype-safe note"]]),
++  tasks: nullDictionary([[
++    "constructor", [{ id: "task-special", title: "Keep constructor task", done: false, createdAt: 1, updatedAt: 1 }],
++  ]]),
++  clocks: nullDictionary([[
++    "toString", { type: "timer", running: false, startedAt: null, accumulatedMs: 1_000, durationMs: 60_000, targetAt: null },
++  ]]),
++  linkPages: nullDictionary([["hasOwnProperty", 4]]),
++};
++const normalizedRuntime = normalizeRuntimeState(runtimeSource, normalizedSpecialSettings);
++for (const dictionary of [normalizedRuntime.notes, normalizedRuntime.tasks, normalizedRuntime.clocks, normalizedRuntime.linkPages]) {
++  assert.equal(Object.getPrototypeOf(dictionary), null, "Runtime user-keyed dictionaries must not inherit Object.prototype");
++}
++assert.equal(normalizedRuntime.notes.__proto__, "prototype-safe note");
++assert.equal(normalizedRuntime.tasks.constructor?.[0]?.title, "Keep constructor task");
++assert.equal(normalizedRuntime.clocks.toString?.accumulatedMs, 1_000);
++assert.equal(normalizedRuntime.linkPages.hasOwnProperty, 4);
++
++const normalizedMinutes = normalizeDomainMinutes(JSON.parse('{"__proto__":17,"constructor":19,"toString":23}'));
++assert.equal(Object.getPrototypeOf(normalizedMinutes), null);
++assert.equal(normalizedMinutes.__proto__, 17);
++assert.equal(normalizedMinutes.constructor, 19);
++assert.equal(normalizedMinutes.tostring, 23);
++
++const normalizedUrls = normalizeLastBlockedUrls(JSON.parse(
++  '{"__proto__":"https://__proto__/path","constructor":"https://constructor/path","toString":"https://toString/path"}',
++));
++assert.equal(Object.getPrototypeOf(normalizedUrls), null);
++assert.equal(normalizedUrls.__proto__, "https://__proto__/path");
++assert.equal(normalizedUrls.constructor, "https://constructor/path");
++assert.equal(normalizedUrls.tostring, "https://toString/path");
++
++const normalizedStats = normalizeFocusStats(JSON.parse(`{
++  "version":1,
++  "totals":{},
++  "byDay":{},
++  "byDomain":{
++    "__proto__":{"blockHits":1,"avoidedVisits":1,"estimatedMinutesSaved":17,"unblocksAfterCountdown":0,"lastAvoidedAt":1},
++    "constructor":{"blockHits":2,"avoidedVisits":0,"estimatedMinutesSaved":0,"unblocksAfterCountdown":0,"lastAvoidedAt":0}
++  },
++  "processedClockCompletions":{"toString":42}
++}`));
++assert.equal(Object.getPrototypeOf(normalizedStats.byDomain), null);
++assert.equal(Object.getPrototypeOf(normalizedStats.processedClockCompletions), null);
++assert.equal(normalizedStats.byDomain.__proto__?.estimatedMinutesSaved, 17);
++assert.equal(normalizedStats.byDomain.constructor?.blockHits, 2);
++assert.equal(normalizedStats.processedClockCompletions.toString, 42);
++
++function clone<T>(value: T): T {
++  return structuredClone(value);
++}
++
++let storageState: Record<string, unknown> = {};
++let storageApiCalls = 0;
++let dnrApiCalls = 0;
++let alarmApiCalls = 0;
++let alarms: Array<{ name: string; scheduledTime: number; periodInMinutes?: number }> = [];
++
++function storageGet(keys?: string | string[] | Record<string, unknown> | null): Record<string, unknown> {
++  if (keys == null) return clone(storageState);
++  const selected: Record<string, unknown> = {};
++  if (typeof keys === "string") {
++    if (own(storageState, keys)) selected[keys] = clone(storageState[keys]);
++    return selected;
++  }
++  if (Array.isArray(keys)) {
++    for (const key of keys) if (own(storageState, key)) selected[key] = clone(storageState[key]);
++    return selected;
++  }
