@@ -1,5 +1,5 @@
 const CLIENT_ID_PATTERN = /^[a-zA-Z0-9._-]+\.apps\.googleusercontent\.com$/;
-const PLACEHOLDER_PATTERN = /(?:REPLACE|TODO)/i;
+const PLACEHOLDER_PATTERN = /(?:^|[._-])(?:REPLACE|TODO)(?:[._-]|$)/i;
 
 export function isValidGoogleOAuthClientId(value) {
   const clientId = typeof value === "string" ? value.trim() : "";
