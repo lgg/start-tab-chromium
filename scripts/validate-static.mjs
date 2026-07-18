@@ -161,10 +161,16 @@ for (const messageType of ["complete-clock", "clock-action", "reset-clocks", "ru
   assert.ok(serviceWorkerSource.includes(`case "${messageType}"`) || serviceWorkerSource.includes(`type: "${messageType}"`), `Service worker must handle ${messageType}`);
 }
 
-assert.match(ci, /npm run test/);
-assert.match(ci, /npm run typecheck/);
-assert.match(ci, /npm run build\b/);
-assert.match(ci, /npm run build:blocker-only/);
+for (const command of [
+  "node scripts/validate-static.mjs",
+  "node scripts/validate-round19-static.mjs",
+  "node scripts/validate-self-hosted-ci.mjs",
+  "npm run typecheck",
+  "npm run build",
+  "npm run build:blocker-only",
+]) {
+  assert.ok(ci.includes(command), `CI must execute ${command}`);
+}
 assertCiPolicy(ci);
 
 const sourceFiles = (await walk(resolve(root, "src"))).filter((file) => /\.(?:ts|js|html)$/.test(file));
