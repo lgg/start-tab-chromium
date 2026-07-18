@@ -33,7 +33,7 @@ assert.match(googleGuard, /requireGoogleOAuthClientId\(\)/,
   "Google build guard must delegate to the shared strict OAuth validator");
 assert.match(googleValidator, /GOOGLE_OAUTH_CLIENT_ID is required/,
   "Shared Google validation must reject a missing client ID");
-assert.match(googleValidator, /\.apps\\\.googleusercontent\\\.com|apps\\\.googleusercontent\\\.com/,
+assert.ok(googleValidator.includes("\\.apps\\.googleusercontent\\.com"),
   "Shared Google validation must enforce the Chrome OAuth client format");
 assert.match(googleValidator, /REPLACE\|TODO/,
   "Shared Google validation must reject documented placeholder client IDs");
