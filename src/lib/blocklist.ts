@@ -295,17 +295,22 @@ export async function blockHost(host: string): Promise<void> {
   })));
 }
 
-export async function unblockHost(host: string): Promise<void> {
+export async function unblockHost(host: string): Promise<boolean> {
   const normalized = requireHost(host);
   if (isPageContext()) {
-    await sendMessage({ type: "unblock", host: normalized });
-    return;
+    const ack = await sendMessage({ type: "unblock", host: normalized });
+    return ack.changed === true;
   }
   await migrateLegacyStorage();
-  await runMutation(() => applyBlocklistMutation((current) => {
-    delete current.lastBlockedUrls[normalized];
-    return { sites: current.sites.filter((site) => site !== normalized), lastBlockedUrls: current.lastBlockedUrls };
-  }));
+  return runMutation(async () => {
+    const sites = await readBlockedSites();
+    if (!sites.includes(normalized)) return false;
+    await applyBlocklistMutation((current) => {
+      delete current.lastBlockedUrls[normalized];
+      return { sites: current.sites.filter((site) => site !== normalized), lastBlockedUrls: current.lastBlockedUrls };
+    });
+    return true;
+  });
 }
 
 export async function clearAll(): Promise<void> {
