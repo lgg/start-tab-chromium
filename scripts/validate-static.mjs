@@ -45,10 +45,14 @@ function assertCatalog(name, catalog) {
 }
 
 function assertCiPolicy(ci) {
-  if (ci.includes("actions/upload-artifact")) {
-    assert.match(ci, /retention-days:\s*1\b/, "GitHub artifact uploads must use one-day retention");
-  }
-  assert.doesNotMatch(ci, /actions\/cache@/, "Explicit GitHub Actions caches are not expected");
+  assert.doesNotMatch(
+    ci,
+    /actions\/upload-artifact|Compress-Archive|retention-days:/,
+    "PR CI must not upload or package build artifacts",
+  );
+  assert.match(ci, /uses: actions\/cache\/restore@v5/, "CI must restore only the npm download cache");
+  assert.match(ci, /uses: actions\/cache\/save@v5/, "CI must save only the npm download cache");
+  assert.doesNotMatch(ci, /path:\s*node_modules/, "CI must not cache node_modules");
 }
 
 const [manifest, packageJson, enMessages, enRound7Messages, ruBaseMessages, ruRoadmapMessages, ruRound7Messages, ci, rootBuild, canonicalBuild, newtabHtml, optionsHtml, settingsSource, runtimeRendererSource, serviceWorkerSource] = await Promise.all([
