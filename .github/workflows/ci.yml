@@ -113,8 +113,17 @@ jobs:
       - name: Validate round 11
         run: node scripts/validate-round11-static.mjs
 
+      - name: Validate release build and cleanup
+        run: node scripts/validate-release-docs.mjs build-cleanup
+
+      - name: Validate release OAuth
+        run: node scripts/validate-release-docs.mjs oauth
+
       - name: Validate release documentation
-        run: node scripts/validate-release-docs.mjs
+        run: node scripts/validate-release-docs.mjs documentation
+
+      - name: Validate release CI contract
+        run: node scripts/validate-release-docs.mjs ci
 
       - name: Run round 12 fixtures
         run: node scripts/run-round12-fixtures.mjs
