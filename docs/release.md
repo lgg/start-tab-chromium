@@ -40,7 +40,7 @@ Output: `build/`
 
 - Contains `chrome_url_overrides.newtab`.
 - Contains the new-tab page and all Start Tab features.
-- Omits `oauth2` and `identity` when `GOOGLE_OAUTH_CLIENT_ID` is not supplied.
+- Always omits `oauth2` and `identity`; an inherited `GOOGLE_OAUTH_CLIENT_ID` does not change this profile.
 
 ### Blocker-only
 
@@ -53,10 +53,12 @@ Output: `build-blocker-only/`
 - Omits `chrome_url_overrides` and all new-tab assets.
 - Omits the unused `history` permission.
 - Retains popup, blocked page, Options, blocker, backup, and focus statistics.
+- Its Options page does not offer the unavailable Open Start Tab action and disables the ineffective Start Tab runtime toggle.
+- Ignores inherited Google OAuth environment values and omits `oauth2` and `identity`.
 
 ### Google-enabled Full Start Tab
 
-Create a Chrome extension OAuth client for the final extension ID and inject it at build time:
+Create a Chrome extension OAuth client for the final extension ID and inject it through the explicit Google profile:
 
 ```bash
 GOOGLE_OAUTH_CLIENT_ID="1234567890-example.apps.googleusercontent.com" npm run build:google
@@ -73,7 +75,8 @@ Output: `build-google/`
 
 - Contains the full Start Tab new-tab override.
 - Contains the supplied OAuth client ID, Calendar/Drive scopes, and `identity` permission.
-- Rejects placeholder or malformed non-empty client IDs.
+- Rejects missing, placeholder, or malformed client IDs.
+- Cannot be combined with blocker-only packaging.
 - Must be tested with the production OAuth client and a real account before release.
 
 Do not edit generated manifests by hand.
