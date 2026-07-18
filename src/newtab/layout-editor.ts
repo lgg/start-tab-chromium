@@ -1,4 +1,5 @@
 import { editBlockInstance } from "../lib/block-settings-editor.js";
+import { placeGridBlock, placeGridBlocks } from "../lib/grid-layout.js";
 import type { I18n } from "../lib/i18n.js";
 import { sendMessage } from "../lib/messages.js";
 import { MAX_START_PAGE_BLOCKS } from "../lib/platform-limits.js";
@@ -64,38 +65,6 @@ function select<T extends string>(value: T, options: Array<[T, string]>): HTMLSe
     node.append(option);
   }
   return node;
-}
-
-function overlap(left: BlockInstance, right: BlockInstance): boolean {
-  return left.column < right.column + right.width
-    && left.column + left.width > right.column
-    && left.row < right.row + right.height
-    && left.row + left.height > right.row;
-}
-
-function clampGrid(block: BlockInstance, columns: number): BlockInstance {
-  const descriptor = blockDescriptor(block.type);
-  const minimumWidth = Math.min(descriptor.minGridWidth, columns);
-  const width = Math.min(columns, Math.max(minimumWidth, Math.round(block.width)));
-  const height = Math.max(descriptor.minGridHeight, Math.round(block.height));
-  return {
-    ...block,
-    width,
-    height,
-    column: Math.max(1, Math.min(Math.round(block.column), Math.max(1, columns - width + 1))),
-    row: Math.max(1, Math.round(block.row)),
-  };
-}
-
-function placeGridBlock(candidate: BlockInstance, blocks: readonly BlockInstance[], columns: number): BlockInstance {
-  let placed = clampGrid(candidate, columns);
-  const others = blocks.filter((block) => block.id !== candidate.id && block.enabled && block.zone === candidate.zone);
-  let attempts = 0;
-  while (others.some((block) => overlap(placed, block)) && attempts < 500) {
-    placed = { ...placed, row: placed.row + 1 };
-    attempts += 1;
-  }
-  return placed;
 }
 
 function maxGridRow(blocks: readonly BlockInstance[]): number {
@@ -202,7 +171,7 @@ export class LayoutEditor {
     const enabled = button(block.enabled ? "◉" : "○", "icon-button");
     enabled.title = this.options.i18n.t(block.enabled ? "disableBlock" : "enableBlock");
     enabled.setAttribute("aria-label", enabled.title);
-    enabled.addEventListener("click", () => this.updateBlock(block.id, (current) => ({ ...current, enabled: !current.enabled })));
+    enabled.addEventListener("click", () => this.toggleBlockEnabled(block.id));
 
     controls.append(drag, settings, enabled);
     if (!isSingletonBlockType(block.type)) {
@@ -249,6 +218,24 @@ export class LayoutEditor {
         blocks: settings.layout.blocks.map((block) => block.id === id ? updater(cloneBlock(block)) : block),
       },
     }));
+  }
+
+  private toggleBlockEnabled(id: string): void {
+    this.mutate((settings) => {
+      const current = settings.layout.blocks.find((block) => block.id === id);
+      if (!current) return settings;
+      let replacement = { ...cloneBlock(current), enabled: !current.enabled };
+      if (replacement.enabled && settings.layout.mode === "grid") {
+        replacement = placeGridBlock(replacement, settings.layout.blocks, settings.layout.columns);
+      }
+      return {
+        ...settings,
+        layout: {
+          ...settings.layout,
+          blocks: settings.layout.blocks.map((block) => block.id === id ? replacement : block),
+        },
+      };
+    });
   }
 
   private async configure(id: string): Promise<void> {
@@ -320,15 +307,24 @@ export class LayoutEditor {
   }
 
   private setMode(mode: LayoutMode): void {
-    if (this.draft.layout.mode !== mode) this.mutate((settings) => ({ ...settings, layout: { ...settings.layout, mode } }));
+    if (this.draft.layout.mode === mode) return;
+    this.mutate((settings) => {
+      const blocks = mode === "grid"
+        ? placeGridBlocks(settings.layout.blocks, settings.layout.columns)
+        : settings.layout.blocks;
+      return { ...settings, layout: { ...settings.layout, mode, blocks } };
+    });
   }
 
   private setZone(zone: LayoutZone): void {
     if (this.draft.layout.zone === zone) return;
-    this.mutate((settings) => ({
-      ...settings,
-      layout: { ...settings.layout, zone, blocks: settings.layout.blocks.map((block) => ({ ...block, zone })) },
-    }));
+    this.mutate((settings) => {
+      const moved = settings.layout.blocks.map((block) => ({ ...block, zone }));
+      const blocks = settings.layout.mode === "grid"
+        ? placeGridBlocks(moved, settings.layout.columns)
+        : moved;
+      return { ...settings, layout: { ...settings.layout, zone, blocks } };
+    });
   }
 
   private renderControls(): void {
