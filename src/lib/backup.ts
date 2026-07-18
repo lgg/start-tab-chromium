@@ -1,7 +1,7 @@
+import { normalizeBackupLastBlockedUrls, type BackupCollectionMode } from "./backup-blocked-urls.js";
 import {
   assertBlockedSiteCapacity,
   normalizeBlockedSites,
-  normalizeLastBlockedUrls,
   syncRulesInCurrentTransaction,
 } from "./blocklist.js";
 import { DATA_REVISION_KEY, markStartTabDataChanged, readStartTabDataRevision } from "./data-revision.js";
@@ -112,7 +112,7 @@ function normalizeLocale(value: unknown): "en" | "ru" | null {
   return value === "en" || value === "ru" ? value : null;
 }
 
-type StorageNormalizationMode = "strict-import" | "local-recovery";
+type StorageNormalizationMode = BackupCollectionMode;
 
 function normalizeBackupBlockedSites(
   source: Record<string, unknown>,
@@ -139,7 +139,6 @@ function assertSupportedSchemas(storage: Record<string, unknown>): void {
     throw new Error("This backup contains focus statistics from a newer extension version");
   }
 }
-
 
 function assertArrayCapacity(value: unknown, maximum: number, label: string): void {
   if (Array.isArray(value) && value.length > maximum) {
@@ -173,6 +172,7 @@ function normalizedStorage(
   mode: StorageNormalizationMode = "strict-import",
 ): Record<string, unknown> {
   if (mode === "strict-import") assertCollectionCapacity(source);
+  const blockedSites = normalizeBackupBlockedSites(source, mode);
   const settings = normalizeStartPageSettings(source[START_PAGE_SETTINGS_KEY]);
   const runtime = normalizeRuntimeState(
     source[START_PAGE_RUNTIME_KEY],
@@ -181,8 +181,8 @@ function normalizedStorage(
   );
   const locale = normalizeLocale(source.localeOverride);
   const storage: Record<string, unknown> = {
-    blockedSites: normalizeBackupBlockedSites(source, mode),
-    lastBlockedUrls: normalizeLastBlockedUrls(source.lastBlockedUrls),
+    blockedSites,
+    lastBlockedUrls: normalizeBackupLastBlockedUrls(source.lastBlockedUrls, blockedSites, mode),
     [START_PAGE_SETTINGS_KEY]: settings,
     [START_PAGE_RUNTIME_KEY]: runtime,
     startPageOnboarding: normalizeOnboarding(source.startPageOnboarding),
