@@ -7,6 +7,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 const build = read("scripts/build.mjs");
 const outputGuard = read("scripts/build-output-path.mjs");
+const pathSafety = read("scripts/path-safety.mjs");
 const oauth = read("scripts/google-oauth-client.mjs");
 const blocklist = read("src/lib/blocklist.ts");
 const fixtures = read("scripts/round24-fixtures.ts");
@@ -20,22 +21,28 @@ assert.match(build, /assertSafeBuildOutputFilesystem/,
   "Builder must import the filesystem-aware output guard");
 assert.ok(build.indexOf("await assertSafeBuildOutputFilesystem") < build.indexOf("await rm(outdir"),
   "Filesystem link validation must run before recursive output cleanup");
-assert.match(outputGuard, /lstat/,
-  "Output guard must inspect existing path components without following them");
-assert.match(outputGuard, /isSymbolicLink\(\)/,
-  "Output guard must reject symbolic links and Windows junctions");
-assert.match(outputGuard, /symbolic link or junction/,
-  "Output guard must expose a clear destructive-path rejection");
+assert.match(outputGuard, /assertPathContainsNoLinks/,
+  "Build output validation must delegate to shared filesystem link inspection");
+assert.match(pathSafety, /lstat/,
+  "Shared output safety must inspect existing path components without following them");
+assert.match(pathSafety, /isSymbolicLink\(\)/,
+  "Shared output safety must detect symbolic links and Windows junctions");
+assert.match(pathSafety, /symbolic link or junction/,
+  "Shared output safety must expose a clear destructive-path rejection");
 
 assert.match(blocklist, /storedSitesEqual/,
   "Blocklist mutations must compare canonical stored sites before writing");
 assert.match(blocklist, /storedLastBlockedUrlsEqual/,
   "Blocklist mutations must compare canonical URL side data before writing");
-assert.match(blocklist, /if \(storedSitesEqual\([\s\S]*storedLastBlockedUrlsEqual\([\s\S]*return previousSites/,
-  "Canonical no-op mutations must return before storage, DNR, or revision writes");
-assert.match(blocklist, /if \(ownValue\(urls, host\) === url\) return;/,
-  "Identical blocked-navigation metadata must not advance the data revision");
+assert.match(blocklist, /const storageUnchanged = storedSitesEqual\([\s\S]*storedLastBlockedUrlsEqual\(/,
+  "Canonical storage no-ops must be identified before writes");
+assert.match(blocklist, /if \(ownValue\(urls, host\) === url && storedLastBlockedUrlsEqual\(snapshot, urls\)\) return;/,
+  "Identical blocked-navigation metadata must remain a true no-op only when raw storage is canonical");
 
+assert.match(deployment, /inherited `GOOGLE_OAUTH_CLIENT_ID` value is ignored/,
+  "Deployment documentation must describe deterministic default profiles");
+assert.match(deployment, /does not offer the unavailable Open Start Tab action/,
+  "Deployment documentation must describe blocker-only Options behavior");
 for (const token of ["EXAMPLE", "YOUR", "CHANGEME", "PLACEHOLDER"]) {
   assert.ok(oauth.includes(token), `OAuth validation must reject common placeholder token: ${token}`);
 }
