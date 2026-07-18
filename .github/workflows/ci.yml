@@ -54,7 +54,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          clean: true
+          clean: false
           fetch-depth: 1
           persist-credentials: false
           show-progress: false
@@ -208,6 +208,12 @@ jobs:
 
       - name: Validate round 25
         run: node scripts/validate-round25-static.mjs
+
+      - name: Run round 26 fixtures
+        run: node scripts/run-round26-fixtures.mjs
+
+      - name: Validate round 26
+        run: node scripts/validate-round26-static.mjs
 
       - name: Validate self-hosted CI contract
         run: node scripts/validate-self-hosted-ci.mjs
