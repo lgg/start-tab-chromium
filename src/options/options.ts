@@ -33,7 +33,7 @@ import {
 } from "../lib/i18n.js";
 import { editBlockInstance } from "../lib/block-settings-editor.js";
 import { sendMessage } from "../lib/messages.js";
-import { MAX_START_PAGE_BLOCKS } from "../lib/platform-limits.js";
+import { MAX_CUSTOM_THEMES, MAX_START_PAGE_BLOCKS } from "../lib/platform-limits.js";
 import {
   deleteInstanceRuntime,
   getStartPageRuntimeState,
@@ -192,13 +192,16 @@ function runUiTask(action: () => Promise<unknown>): void {
   void action().catch(reportUiError);
 }
 
-async function runAction(action: () => Promise<void>, successMessage: string): Promise<void> {
+async function runAction<T>(
+  action: () => Promise<T>,
+  successMessage: string | ((result: T) => string),
+): Promise<void> {
   setStatus(i18n.t("working"));
   try {
-    await action();
+    const result = await action();
     await reloadState();
     render();
-    setStatus(successMessage);
+    setStatus(typeof successMessage === "function" ? successMessage(result) : successMessage);
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error), true);
   }
@@ -414,6 +417,7 @@ function renderBlocks(): HTMLElement {
 
 function themeCard(theme: StartPageTheme): HTMLElement {
   const selected = settings.themes.selectedThemeId === theme.id;
+  const themeCapacityReached = settings.themes.customThemes.length >= MAX_CUSTOM_THEMES;
   const card = element("article", selected ? "theme-card theme-card--selected" : "theme-card");
   const preview = element("div", "theme-card__preview");
   preview.style.setProperty("--preview-text", theme.tokens.textPrimary);
@@ -431,6 +435,7 @@ function themeCard(theme: StartPageTheme): HTMLElement {
   choose.disabled = selected;
   choose.addEventListener("click", () => void runAction(async () => { await selectTheme(theme.id); }, i18n.t("themeSelected")));
   const duplicate = button(i18n.t("duplicate"), "button button--secondary");
+  duplicate.disabled = themeCapacityReached;
   duplicate.addEventListener("click", () => void runAction(async () => { await duplicateTheme(theme.id); }, i18n.t("themeDuplicated")));
   actions.append(choose, duplicate);
   if (!theme.builtIn) {
@@ -455,7 +460,9 @@ function themeCard(theme: StartPageTheme): HTMLElement {
 
 function renderThemes(): HTMLElement {
   const item = section("themes", i18n.t("sectionThemes"), i18n.t("sectionThemesDescription"));
+  const themeCapacityReached = settings.themes.customThemes.length >= MAX_CUSTOM_THEMES;
   const create = button(i18n.t("createTheme"), "button button--primary");
+  create.disabled = themeCapacityReached;
   create.addEventListener("click", () => runUiTask(async () => {
     const created = await createCustomTheme(i18n.t("newCustomTheme"), settings.themes.selectedThemeId);
     const edited = await editTheme(created, i18n);
@@ -464,8 +471,10 @@ function renderThemes(): HTMLElement {
     render();
   }));
   const importButton = button(i18n.t("importTheme"), "button button--secondary");
+  importButton.disabled = themeCapacityReached;
   importButton.addEventListener("click", () => themeImportInput.click());
   const actions = actionRow(create, importButton);
+  if (themeCapacityReached) actions.append(element("span", "block-meta", `${settings.themes.customThemes.length}/${MAX_CUSTOM_THEMES}`));
   const grid = element("div", "theme-grid");
   const themes = [...BUILT_IN_THEMES, ...settings.themes.customThemes];
   grid.append(...themes.map(themeCard));
@@ -492,10 +501,9 @@ function renderBackup(): HTMLElement {
   const restore = button(i18n.t("syncRestore"), "button button--secondary");
   restore.addEventListener("click", () => void runAction(restoreChromeSyncBackup, i18n.t("syncRestored")));
   const smart = button(i18n.t("syncNow"), "button button--primary");
-  smart.addEventListener("click", () => void runAction(async () => {
-    const result = await syncChromeSyncBackup();
-    setStatus(i18n.t(result === "uploaded" ? "syncUploaded" : result === "restored" ? "syncRestored" : "syncUnchanged"));
-  }, i18n.t("syncComplete")));
+  smart.addEventListener("click", () => void runAction(syncChromeSyncBackup, (result) => i18n.t(
+    result === "uploaded" ? "syncUploaded" : result === "restored" ? "syncRestored" : "syncUnchanged",
+  )));
   browser.append(actionRow(upload, restore, smart));
 
   const drive = element("div", "option-card");
