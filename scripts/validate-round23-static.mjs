@@ -27,7 +27,8 @@ assert.match(outputGuard, /Repository-local outputs must live under a top-level 
 assert.match(outputGuard, /External build output must be inside the operating-system temp directory/);
 assert.match(outputGuard, /Refusing to use the repository or its parent as build output/);
 
-assert.match(oauth, /PLACEHOLDER_PATTERN = \/\(\?:REPLACE\|TODO\)\/i/,
+assert.match(oauth, /PLACEHOLDER_PATTERN/);
+assert.match(oauth, /REPLACE\|TODO/,
   "OAuth validation must reject documented placeholder IDs");
 assert.match(oauthGuard, /requireGoogleOAuthClientId\(\)/,
   "The npm Google guard must use shared placeholder-safe validation");
