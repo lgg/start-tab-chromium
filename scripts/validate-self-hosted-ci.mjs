@@ -16,16 +16,16 @@ assert.doesNotMatch(workflow, /pull_request_target/);
 assert.match(workflow, /permissions:\s*\n\s*contents: read/);
 assert.match(workflow, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
 
-assert.equal((workflow.match(/^\s+jobs:/gm) ?? []).length, 0, "jobs must be a top-level key");
-assert.equal((workflow.match(/^\s{2}validate:/gm) ?? []).length, 1, "CI must contain one serial project job");
-assert.equal((workflow.match(/^\s{4}runs-on:/gm) ?? []).length, 1, "CI must route exactly one job");
-assert.match(workflow, /^\s{4}runs-on: start-tab-chromium-ci$/m);
-assert.doesNotMatch(workflow, /^\s{6}- (?:self-hosted|windows|x64)$/m);
+assert.equal((workflow.match(/^[ \t]+jobs:/gm) ?? []).length, 0, "jobs must be a top-level key");
+assert.equal((workflow.match(/^[ \t]{2}validate:/gm) ?? []).length, 1, "CI must contain one serial project job");
+assert.equal((workflow.match(/^[ \t]{4}runs-on:/gm) ?? []).length, 1, "CI must route exactly one job");
+assert.match(workflow, /^[ \t]{4}runs-on: start-tab-chromium-ci$/m);
+assert.doesNotMatch(workflow, /^[ \t]{6}- (?:self-hosted|windows|x64)$/m);
 assert.doesNotMatch(workflow, /ubuntu-latest|macos-latest/);
 assert.doesNotMatch(workflow, /^concurrency:/m);
 assert.doesNotMatch(workflow, /cancel-in-progress/);
-assert.match(workflow, /^\s{8}shell: pwsh$/m);
-assert.doesNotMatch(workflow, /^\s+shell: powershell$/m);
+assert.match(workflow, /^[ \t]{8}shell: pwsh$/m);
+assert.doesNotMatch(workflow, /^[ \t]+shell: powershell$/m);
 
 assert.match(workflow, /- name: Configure isolated CI paths/);
 assert.match(workflow, /RUNNER_TEMP/);
