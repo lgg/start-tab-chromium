@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(".github/workflows/ci.yml", "utf8");
 const runnerGuide = await readFile("docs/self-hosted-runner.md", "utf8");
+const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+const cleanScript = await readFile("scripts/clean.mjs", "utf8");
 
 assert.match(workflow, /pull_request:[\s\S]*branches:[\s\S]*- master/);
 assert.match(workflow, /push:[\s\S]*branches:[\s\S]*- master/);
@@ -45,6 +47,15 @@ for (const command of [
   "npm run build:google",
 ]) {
   assert.ok(workflow.includes(command), `Missing CI command: ${command}`);
+}
+
+assert.equal(packageJson.scripts?.clean, "node scripts/clean.mjs");
+assert.doesNotMatch(packageJson.scripts.clean, /\brm\b|rmdir|\bdel\b/i);
+assert.match(cleanScript, /node:fs\/promises/);
+assert.match(cleanScript, /recursive:\s*true/);
+assert.match(cleanScript, /force:\s*true/);
+for (const directory of ["build", "build-blocker-only", "build-google"]) {
+  assert.ok(cleanScript.includes(`"${directory}"`), `Portable clean script must remove ${directory}`);
 }
 
 for (const artifactMarker of [
