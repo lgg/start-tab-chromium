@@ -58,7 +58,7 @@ The workflow caches only npm's download cache, never `node_modules` or build out
 - Node.js major version 22;
 - `package-lock.json` hash.
 
-A runtime setup step creates a project-specific cache directory inside `RUNNER_TEMP` and exports its paths through `GITHUB_ENV`. The cache is restored from and saved to GitHub Actions cache storage, then the local project cache directory is deleted by the final cleanup. In repository **Settings -> Actions -> General -> Cache settings**, keep cache retention at **1 day** and use a conservative repository cache-size limit.
+A runtime setup step resolves a project-specific cache directory inside `RUNNER_TEMP` and exports it through `GITHUB_ENV` without creating or overwriting a stale path first. After checkout and the pinned Node.js setup, the shared cleanup script safely removes any old project cache, the GitHub cache action restores the requested entry, and the final `if: always()` cleanup removes the local cache again. In repository **Settings -> Actions -> General -> Cache settings**, keep cache retention at **1 day** and use a conservative repository cache-size limit.
 
 ## Build outputs and artifacts
 
@@ -74,19 +74,20 @@ The workflow does not package or upload any build artifacts, test reports, logs,
 
 ## Workspace and temporary-directory cleanup
 
-The workflow uses `actions/checkout` with `clean: true`, removes known stale project outputs before checkout, and repeats cleanup with `if: always()` after validation.
+The workflow uses `actions/checkout` with `clean: true`, installs the pinned Node.js toolchain, runs the checked-in `scripts/clean-ci.mjs` before dependency restoration, and repeats that same cleanup with `if: always()` after validation.
 
-Only these project-local workspace paths may be removed:
+Only these known workspace paths may be removed:
 
 - `node_modules/`
 - `build/`
 - `build-blocker-only/`
 - `build-google/`
+- temporary `build-round24-link` / `build-round25-link` regression paths;
 - `locale-parity-report.json`
 
-The project-specific `start-tab-chromium-cache/` directory may also be removed, but only after it is resolved and verified as a descendant of `RUNNER_TEMP`.
+The project-specific `start-tab-chromium-cache/` path may also be removed only when it exactly matches the expected child of `RUNNER_TEMP`.
 
-Every workspace path is resolved and verified to be a descendant of `GITHUB_WORKSPACE`. The workflow never deletes the runner installation directory, a drive root, another repository workspace, global package caches, or global Docker resources. Cleanup failure is visible and fails the job instead of being silently ignored.
+Every cleanup target must be a strict descendant of its declared boundary. Existing path components are inspected with `lstat`; an intermediate symbolic link or Windows junction is rejected, while a final link is removed as the link itself without traversing its external target. The same bounded remover is used by local `npm run clean`. The workflow never deletes the runner installation directory, a drive root, another repository workspace, global package caches, or global Docker resources. Cleanup failure is visible and fails the job instead of being silently ignored.
 
 ## Events and fork security
 

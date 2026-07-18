@@ -5,6 +5,8 @@ const workflow = await readFile(".github/workflows/ci.yml", "utf8");
 const runnerGuide = await readFile("docs/self-hosted-runner.md", "utf8");
 const packageJson = JSON.parse(await readFile("package.json", "utf8"));
 const cleanScript = await readFile("scripts/clean.mjs", "utf8");
+const cleanCiScript = await readFile("scripts/clean-ci.mjs", "utf8");
+const pathSafety = await readFile("scripts/path-safety.mjs", "utf8");
 
 assert.match(workflow, /pull_request:[\s\S]*branches:[\s\S]*- master/);
 for (const activityType of ["opened", "synchronize", "reopened"]) {
@@ -33,6 +35,8 @@ assert.match(workflow, /start-tab-chromium-cache/);
 assert.match(workflow, /Out-File -FilePath \$env:GITHUB_ENV -Encoding utf8 -Append/);
 assert.match(workflow, /NPM_CONFIG_CACHE=\$\(Join-Path \$cacheRoot 'npm'\)/);
 assert.doesNotMatch(workflow, /NPM_CONFIG_CACHE:\s*\$\{\{ github\.workspace \}\}/);
+assert.doesNotMatch(workflow, /New-Item[^\n]*\$cacheRoot/,
+  "The workflow must not create or overwrite a stale cache junction before safe cleanup");
 
 assert.match(workflow, /uses: actions\/checkout@v6/);
 assert.match(workflow, /clean: true/);
@@ -49,12 +53,18 @@ assert.match(
 );
 assert.doesNotMatch(workflow, /path:\s*node_modules/);
 
+const releaseValidationCommands = [
+  "node scripts/validate-release-docs.mjs build-cleanup",
+  "node scripts/validate-release-docs.mjs oauth",
+  "node scripts/validate-release-docs.mjs documentation",
+  "node scripts/validate-release-docs.mjs ci",
+];
 const regressionCommands = [
   "node scripts/validate-static.mjs",
   "node scripts/validate-round6-static.mjs",
   "node scripts/validate-round7-static.mjs",
   "node scripts/validate-round11-static.mjs",
-  "node scripts/validate-release-docs.mjs",
+  ...releaseValidationCommands,
   "node scripts/run-round12-fixtures.mjs",
   "node scripts/validate-round12-static.mjs",
   "node scripts/run-round13-fixtures.mjs",
@@ -77,6 +87,12 @@ const regressionCommands = [
   "node scripts/validate-round21-static.mjs",
   "node scripts/run-round22-fixtures.mjs",
   "node scripts/validate-round22-static.mjs",
+  "node scripts/run-round23-fixtures.mjs",
+  "node scripts/validate-round23-static.mjs",
+  "node scripts/run-round24-fixtures.mjs",
+  "node scripts/validate-round24-static.mjs",
+  "node scripts/run-round25-fixtures.mjs",
+  "node scripts/validate-round25-static.mjs",
   "node scripts/validate-self-hosted-ci.mjs",
 ];
 
@@ -97,9 +113,11 @@ for (const toolPath of ["node_modules/typescript/bin/tsc", "node_modules/esbuild
 for (const scriptName of ["test", "typecheck", "build", "build:blocker-only", "build:google", "clean"]) {
   assert.equal(typeof packageJson.scripts?.[scriptName], "string", `package.json is missing script: ${scriptName}`);
 }
+assert.ok(packageJson.scripts.test.includes("node scripts/validate-release-docs.mjs"),
+  "npm test must execute every release validation scope through the default all mode");
 await access("scripts/report-locale-parity.mjs");
 for (const command of regressionCommands) {
-  const relativePath = command.replace(/^node\s+/, "");
+  const [relativePath] = command.replace(/^node\s+/, "").split(/\s+/);
   await access(relativePath);
 }
 
@@ -121,12 +139,22 @@ assert.match(
 
 assert.equal(packageJson.scripts?.clean, "node scripts/clean.mjs");
 assert.doesNotMatch(packageJson.scripts.clean, /\brm\b|rmdir|\bdel\b/i);
-assert.match(cleanScript, /node:fs\/promises/);
-assert.match(cleanScript, /recursive:\s*true/);
-assert.match(cleanScript, /force:\s*true/);
-for (const directory of ["build", "build-blocker-only", "build-google"]) {
+assert.match(cleanScript, /removePathWithinBoundary/);
+assert.match(cleanCiScript, /removePathWithinBoundary/);
+assert.match(pathSafety, /lstat/);
+assert.match(pathSafety, /intermediate symbolic link or junction/);
+for (const directory of ["build", "build-blocker-only", "build-google", "build-round24-link", "build-round25-link"]) {
   assert.ok(cleanScript.includes(`"${directory}"`), `Portable clean script must remove ${directory}`);
+  assert.ok(cleanCiScript.includes(`"${directory}"`), `CI clean script must remove ${directory}`);
 }
+
+assert.equal((workflow.match(/run: node scripts\/clean-ci\.mjs/g) ?? []).length, 2,
+  "CI must run the shared safe cleanup before tests and in the always() post-step");
+assert.ok(workflow.indexOf("uses: actions/checkout@v6") < workflow.indexOf("run: node scripts/clean-ci.mjs"));
+assert.ok(workflow.indexOf("uses: actions/setup-node@v6") < workflow.indexOf("run: node scripts/clean-ci.mjs"));
+assert.match(workflow, /- name: Clean project workspace\s*\n\s*if: always\(\)\s*\n\s*run: node scripts\/clean-ci\.mjs/);
+assert.doesNotMatch(workflow, /Remove-Item[^\n]*-Recurse/,
+  "CI must not use lexical-only recursive PowerShell deletion");
 
 for (const artifactMarker of [
   "actions/upload-artifact",
@@ -138,10 +166,6 @@ for (const artifactMarker of [
 ]) {
   assert.doesNotMatch(workflow, new RegExp(artifactMarker), `CI must not contain artifact marker: ${artifactMarker}`);
 }
-
-assert.match(workflow, /- name: Clean project workspace\s*\n\s*if: always\(\)/);
-assert.match(workflow, /Refusing to remove a path outside GITHUB_WORKSPACE/);
-assert.match(workflow, /Refusing to remove a cache path outside RUNNER_TEMP/);
 for (const dangerousCommand of [
   "docker system prune",
   "docker volume prune",
