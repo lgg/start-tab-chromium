@@ -123,6 +123,24 @@ function storedLastBlockedUrlsEqual(snapshot: Record<string, unknown>, expected:
     && expectedEntries.every(([host, url]) => Object.prototype.hasOwnProperty.call(rawRecord, host) && rawRecord[host] === url);
 }
 
+interface LastBlockedUrlSnapshot {
+  snapshot: Record<string, unknown>;
+  urls: Record<string, string>;
+}
+
+async function readLastBlockedUrlSnapshot(): Promise<LastBlockedUrlSnapshot> {
+  const snapshot = await chrome.storage.local.get(LAST_BLOCKED_URLS_KEY) as Record<string, unknown>;
+  return { snapshot, urls: normalizeLastBlockedUrls(snapshot[LAST_BLOCKED_URLS_KEY]) };
+}
+
+async function writeCanonicalLastBlockedUrls(urls: Record<string, string>): Promise<void> {
+  if (Object.keys(urls).length === 0) {
+    await chrome.storage.local.remove(LAST_BLOCKED_URLS_KEY);
+    return;
+  }
+  await chrome.storage.local.set({ [LAST_BLOCKED_URLS_KEY]: urls });
+}
+
 export async function getBlockedSites(): Promise<string[]> {
   await migrateLegacyStorage();
   return readBlockedSites();
@@ -156,8 +174,7 @@ export async function migrateLegacyStorage(): Promise<void> {
 }
 
 async function getLastBlockedUrls(): Promise<Record<string, string>> {
-  const items = await chrome.storage.local.get(LAST_BLOCKED_URLS_KEY);
-  return normalizeLastBlockedUrls(items[LAST_BLOCKED_URLS_KEY]);
+  return (await readLastBlockedUrlSnapshot()).urls;
 }
 
 export async function replaceBlockedSites(sites: string[]): Promise<string[]> {
@@ -190,12 +207,12 @@ export async function rememberBlockedNavigation(url: string): Promise<void> {
     const sites = await readBlockedSites();
     const host = sites.find((site) => hostMatchesBlockedSite(urlHost, site));
     if (!host) return;
-    const urls = await getLastBlockedUrls();
-    if (ownValue(urls, host) === url) return;
+    const { snapshot, urls } = await readLastBlockedUrlSnapshot();
+    if (ownValue(urls, host) === url && storedLastBlockedUrlsEqual(snapshot, urls)) return;
     urls[host] = url;
     await commitStorageMutationWithRevision(
       [LAST_BLOCKED_URLS_KEY],
-      () => chrome.storage.local.set({ [LAST_BLOCKED_URLS_KEY]: urls }),
+      () => writeCanonicalLastBlockedUrls(urls),
     );
   });
 }
@@ -211,12 +228,13 @@ export async function clearLastBlockedUrl(host: string): Promise<void> {
   const normalized = normalizeStoredHost(host);
   if (!normalized) return;
   await withStorageLock("data-write", async () => {
-    const urls = await getLastBlockedUrls();
-    if (!Object.prototype.hasOwnProperty.call(urls, normalized)) return;
-    delete urls[normalized];
+    const { snapshot, urls } = await readLastBlockedUrlSnapshot();
+    const contained = Object.prototype.hasOwnProperty.call(urls, normalized);
+    if (contained) delete urls[normalized];
+    if (!contained && storedLastBlockedUrlsEqual(snapshot, urls)) return;
     await commitStorageMutationWithRevision(
       [LAST_BLOCKED_URLS_KEY],
-      () => chrome.storage.local.set({ [LAST_BLOCKED_URLS_KEY]: urls }),
+      () => writeCanonicalLastBlockedUrls(urls),
     );
   });
 }
@@ -238,8 +256,35 @@ function buildRules(sites: string[]): chrome.declarativeNetRequest.Rule[] {
   }));
 }
 
-async function replaceDynamicRules(sites: string[]): Promise<void> {
-  const existing = await chrome.declarativeNetRequest.getDynamicRules();
+function stableRuleValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value
+      .map(stableRuleValue)
+      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+  }
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => [key, stableRuleValue(child)]),
+  );
+}
+
+function dynamicRulesEqual(
+  actual: readonly chrome.declarativeNetRequest.Rule[],
+  expected: readonly chrome.declarativeNetRequest.Rule[],
+): boolean {
+  if (actual.length !== expected.length) return false;
+  const normalized = (rules: readonly chrome.declarativeNetRequest.Rule[]) => [...rules]
+    .sort((left, right) => left.id - right.id)
+    .map(stableRuleValue);
+  return JSON.stringify(normalized(actual)) === JSON.stringify(normalized(expected));
+}
+
+async function replaceDynamicRules(
+  sites: string[],
+  existing = await chrome.declarativeNetRequest.getDynamicRules(),
+): Promise<void> {
   await chrome.declarativeNetRequest.updateDynamicRules({
     removeRuleIds: existing.map((rule) => rule.id),
     addRules: buildRules(sites),
@@ -284,7 +329,13 @@ async function applyBlocklistMutation(
   const nextSites = normalizeBlockedSites(requested.sites);
   assertBlockedSiteCapacity(nextSites);
   const nextUrls = requested.lastBlockedUrls === null ? null : normalizeLastBlockedUrls(requested.lastBlockedUrls);
-  if (storedSitesEqual(original[STORAGE_KEY], nextSites) && storedLastBlockedUrlsEqual(original, nextUrls)) {
+  const storageUnchanged = storedSitesEqual(original[STORAGE_KEY], nextSites)
+    && storedLastBlockedUrlsEqual(original, nextUrls);
+  if (storageUnchanged) {
+    const existingRules = await chrome.declarativeNetRequest.getDynamicRules();
+    const expectedRules = buildRules(nextSites);
+    if (dynamicRulesEqual(existingRules, expectedRules)) return previousSites;
+    await replaceDynamicRules(nextSites, existingRules);
     return previousSites;
   }
   try {
