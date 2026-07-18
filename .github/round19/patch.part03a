@@ -1,0 +1,56 @@
+   if (isRecord(value.byDay)) for (const [key, counts] of Object.entries(value.byDay)) if (key) stats.byDay[key] = normalizeCounts(counts);
+   if (isRecord(value.byDomain)) for (const [host, domainStats] of Object.entries(value.byDomain)) if (host) stats.byDomain[host] = normalizeDomainStats(domainStats);
+   if (isRecord(value.processedClockCompletions)) {
+     const entries = Object.entries(value.processedClockCompletions)
+       .flatMap(([token, completedAt]) => typeof token === "string" && token.length <= 520 ? [[token, nonNegativeNumber(completedAt)] as const] : [])
+       .filter((entry) => entry[1] > 0).sort((left, right) => right[1] - left[1]).slice(0, 512);
+-    stats.processedClockCompletions = Object.fromEntries(entries);
++    const completions = createDictionary<number>();
++    for (const [token, completedAt] of entries) completions[token] = completedAt;
++    stats.processedClockCompletions = completions;
+   }
+   return stats;
+ }
+@@ -153,7 +168,7 @@ function applyFocusClockStatsPatch(stats: FocusStats, patch: FocusClockStatsPatc
+   const completionId = typeof patch.completionId === "string" && patch.completionId.length <= 520
+     ? patch.completionId
+     : undefined;
+-  if (completionId && stats.processedClockCompletions[completionId]) return false;
++  if (completionId && ownValue(stats.processedClockCompletions, completionId)) return false;
+ 
+   const startedSessions = typeof patch.startedSessions === "number" && Number.isFinite(patch.startedSessions)
+     ? Math.max(0, Math.round(patch.startedSessions))
+@@ -181,7 +196,9 @@ function applyFocusClockStatsPatch(stats: FocusStats, patch: FocusClockStatsPatc
+     const newest = Object.entries(stats.processedClockCompletions)
+       .sort((left, right) => right[1] - left[1])
+       .slice(0, 512);
+-    stats.processedClockCompletions = Object.fromEntries(newest);
++    const completions = createDictionary<number>();
++    for (const [token, completedAt] of newest) completions[token] = completedAt;
++    stats.processedClockCompletions = completions;
+   }
+   return true;
+ }
+@@ -198,7 +215,7 @@ export async function applyFocusClockStatsPatchInExistingTransaction(patch: Focu
+ }
+ 
+ function domainMinutes(host: string, settings: StartPageSettings): number {
+-  return settings.focusStats.domainMinutes[host] ?? settings.focusStats.defaultMinutesPerAvoidedVisit;
++  return ownValue(settings.focusStats.domainMinutes, host) ?? settings.focusStats.defaultMinutesPerAvoidedVisit;
+ }
+ 
+ export async function getFocusStats(): Promise<FocusStats> { return readStats(); }
+diff --git a/src/lib/start-page-runtime.ts b/src/lib/start-page-runtime.ts
+index fa084c7..501c422 100644
+--- a/src/lib/start-page-runtime.ts
++++ b/src/lib/start-page-runtime.ts
+@@ -1,4 +1,5 @@
+ import { commitStorageMutationWithRevision, DATA_REVISION_KEY, markStartTabDataChanged } from "./data-revision.js";
++import { cloneDictionary, createDictionary, ownValue } from "./dictionary.js";
+ import { withStorageLock } from "./storage-lock.js";
+ import { MAX_LOCAL_TASKS_PER_INSTANCE } from "./platform-limits.js";
+ import { sendMessage } from "./messages.js";
+@@ -171,7 +172,10 @@ function firstBlockOfType(settings: StartPageSettings, type: BlockInstance["type
+ function legacyClockValue(block: Extract<BlockInstance, { type: ClockBlockType }>, primary: Record<string, unknown>, secondary: Record<string, unknown>): unknown {
+   const primaryClocks = isRecord(primary.clocks) ? primary.clocks : {};
+   const secondaryClocks = isRecord(secondary
