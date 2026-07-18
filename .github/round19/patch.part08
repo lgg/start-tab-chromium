@@ -1,0 +1,147 @@
++  for (const [key, fallback] of Object.entries(keys)) {
++    selected[key] = own(storageState, key) ? clone(storageState[key]) : clone(fallback);
++  }
++  return selected;
++}
++
++Object.defineProperty(globalThis, "chrome", {
++  configurable: true,
++  value: {
++    storage: {
++      local: {
++        async get(keys?: string | string[] | Record<string, unknown> | null): Promise<Record<string, unknown>> {
++          storageApiCalls += 1;
++          return storageGet(keys);
++        },
++        async set(items: Record<string, unknown>): Promise<void> {
++          storageApiCalls += 1;
++          for (const [key, value] of Object.entries(items)) storageState[key] = clone(value);
++        },
++        async remove(keys: string | string[]): Promise<void> {
++          storageApiCalls += 1;
++          for (const key of typeof keys === "string" ? [keys] : keys) delete storageState[key];
++        },
++      },
++    },
++    alarms: {
++      async getAll(): Promise<typeof alarms> { alarmApiCalls += 1; return clone(alarms); },
++      async create(name: string, info: { when: number; periodInMinutes?: number }): Promise<void> {
++        alarmApiCalls += 1;
++        alarms = alarms.filter((alarm) => alarm.name !== name);
++        alarms.push({ name, scheduledTime: info.when, ...(info.periodInMinutes ? { periodInMinutes: info.periodInMinutes } : {}) });
++      },
++      async clear(name: string): Promise<boolean> {
++        alarmApiCalls += 1;
++        const before = alarms.length;
++        alarms = alarms.filter((alarm) => alarm.name !== name);
++        return alarms.length !== before;
++      },
++    },
++    declarativeNetRequest: {
++      RuleActionType: { REDIRECT: "redirect" },
++      ResourceType: { MAIN_FRAME: "main_frame" },
++      async getDynamicRules(): Promise<never[]> { dnrApiCalls += 1; return []; },
++      async updateDynamicRules(): Promise<void> { dnrApiCalls += 1; },
++    },
++    runtime: { getURL(path: string): string { return `chrome-extension://round19/${path}`; } },
++  },
++});
++
++storageState = {
++  startPageSettings: normalizedSpecialSettings,
++  startPageRuntimeState: { version: 2, updatedAt: 1, clocks: {}, notes: {}, tasks: {}, linkPages: {} },
++  [FOCUS_STATS_KEY]: { version: 1, totals: {}, byDay: {}, byDomain: {}, processedClockCompletions: {} },
++};
++await mutateStartPageRuntimeState((runtime) => {
++  runtime.notes["__proto__"] = "written through runtime mutation";
++  return { state: runtime, result: undefined };
++});
++const storedSpecialRuntime = storageState.startPageRuntimeState as { notes: Record<string, string> };
++assert.equal(own(storedSpecialRuntime.notes, "__proto__"), true,
++  "Mutation clones must preserve prototype-free dictionaries before writing a special instance ID");
++assert.equal(storedSpecialRuntime.notes.__proto__, "written through runtime mutation");
++delete (Object.prototype as Record<string, unknown>).blockHits;
++await recordBlockedNavigation("__proto__");
++assert.equal(own(Object.prototype, "blockHits"), false, "Special domains must never mutate Object.prototype");
++const storedFocusStats = storageState[FOCUS_STATS_KEY] as { byDomain: Record<string, { blockHits: number; estimatedMinutesSaved: number }> };
++assert.equal(own(storedFocusStats.byDomain, "__proto__"), true);
++assert.equal(storedFocusStats.byDomain.__proto__.blockHits, 1);
++assert.equal(storedFocusStats.byDomain.__proto__.estimatedMinutesSaved, 17);
++
++function repeatedBlocks(count: number): BlockInstance[] {
++  const source = DEFAULT_SETTINGS.layout.blocks.find((block) => block.type === "dateTime");
++  assert.ok(source);
++  return Array.from({ length: count }, (_, index) => ({
++    ...structuredClone(source),
++    id: `round19-block-${index}`,
++    order: index,
++    row: Math.min(500, index + 1),
++  }));
++}
++
++function tasks(count: number): LocalTask[] {
++  return Array.from({ length: count }, (_, index) => ({
++    id: `round19-task-${index}`,
++    title: `Task ${index}`,
++    done: false,
++    createdAt: index + 1,
++    updatedAt: index + 1,
++  }));
++}
++
++function backup(storage: Record<string, unknown>): Record<string, unknown> {
++  return {
++    app: "Start Tab",
++    version: 4,
++    exportedAt: new Date().toISOString(),
++    snapshotId: "round19-backup",
++    storage,
++  };
++}
++
++const taskBlock = DEFAULT_SETTINGS.layout.blocks.find((block) => block.type === "localTasks");
++assert.ok(taskBlock);
++const corruptedSettings = cloneSettings(DEFAULT_SETTINGS);
++corruptedSettings.layout.mode = "free";
++corruptedSettings.layout.blocks = repeatedBlocks(MAX_START_PAGE_BLOCKS + 1);
++const corruptedRuntime = {
++  version: 2,
++  updatedAt: 5,
++  tasks: { [taskBlock.id]: tasks(MAX_LOCAL_TASKS_PER_INSTANCE + 1) },
++};
++const corruptedBlockedSites = Array.from({ length: MAX_BLOCKED_SITES + 1 }, (_, index) => `round19-${index}.example`);
++storageState = {
++  blockedSites: corruptedBlockedSites,
++  startPageSettings: corruptedSettings,
++  startPageRuntimeState: corruptedRuntime,
++  startTabDataRevision: { version: 1, updatedAt: 9 },
++};
++storageApiCalls = dnrApiCalls = alarmApiCalls = 0;
++
++const recoveredExport = await exportBackup();
++const exportedSettings = recoveredExport.storage.startPageSettings as StartPageSettings;
++const exportedRuntime = recoveredExport.storage.startPageRuntimeState as { tasks: Record<string, LocalTask[]> };
++assert.equal((recoveredExport.storage.blockedSites as string[]).length, MAX_BLOCKED_SITES,
++  "Export must bound corrupted local blocked sites so a recoverable backup can still be created");
++assert.equal(exportedSettings.layout.blocks.length, MAX_START_PAGE_BLOCKS,
++  "Export must normalize corrupted local settings to the editable supported boundary");
++assert.equal(exportedRuntime.tasks[taskBlock.id]?.length ?? 0, 0,
++  "Runtime data for blocks absent from bounded normalized settings must not survive as an orphan");
++
++const validImport = backup({
++  blockedSites: [],
++  startPageSettings: DEFAULT_SETTINGS,
++  startPageRuntimeState: { version: 2, updatedAt: 1, clocks: {}, notes: {}, tasks: {}, linkPages: {} },
++});
++const importReport = await importBackup(validImport);
++assert.equal(importReport.targetVersion, 4);
++const recovery = storageState[PRE_IMPORT_BACKUP_KEY] as { storage: Record<string, unknown> };
++assert.ok(recovery, "A pre-import recovery backup must be persisted even when previous local state was oversized");
++assert.equal((recovery.storage.blockedSites as string[]).length, MAX_BLOCKED_SITES);
++assert.equal((recovery.storage.startPageSettings as StartPageSettings).layout.blocks.length, MAX_START_PAGE_BLOCKS);
++assert.deepEqual(storageState.blockedSites, [], "The valid incoming backup must replace corrupted local state");
++assert.ok(storageApiCalls > 0 && dnrApiCalls > 0 && alarmApiCalls > 0,
++  "Successful recovery import must execute storage, DNR, and alarm reconciliation");
++
++storageApiCalls = dnrApiCalls = alarmApiCalls = 0;
++const oversizedIncoming = backup({
