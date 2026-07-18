@@ -16,6 +16,7 @@ const settingsValidation = read("src/lib/start-page-settings-validation.ts");
 const renderRuntime = read("src/newtab/block-renderers-runtime.ts");
 const renderStatic = read("src/newtab/block-renderers-static.ts");
 const backup = read("src/lib/backup.ts");
+const backupBlockedUrls = read("src/lib/backup-blocked-urls.ts");
 
 assert.match(dictionary, /Object\.create\(null\)/,
   "User-keyed dictionaries must have no inherited prototype names");
@@ -48,7 +49,7 @@ for (const [source, label] of [
 ]) {
   assert.match(source, /ownValue\(/, `${label} must use own-property reads for user-controlled block IDs`);
 }
-assert.match(backup, /type StorageNormalizationMode = "strict-import" \| "local-recovery"/,
+assert.match(backupBlockedUrls, /export type BackupCollectionMode = "strict-import" \| "local-recovery"/,
   "Backup normalization must distinguish untrusted imports from local recovery");
 assert.match(backup, /mode === "strict-import"\) assertCollectionCapacity\(source\)/,
   "Untrusted backup collections must remain strictly rejected before normalization");
