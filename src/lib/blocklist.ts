@@ -117,9 +117,10 @@ function storedLastBlockedUrlsEqual(snapshot: Record<string, unknown>, expected:
   }
   const raw = snapshot[LAST_BLOCKED_URLS_KEY];
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
-  const rawEntries = Object.entries(raw);
+  const rawRecord = raw as Record<string, unknown>;
+  const rawEntries = Object.entries(rawRecord);
   return rawEntries.length === expectedEntries.length
-    && expectedEntries.every(([host, url]) => Object.prototype.hasOwnProperty.call(raw, host) && raw[host] === url);
+    && expectedEntries.every(([host, url]) => Object.prototype.hasOwnProperty.call(rawRecord, host) && rawRecord[host] === url);
 }
 
 export async function getBlockedSites(): Promise<string[]> {
