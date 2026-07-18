@@ -12,11 +12,10 @@ assert.match(workflow, /permissions:\s*\n\s*contents: read/);
 assert.match(workflow, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
 
 assert.equal((workflow.match(/^\s+jobs:/gm) ?? []).length, 0, "jobs must be a top-level key");
-assert.equal((workflow.match(/^\s{2}validate-package:/gm) ?? []).length, 1, "CI must contain one serial project job");
+assert.equal((workflow.match(/^\s{2}validate:/gm) ?? []).length, 1, "CI must contain one serial project job");
 assert.equal((workflow.match(/^\s{4}runs-on:/gm) ?? []).length, 1, "CI must route exactly one job");
-for (const label of ["self-hosted", "windows", "x64", "start-tab-chromium-ci"]) {
-  assert.match(workflow, new RegExp(`^\\s{6}- ${label}$`, "m"), `Missing runner label ${label}`);
-}
+assert.match(workflow, /^\s{4}runs-on: start-tab-chromium-ci$/m);
+assert.doesNotMatch(workflow, /^\s{6}- (?:self-hosted|windows|x64)$/m);
 assert.doesNotMatch(workflow, /ubuntu-latest|macos-latest/);
 assert.doesNotMatch(workflow, /^concurrency:/m);
 assert.doesNotMatch(workflow, /cancel-in-progress/);
@@ -48,12 +47,16 @@ for (const command of [
   assert.ok(workflow.includes(command), `Missing CI command: ${command}`);
 }
 
-assert.match(workflow, /start-tab-chromium-full-\$shortSha\.zip/);
-assert.match(workflow, /start-tab-chromium-blocker-only-\$shortSha\.zip/);
-assert.match(workflow, /uses: actions\/upload-artifact@v7/);
-assert.match(workflow, /path: ci-artifacts\/\*\.zip/);
-assert.match(workflow, /retention-days: 1/);
-assert.doesNotMatch(workflow, /complete-audit-snapshot/);
+for (const artifactMarker of [
+  "actions/upload-artifact",
+  "Compress-Archive",
+  "ci-artifacts",
+  "retention-days",
+  "start-tab-chromium-packages",
+  "complete-audit-snapshot",
+]) {
+  assert.doesNotMatch(workflow, new RegExp(artifactMarker), `CI must not contain artifact marker: ${artifactMarker}`);
+}
 
 assert.match(workflow, /- name: Clean project workspace\s*\n\s*if: always\(\)/);
 assert.match(workflow, /Refusing to remove a path outside GITHUB_WORKSPACE/);
@@ -67,11 +70,13 @@ for (const dangerousCommand of [
   assert.doesNotMatch(workflow, new RegExp(dangerousCommand));
 }
 
-assert.match(runnerGuide, /start-tab-chromium-ci/);
+assert.match(runnerGuide, /workflow requires exactly one label/);
+assert.match(runnerGuide, /--no-default-labels --labels start-tab-chromium-ci/);
 assert.match(runnerGuide, /2\.329\.0 or newer/);
 assert.match(runnerGuide, /does not contain a Dockerfile or Compose configuration/);
+assert.match(runnerGuide, /does not package or upload any build artifacts/);
 assert.match(runnerGuide, /No repository secret or Actions variable is required/);
-assert.match(runnerGuide, /cache retention to \*\*1 day\*\*/);
+assert.match(runnerGuide, /cache retention at \*\*1 day\*\*/);
 assert.match(runnerGuide, /Never approve or manually dispatch a fork-authored workflow/);
 
 console.log("Self-hosted Windows CI validation passed");

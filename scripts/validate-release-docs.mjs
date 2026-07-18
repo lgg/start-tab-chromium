@@ -46,6 +46,7 @@ assert.match(
   /GOOGLE_OAUTH_CLIENT_ID:\s*ci-validation\.apps\.googleusercontent\.com[\s\S]*run: npm run build:google/,
   "CI must execute the Google-enabled build with a non-production validation ID",
 );
-assert.match(ci, /build-google/, "CI audit artifacts must include build-google/");
+assert.match(ci, /build-google/, "CI must generate and clean the build-google/ validation output");
+assert.doesNotMatch(ci, /actions\/upload-artifact|Compress-Archive|retention-days:/, "CI must not upload build artifacts");
 
 console.log("Release documentation and build-profile validation passed");
