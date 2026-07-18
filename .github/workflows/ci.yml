@@ -4,9 +4,10 @@ on:
   pull_request:
     branches:
       - master
-  push:
-    branches:
-      - master
+    types:
+      - opened
+      - synchronize
+      - reopened
   workflow_dispatch:
 
 permissions:
@@ -23,12 +24,34 @@ jobs:
     timeout-minutes: 30
     defaults:
       run:
-        shell: powershell
+        shell: pwsh
     env:
       CI: "true"
-      NPM_CONFIG_CACHE: ${{ github.workspace }}/.ci-cache/npm
 
     steps:
+      - name: Configure isolated CI paths
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
+            throw 'RUNNER_TEMP is empty'
+          }
+
+          $runnerTemp = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\', '/')
+          $volumeRoot = [System.IO.Path]::GetPathRoot($runnerTemp).TrimEnd('\', '/')
+          if ([string]::IsNullOrWhiteSpace($runnerTemp) -or $runnerTemp -eq $volumeRoot) {
+            throw "Unsafe RUNNER_TEMP: $runnerTemp"
+          }
+
+          $cacheRoot = [System.IO.Path]::GetFullPath((Join-Path $runnerTemp 'start-tab-chromium-cache')).TrimEnd('\', '/')
+          $runnerTempPrefix = $runnerTemp + [System.IO.Path]::DirectorySeparatorChar
+          if (-not $cacheRoot.StartsWith($runnerTempPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "CI cache path escaped RUNNER_TEMP: $cacheRoot"
+          }
+
+          New-Item -ItemType Directory -Path $cacheRoot -Force | Out-Null
+          "CI_CACHE_ROOT=$cacheRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "NPM_CONFIG_CACHE=$(Join-Path $cacheRoot 'npm')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Remove stale project outputs
         run: |
           $ErrorActionPreference = 'Stop'
@@ -45,7 +68,6 @@ jobs:
           $workspacePrefix = $workspace + [System.IO.Path]::DirectorySeparatorChar
           $targets = @(
             'node_modules',
-            '.ci-cache',
             'build',
             'build-blocker-only',
             'build-google',
@@ -60,6 +82,10 @@ jobs:
             if (Test-Path -LiteralPath $target) {
               Remove-Item -LiteralPath $target -Recurse -Force
             }
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($env:CI_CACHE_ROOT) -and (Test-Path -LiteralPath $env:CI_CACHE_ROOT)) {
+            Remove-Item -LiteralPath $env:CI_CACHE_ROOT -Recurse -Force
           }
 
       - name: Checkout
@@ -85,7 +111,19 @@ jobs:
           key: start-tab-chromium-npm-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json') }}
 
       - name: Install dependencies
-        run: npm ci --no-audit --no-fund --loglevel=error
+        run: npm ci --include=dev --bin-links=true --no-audit --no-fund --loglevel=error
+
+      - name: Verify required toolchain
+        run: |
+          $requiredFiles = @(
+            'node_modules/typescript/bin/tsc',
+            'node_modules/esbuild/bin/esbuild'
+          )
+          foreach ($relativePath in $requiredFiles) {
+            if (-not (Test-Path -LiteralPath (Join-Path $env:GITHUB_WORKSPACE $relativePath))) {
+              throw "Required CI tool is missing after npm ci: $relativePath"
+            }
+          }
 
       - name: Save npm download cache
         if: steps.npm-cache.outputs.cache-hit != 'true'
@@ -118,42 +156,68 @@ jobs:
         if: always()
         run: |
           $ErrorActionPreference = 'Continue'
-          if ([string]::IsNullOrWhiteSpace($env:GITHUB_WORKSPACE)) {
-            Write-Error 'GITHUB_WORKSPACE is empty; cleanup was not attempted'
-            exit 1
-          }
-
-          $workspace = [System.IO.Path]::GetFullPath($env:GITHUB_WORKSPACE).TrimEnd('\', '/')
-          $volumeRoot = [System.IO.Path]::GetPathRoot($workspace).TrimEnd('\', '/')
-          if ([string]::IsNullOrWhiteSpace($workspace) -or $workspace -eq $volumeRoot) {
-            Write-Error "Unsafe GITHUB_WORKSPACE: $workspace"
-            exit 1
-          }
-
-          $workspacePrefix = $workspace + [System.IO.Path]::DirectorySeparatorChar
-          $targets = @(
-            'node_modules',
-            '.ci-cache',
-            'build',
-            'build-blocker-only',
-            'build-google',
-            'locale-parity-report.json'
-          )
           $cleanupFailed = $false
 
-          foreach ($relativePath in $targets) {
-            $target = [System.IO.Path]::GetFullPath((Join-Path $workspace $relativePath)).TrimEnd('\', '/')
-            if (-not $target.StartsWith($workspacePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-              Write-Error "Refusing to remove a path outside GITHUB_WORKSPACE: $target"
+          if ([string]::IsNullOrWhiteSpace($env:GITHUB_WORKSPACE)) {
+            Write-Error 'GITHUB_WORKSPACE is empty; workspace cleanup was not attempted'
+            $cleanupFailed = $true
+          } else {
+            $workspace = [System.IO.Path]::GetFullPath($env:GITHUB_WORKSPACE).TrimEnd('\', '/')
+            $volumeRoot = [System.IO.Path]::GetPathRoot($workspace).TrimEnd('\', '/')
+            if ([string]::IsNullOrWhiteSpace($workspace) -or $workspace -eq $volumeRoot) {
+              Write-Error "Unsafe GITHUB_WORKSPACE: $workspace"
               $cleanupFailed = $true
-              continue
+            } else {
+              $workspacePrefix = $workspace + [System.IO.Path]::DirectorySeparatorChar
+              $targets = @(
+                'node_modules',
+                'build',
+                'build-blocker-only',
+                'build-google',
+                'locale-parity-report.json'
+              )
+
+              foreach ($relativePath in $targets) {
+                $target = [System.IO.Path]::GetFullPath((Join-Path $workspace $relativePath)).TrimEnd('\', '/')
+                if (-not $target.StartsWith($workspacePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                  Write-Error "Refusing to remove a path outside GITHUB_WORKSPACE: $target"
+                  $cleanupFailed = $true
+                  continue
+                }
+                if (Test-Path -LiteralPath $target) {
+                  try {
+                    Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop
+                  } catch {
+                    Write-Error "Failed to remove $target`: $($_.Exception.Message)"
+                    $cleanupFailed = $true
+                  }
+                }
+              }
             }
-            if (Test-Path -LiteralPath $target) {
-              try {
-                Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop
-              } catch {
-                Write-Error "Failed to remove $target`: $($_.Exception.Message)"
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
+            Write-Error 'RUNNER_TEMP is empty; cache cleanup was not attempted'
+            $cleanupFailed = $true
+          } else {
+            $runnerTemp = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\', '/')
+            $volumeRoot = [System.IO.Path]::GetPathRoot($runnerTemp).TrimEnd('\', '/')
+            if ([string]::IsNullOrWhiteSpace($runnerTemp) -or $runnerTemp -eq $volumeRoot) {
+              Write-Error "Unsafe RUNNER_TEMP: $runnerTemp"
+              $cleanupFailed = $true
+            } else {
+              $cacheRoot = [System.IO.Path]::GetFullPath((Join-Path $runnerTemp 'start-tab-chromium-cache')).TrimEnd('\', '/')
+              $runnerTempPrefix = $runnerTemp + [System.IO.Path]::DirectorySeparatorChar
+              if (-not $cacheRoot.StartsWith($runnerTempPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                Write-Error "Refusing to remove a cache path outside RUNNER_TEMP: $cacheRoot"
                 $cleanupFailed = $true
+              } elseif (Test-Path -LiteralPath $cacheRoot) {
+                try {
+                  Remove-Item -LiteralPath $cacheRoot -Recurse -Force -ErrorAction Stop
+                } catch {
+                  Write-Error "Failed to remove $cacheRoot`: $($_.Exception.Message)"
+                  $cleanupFailed = $true
+                }
               }
             }
           }
