@@ -94,6 +94,18 @@ export function normalizeLastBlockedUrls(value: unknown): Record<string, string>
   return normalized;
 }
 
+function lastBlockedUrlsForSites(
+  urls: Record<string, string>,
+  sites: readonly string[],
+): Record<string, string> {
+  const filtered = createDictionary<string>();
+  for (const site of sites) {
+    const url = ownValue(urls, site);
+    if (url !== undefined) filtered[site] = url;
+  }
+  return filtered;
+}
+
 function requireHost(host: string): string {
   const normalized = normalizeStoredHost(host);
   if (!normalized) throw new Error("Invalid host");
@@ -152,25 +164,36 @@ async function readBlockedSites(): Promise<string[]> {
 }
 
 export async function migrateLegacyStorage(): Promise<void> {
-  migrationPromise ??= withStorageLock("data-write", async () => {
+  if (migrationPromise) {
+    await migrationPromise;
+    return;
+  }
+
+  const migration = withStorageLock("data-write", async () => {
     const items = await chrome.storage.local.get([STORAGE_KEY, LEGACY_STORAGE_KEY]);
+    if (!Object.prototype.hasOwnProperty.call(items, LEGACY_STORAGE_KEY)) return;
+
     const current = Array.isArray(items[STORAGE_KEY]) ? (items[STORAGE_KEY] as string[]) : [];
     const legacy = Array.isArray(items[LEGACY_STORAGE_KEY]) ? (items[LEGACY_STORAGE_KEY] as string[]) : [];
-    if (legacy.length === 0) return;
     const normalized = normalizeBlockedSites([...current, ...legacy]);
     assertBlockedSiteCapacity(normalized);
     await commitStorageMutationWithRevision(
       [STORAGE_KEY, LEGACY_STORAGE_KEY],
       async () => {
-        await chrome.storage.local.set({ [STORAGE_KEY]: normalized });
+        if (!storedSitesEqual(items[STORAGE_KEY], normalized)) {
+          await chrome.storage.local.set({ [STORAGE_KEY]: normalized });
+        }
         await chrome.storage.local.remove(LEGACY_STORAGE_KEY);
       },
     );
-  }).catch((error) => {
-    migrationPromise = undefined;
-    throw error;
   });
-  await migrationPromise;
+
+  migrationPromise = migration;
+  try {
+    await migration;
+  } finally {
+    if (migrationPromise === migration) migrationPromise = undefined;
+  }
 }
 
 async function getLastBlockedUrls(): Promise<Record<string, string>> {
@@ -207,7 +230,8 @@ export async function rememberBlockedNavigation(url: string): Promise<void> {
     const sites = await readBlockedSites();
     const host = sites.find((site) => hostMatchesBlockedSite(urlHost, site));
     if (!host) return;
-    const { snapshot, urls } = await readLastBlockedUrlSnapshot();
+    const { snapshot, urls: storedUrls } = await readLastBlockedUrlSnapshot();
+    const urls = lastBlockedUrlsForSites(storedUrls, sites);
     if (ownValue(urls, host) === url && storedLastBlockedUrlsEqual(snapshot, urls)) return;
     urls[host] = url;
     await commitStorageMutationWithRevision(
@@ -227,8 +251,11 @@ export async function getLastBlockedUrl(host: string): Promise<string | null> {
 export async function clearLastBlockedUrl(host: string): Promise<void> {
   const normalized = normalizeStoredHost(host);
   if (!normalized) return;
+  await migrateLegacyStorage();
   await withStorageLock("data-write", async () => {
-    const { snapshot, urls } = await readLastBlockedUrlSnapshot();
+    const sites = await readBlockedSites();
+    const { snapshot, urls: storedUrls } = await readLastBlockedUrlSnapshot();
+    const urls = lastBlockedUrlsForSites(storedUrls, sites);
     const contained = Object.prototype.hasOwnProperty.call(urls, normalized);
     if (contained) delete urls[normalized];
     if (!contained && storedLastBlockedUrlsEqual(snapshot, urls)) return;
@@ -329,7 +356,8 @@ async function applyBlocklistMutation(
   });
   const nextSites = normalizeBlockedSites(requested.sites);
   assertBlockedSiteCapacity(nextSites);
-  const nextUrls = requested.lastBlockedUrls === null ? null : normalizeLastBlockedUrls(requested.lastBlockedUrls);
+  const normalizedUrls = requested.lastBlockedUrls === null ? null : normalizeLastBlockedUrls(requested.lastBlockedUrls);
+  const nextUrls = normalizedUrls === null ? null : lastBlockedUrlsForSites(normalizedUrls, nextSites);
   const storageUnchanged = storedSitesEqual(original[STORAGE_KEY], nextSites)
     && storedLastBlockedUrlsEqual(original, nextUrls);
   if (storageUnchanged) {
@@ -378,13 +406,16 @@ export async function unblockHost(host: string): Promise<boolean> {
   }
   await migrateLegacyStorage();
   return runMutation(async () => {
-    const sites = await readBlockedSites();
-    if (!sites.includes(normalized)) return false;
+    let changed = false;
     await applyBlocklistMutation((current) => {
-      delete current.lastBlockedUrls[normalized];
-      return { sites: current.sites.filter((site) => site !== normalized), lastBlockedUrls: current.lastBlockedUrls };
+      changed = current.sites.includes(normalized);
+      if (changed) delete current.lastBlockedUrls[normalized];
+      return {
+        sites: changed ? current.sites.filter((site) => site !== normalized) : current.sites,
+        lastBlockedUrls: current.lastBlockedUrls,
+      };
     });
-    return true;
+    return changed;
   });
 }
 

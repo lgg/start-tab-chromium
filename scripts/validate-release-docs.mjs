@@ -107,6 +107,10 @@ if (selected("ci")) {
     /GOOGLE_OAUTH_CLIENT_ID:\s*ci-validation\.apps\.googleusercontent\.com[\s\S]*run: npm run build:google/,
     "CI must execute the Google-enabled build with a non-production validation ID",
   );
+  assert.match(ci, /uses: actions\/checkout@v6[\s\S]*clean: false/,
+    "Checkout must delegate deletion to the repository's bounded cleanup");
+  assert.doesNotMatch(ci, /clean: true/,
+    "Checkout must not run broad recursive git clean before bounded cleanup");
   assert.equal((ci.match(/run: node scripts\/clean-ci\.mjs/g) ?? []).length, 2,
     "CI must invoke the shared cleanup before validation and in the final always() step");
   assert.ok(cleanCiScript.includes('"build-google"'),
