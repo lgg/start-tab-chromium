@@ -45,10 +45,14 @@ function assertCatalog(name, catalog) {
 }
 
 function assertCiPolicy(ci) {
-  if (ci.includes("actions/upload-artifact")) {
-    assert.match(ci, /retention-days:\s*1\b/, "GitHub artifact uploads must use one-day retention");
-  }
-  assert.doesNotMatch(ci, /actions\/cache@/, "Explicit GitHub Actions caches are not expected");
+  assert.doesNotMatch(
+    ci,
+    /actions\/upload-artifact|Compress-Archive|retention-days:/,
+    "PR CI must not upload or package build artifacts",
+  );
+  assert.match(ci, /uses: actions\/cache\/restore@v5/, "CI must restore only the npm download cache");
+  assert.match(ci, /uses: actions\/cache\/save@v5/, "CI must save only the npm download cache");
+  assert.doesNotMatch(ci, /path:\s*node_modules/, "CI must not cache node_modules");
 }
 
 const [manifest, packageJson, enMessages, enRound7Messages, ruBaseMessages, ruRoadmapMessages, ruRound7Messages, ci, rootBuild, canonicalBuild, newtabHtml, optionsHtml, settingsSource, runtimeRendererSource, serviceWorkerSource] = await Promise.all([
@@ -157,10 +161,16 @@ for (const messageType of ["complete-clock", "clock-action", "reset-clocks", "ru
   assert.ok(serviceWorkerSource.includes(`case "${messageType}"`) || serviceWorkerSource.includes(`type: "${messageType}"`), `Service worker must handle ${messageType}`);
 }
 
-assert.match(ci, /npm run test/);
-assert.match(ci, /npm run typecheck/);
-assert.match(ci, /npm run build\b/);
-assert.match(ci, /npm run build:blocker-only/);
+for (const command of [
+  "node scripts/validate-static.mjs",
+  "node scripts/validate-round19-static.mjs",
+  "node scripts/validate-self-hosted-ci.mjs",
+  "npm run typecheck",
+  "npm run build",
+  "npm run build:blocker-only",
+]) {
+  assert.ok(ci.includes(command), `CI must execute ${command}`);
+}
 assertCiPolicy(ci);
 
 const sourceFiles = (await walk(resolve(root, "src"))).filter((file) => /\.(?:ts|js|html)$/.test(file));

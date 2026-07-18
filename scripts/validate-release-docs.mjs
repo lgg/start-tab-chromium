@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (relativePath) => readFile(path.join(root, relativePath), "utf8");
 
-const [packageSource, readme, releaseNotes, deployment, manualQa, ci, googleGuard] = await Promise.all([
+const [packageSource, readme, releaseNotes, deployment, manualQa, ci, googleGuard, cleanScript] = await Promise.all([
   read("package.json"),
   read("README.md"),
   read("docs/release.md"),
@@ -14,6 +14,7 @@ const [packageSource, readme, releaseNotes, deployment, manualQa, ci, googleGuar
   read("docs/manual-qa-3.0.0.md"),
   read(".github/workflows/ci.yml"),
   read("scripts/require-google-oauth.mjs"),
+  read("scripts/clean.mjs"),
 ]);
 
 const packageJson = JSON.parse(packageSource);
@@ -22,7 +23,10 @@ assert.equal(typeof googleBuild, "string", "package.json must expose build:googl
 assert.match(googleBuild, /require-google-oauth\.mjs/, "build:google must reject missing OAuth configuration");
 assert.match(googleBuild, /--outdir=build-google\b/, "build:google must write build-google/");
 assert.match(googleBuild, /validate-build-output\.mjs build-google full/, "build:google must validate the generated full build");
-assert.match(packageJson.scripts?.clean ?? "", /build-google/, "clean must remove build-google/");
+assert.equal(packageJson.scripts?.clean, "node scripts/clean.mjs", "clean must use the portable Node cleanup entrypoint");
+for (const directory of ["build", "build-blocker-only", "build-google"]) {
+  assert.ok(cleanScript.includes(`"${directory}"`), `clean.mjs must remove ${directory}/`);
+}
 assert.match(googleGuard, /GOOGLE_OAUTH_CLIENT_ID is required/, "Google build guard must reject a missing client ID");
 assert.match(googleGuard, /\.apps\.googleusercontent\.com/, "Google build guard must validate the Chrome OAuth client format");
 
