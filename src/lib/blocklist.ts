@@ -104,6 +104,25 @@ function hostMatchesBlockedSite(host: string, site: string): boolean {
   return host === site || host.endsWith(`.${site}`);
 }
 
+function storedSitesEqual(raw: unknown, expected: readonly string[]): boolean {
+  return Array.isArray(raw)
+    && raw.length === expected.length
+    && raw.every((site, index) => site === expected[index]);
+}
+
+function storedLastBlockedUrlsEqual(snapshot: Record<string, unknown>, expected: Record<string, string> | null): boolean {
+  const expectedEntries = expected === null ? [] : Object.entries(expected);
+  if (expectedEntries.length === 0) {
+    return !Object.prototype.hasOwnProperty.call(snapshot, LAST_BLOCKED_URLS_KEY);
+  }
+  const raw = snapshot[LAST_BLOCKED_URLS_KEY];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  const rawRecord = raw as Record<string, unknown>;
+  const rawEntries = Object.entries(rawRecord);
+  return rawEntries.length === expectedEntries.length
+    && expectedEntries.every(([host, url]) => Object.prototype.hasOwnProperty.call(rawRecord, host) && rawRecord[host] === url);
+}
+
 export async function getBlockedSites(): Promise<string[]> {
   await migrateLegacyStorage();
   return readBlockedSites();
@@ -172,6 +191,7 @@ export async function rememberBlockedNavigation(url: string): Promise<void> {
     const host = sites.find((site) => hostMatchesBlockedSite(urlHost, site));
     if (!host) return;
     const urls = await getLastBlockedUrls();
+    if (ownValue(urls, host) === url) return;
     urls[host] = url;
     await commitStorageMutationWithRevision(
       [LAST_BLOCKED_URLS_KEY],
@@ -264,6 +284,9 @@ async function applyBlocklistMutation(
   const nextSites = normalizeBlockedSites(requested.sites);
   assertBlockedSiteCapacity(nextSites);
   const nextUrls = requested.lastBlockedUrls === null ? null : normalizeLastBlockedUrls(requested.lastBlockedUrls);
+  if (storedSitesEqual(original[STORAGE_KEY], nextSites) && storedLastBlockedUrlsEqual(original, nextUrls)) {
+    return previousSites;
+  }
   try {
     await chrome.storage.local.set({ [STORAGE_KEY]: nextSites });
     if (nextUrls === null || Object.keys(nextUrls).length === 0) await chrome.storage.local.remove(LAST_BLOCKED_URLS_KEY);

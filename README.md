@@ -66,20 +66,20 @@ The full production extension is built into `build/` and can be loaded as an unp
 
 ### Google-enabled build
 
-Create a Chrome extension OAuth client for the final extension ID, then inject it at build time:
+Create a Chrome extension OAuth client for the final extension ID, then replace the entire placeholder below with that real client ID:
 
 ```bash
-GOOGLE_OAUTH_CLIENT_ID="1234567890-example.apps.googleusercontent.com" npm run build:google
+GOOGLE_OAUTH_CLIENT_ID="REPLACE_WITH_REAL_CLIENT_ID.apps.googleusercontent.com" npm run build:google
 ```
 
 PowerShell:
 
 ```powershell
-$env:GOOGLE_OAUTH_CLIENT_ID = "1234567890-example.apps.googleusercontent.com"
+$env:GOOGLE_OAUTH_CLIENT_ID = "REPLACE_WITH_REAL_CLIENT_ID.apps.googleusercontent.com"
 npm run build:google
 ```
 
-The Google-enabled artifact is written to `build-google/`. The builder validates the ID and includes the Calendar/Drive OAuth configuration plus the `identity` permission. Default full and blocker-only builds deliberately omit both OAuth configuration and `identity`. Placeholder or malformed IDs fail validation instead of producing an ambiguous package.
+The shown placeholder is intentionally rejected. The Google-enabled artifact is written to `build-google/`. The builder validates the ID and includes the Calendar/Drive OAuth configuration plus the `identity` permission. Default full and blocker-only builds deliberately omit both OAuth configuration and `identity`. Placeholder or malformed IDs fail validation instead of producing an ambiguous package.
 
 ## Local Install And New Tab Checks
 

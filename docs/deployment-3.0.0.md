@@ -32,20 +32,20 @@ Load or package `build-blocker-only/`. It has no `chrome_url_overrides`, no new-
 
 ### Full Start Tab with Google Calendar and Drive
 
-Create a Chrome extension OAuth client in Google Cloud for the final extension ID, then build with that exact client ID:
+Create a Chrome extension OAuth client in Google Cloud for the final extension ID, then replace the entire placeholder below with that real client ID:
 
 ```bash
-GOOGLE_OAUTH_CLIENT_ID="1234567890-example.apps.googleusercontent.com" npm run build:google
+GOOGLE_OAUTH_CLIENT_ID="REPLACE_WITH_REAL_CLIENT_ID.apps.googleusercontent.com" npm run build:google
 ```
 
 PowerShell:
 
 ```powershell
-$env:GOOGLE_OAUTH_CLIENT_ID = "1234567890-example.apps.googleusercontent.com"
+$env:GOOGLE_OAUTH_CLIENT_ID = "REPLACE_WITH_REAL_CLIENT_ID.apps.googleusercontent.com"
 npm run build:google
 ```
 
-Load or package `build-google/`. The explicit Google profile validates the client ID, injects the least-privilege Calendar/Drive scopes, and enables `identity`. Placeholder or malformed IDs fail the build, and Google mode cannot be combined with blocker-only packaging.
+The shown placeholder is intentionally rejected. Load or package `build-google/`. The explicit Google profile validates the client ID, injects the least-privilege Calendar/Drive scopes, and enables `identity`. Placeholder or malformed IDs fail the build, and Google mode cannot be combined with blocker-only packaging.
 
 ## Pre-deployment checks
 
