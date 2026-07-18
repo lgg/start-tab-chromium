@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { resolveSafeBuildOutput } from "./build-output-path.mjs";
+import { assertSafeBuildOutputFilesystem, resolveSafeBuildOutput } from "./build-output-path.mjs";
 import { requireGoogleOAuthClientId } from "./google-oauth-client.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -106,6 +106,7 @@ const copyPlugin = {
   },
 };
 
+await assertSafeBuildOutputFilesystem(root, tmpdir(), outdir);
 await rm(outdir, { recursive: true, force: true });
 await mkdir(outdir, { recursive: true });
 
