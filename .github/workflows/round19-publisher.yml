@@ -27,12 +27,33 @@ jobs:
           fetch-depth: 0
           show-progress: false
 
-      - name: Assemble audited patch
+      - name: Assemble and inspect audited patch
         shell: bash
         run: |
           set -euo pipefail
           cat .github/round19/patch.part* > /tmp/round19.patch
-          sha256sum /tmp/round19.patch
+          sha256sum /tmp/round19.patch | tee /tmp/round19.sha256
+          git apply --check /tmp/round19.patch 2> /tmp/round19-apply-error.txt || true
+
+      - name: Upload patch diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: round19-patch-diagnostics
+          path: |
+            /tmp/round19.patch
+            /tmp/round19.sha256
+            /tmp/round19-apply-error.txt
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Apply audited patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test -s /tmp/round19-apply-error.txt; then
+            cat /tmp/round19-apply-error.txt
+            exit 1
+          fi
           git apply --index /tmp/round19.patch
           git rm .github/round19/patch.part* .github/workflows/round19-publisher.yml
           git diff --cached --check
