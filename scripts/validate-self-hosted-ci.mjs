@@ -39,7 +39,10 @@ assert.doesNotMatch(workflow, /New-Item[^\n]*\$cacheRoot/,
   "The workflow must not create or overwrite a stale cache junction before safe cleanup");
 
 assert.match(workflow, /uses: actions\/checkout@v6/);
-assert.match(workflow, /clean: true/);
+assert.match(workflow, /clean: false/,
+  "Checkout must leave deletion to the checked-in bounded cleanup implementation");
+assert.doesNotMatch(workflow, /clean: true/,
+  "Checkout must not run broad git clean before path-safety code is available");
 assert.match(workflow, /persist-credentials: false/);
 assert.match(workflow, /uses: actions\/setup-node@v6/);
 assert.match(workflow, /node-version: 22/);
@@ -93,6 +96,8 @@ const regressionCommands = [
   "node scripts/validate-round24-static.mjs",
   "node scripts/run-round25-fixtures.mjs",
   "node scripts/validate-round25-static.mjs",
+  "node scripts/run-round26-fixtures.mjs",
+  "node scripts/validate-round26-static.mjs",
   "node scripts/validate-self-hosted-ci.mjs",
 ];
 
@@ -186,5 +191,7 @@ assert.match(runnerGuide, /cache retention at \*\*1 day\*\*/);
 assert.match(runnerGuide, /Never approve or manually dispatch a fork-authored workflow/);
 assert.match(runnerGuide, /pull requests targeting `master` and manual `workflow_dispatch` runs/);
 assert.match(runnerGuide, /project-specific cache directory inside `RUNNER_TEMP`/);
+assert.match(runnerGuide, /checkout's built-in recursive clean is disabled/,
+  "Runner documentation must explain why checkout delegates deletion to bounded cleanup");
 
 console.log("Self-hosted Windows CI validation passed");
