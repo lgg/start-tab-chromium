@@ -1,0 +1,125 @@
+   context.runtime = await getStartPageRuntimeState(context.settings);
+-  if (!context.runtime.clocks[block.id]) context.runtime.clocks[block.id] = defaultClockForBlock(block);
++  if (!ownValue(context.runtime.clocks, block.id)) context.runtime.clocks[block.id] = defaultClockForBlock(block);
+   context.requestRender();
+ }
+ 
+@@ -23,7 +24,7 @@ export function renderClock(
+   container: HTMLElement,
+   context: BlockRenderContext,
+ ): void {
+-  let clock = context.runtime.clocks[block.id] ?? defaultClockForBlock(block);
++  let clock = ownValue(context.runtime.clocks, block.id) ?? defaultClockForBlock(block);
+   context.runtime.clocks[block.id] = clock;
+   const phase = element("div", "clock__phase");
+   const display = element("div", "clock__display");
+@@ -61,7 +62,7 @@ export function renderClock(
+   };
+ 
+   const update = (): void => {
+-    clock = context.runtime.clocks[block.id] ?? clock;
++    clock = ownValue(context.runtime.clocks, block.id) ?? clock;
+     const now = Date.now();
+     const value = block.type === "stopwatch" ? elapsedClockMs(clock, now) : remainingClockMs(clock, now);
+     display.textContent = formatDuration(value, block.type === "stopwatch");
+@@ -89,7 +90,7 @@ export function renderNote(
+   context: BlockRenderContext,
+ ): void {
+   const textarea = element("textarea", "note");
+-  let persistedValue = context.runtime.notes[block.id] ?? "";
++  let persistedValue = ownValue(context.runtime.notes, block.id) ?? "";
+   textarea.value = persistedValue;
+   textarea.placeholder = block.config.placeholder || context.i18n.t("notePlaceholder");
+   textarea.setAttribute("aria-label", block.title);
+@@ -136,7 +137,7 @@ async function saveTasks(
+   context: BlockRenderContext,
+   nextTasks: LocalTask[],
+ ): Promise<void> {
+-  const expectedTasks = cloneTasks(context.runtime.tasks[block.id] ?? []);
++  const expectedTasks = cloneTasks(ownValue(context.runtime.tasks, block.id) ?? []);
+   context.runtime.tasks[block.id] = cloneTasks(nextTasks);
+   await context.setRuntime({
+     kind: "tasks",
+@@ -159,7 +160,7 @@ function taskRow(
+   checkbox.setAttribute("aria-label", context.i18n.t("toggleTask", { title: task.title }));
+   const title = element("span", task.done ? "task__title task__title--done" : "task__title", task.title);
+   const remove = actionButton("×", async () => {
+-    const nextTasks = (context.runtime.tasks[block.id] ?? []).filter((candidate) => candidate.id !== task.id);
++    const nextTasks = (ownValue(context.runtime.tasks, block.id) ?? []).filter((candidate) => candidate.id !== task.id);
+     await saveTasks(block, context, nextTasks);
+     redraw();
+   }, "icon-button");
+@@ -167,7 +168,7 @@ function taskRow(
+   remove.setAttribute("aria-label", context.i18n.t("removeTask"));
+   checkbox.addEventListener("change", () => {
+     const now = Date.now();
+-    const nextTasks = (context.runtime.tasks[block.id] ?? []).map((candidate) => candidate.id === task.id
++    const nextTasks = (ownValue(context.runtime.tasks, block.id) ?? []).map((candidate) => candidate.id === task.id
+       ? { ...candidate, done: checkbox.checked, updatedAt: now }
+       : { ...candidate });
+     void saveTasks(block, context, nextTasks).then(redraw).catch(() => undefined);
+@@ -189,7 +190,7 @@ export function renderLocalTasks(
+   add.type = "submit";
+   const list = element("div", "task-list");
+   const redraw = (): void => {
+-    const tasks = (context.runtime.tasks[block.id] ?? []).filter((task) => block.config.showCompleted || !task.done);
++    const tasks = (ownValue(context.runtime.tasks, block.id) ?? []).filter((task) => block.config.showCompleted || !task.done);
+     list.replaceChildren(...tasks.map((task) => taskRow(block, task, context, redraw)));
+     if (tasks.length === 0) list.append(element("p", "empty-state", context.i18n.t("emptyList")));
+   };
+@@ -206,7 +207,7 @@ export function renderLocalTasks(
+       createdAt: now,
+       updatedAt: now,
+     };
+-    const nextTasks = [...(context.runtime.tasks[block.id] ?? []).map((item) => ({ ...item })), task];
++    const nextTasks = [...(ownValue(context.runtime.tasks, block.id) ?? []).map((item) => ({ ...item })), task];
+     input.value = "";
+     void saveTasks(block, context, nextTasks).then(redraw).catch(() => undefined);
+   });
+diff --git a/src/newtab/block-renderers-static.ts b/src/newtab/block-renderers-static.ts
+index d82e4cc..b99f23e 100644
+--- a/src/newtab/block-renderers-static.ts
++++ b/src/newtab/block-renderers-static.ts
+@@ -1,3 +1,4 @@
++import { ownValue } from "../lib/dictionary.js";
+ import type { I18n } from "../lib/i18n.js";
+ import type { BlockInstance, StartLink } from "../lib/start-page-settings.js";
+ import { actionButton, element } from "./block-renderer-common.js";
+@@ -195,11 +196,11 @@ export function renderLinkCollection(
+   container.style.setProperty("--link-icon-size", `${config.iconSize}px`);
+   const perPage = Math.max(1, config.columns * config.rows);
+   const totalPages = Math.max(1, Math.ceil(config.items.length / perPage));
+-  let page = Math.min(context.runtime.linkPages[block.id] ?? 0, totalPages - 1);
++  let page = Math.min(ownValue(context.runtime.linkPages, block.id) ?? 0, totalPages - 1);
+   const list = element("div", `links links--${config.pageDirection}`);
+   const pager = element("div", "pager");
+   const changePage = async (nextPage: number): Promise<void> => {
+-    const expectedPage = context.runtime.linkPages[block.id] ?? 0;
++    const expectedPage = ownValue(context.runtime.linkPages, block.id) ?? 0;
+     page = nextPage;
+     context.runtime.linkPages[block.id] = page;
+     await context.setRuntime({ kind: "linkPage", instanceId: block.id, page, expectedPage });
+diff --git a/src/service-worker.ts b/src/service-worker.ts
+index 98dad80..9f74d77 100644
+--- a/src/service-worker.ts
++++ b/src/service-worker.ts
+@@ -22,6 +22,7 @@ import {
+   recordUnblockAfterCountdown,
+   resetFocusStats,
+ } from "./lib/focus-stats.js";
++import { ownValue } from "./lib/dictionary.js";
+ import { runIndependentEffects } from "./lib/independent-effects.js";
+ import { isMessage, type Ack, type ClockAction, type Message } from "./lib/messages.js";
+ import { consumeNativeNewTabBypass, openNativeNewTab } from "./lib/native-new-tab.js";
+@@ -191,7 +192,7 @@ function sameTasks(left: readonly LocalTask[], right: readonly LocalTask[]): boo
+ 
+ async function updateRuntimeNote(instanceId: string, value: string, expectedValue: string): Promise<void> {
+   await updateStartPageRuntimeState((runtime) => {
+-    const current = runtime.notes[instanceId] ?? "";
++    const current = ownValue(runtime.notes, instanceId) ?? "";
+     if (current !== expectedValue) {
+       throw new Error("Start Tab note changed in another extension context; latest data was kept");
+     }
+@@ -202,7 +203,7 @@ async function updateRuntimeNote(instanceId: string, value: string, expectedValu
+ 
+ async function updateRuntimeTasks(instanceId: string, tasks: LocalTask[], expectedTasks: LocalTask[]): Promise<void> {
