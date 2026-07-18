@@ -53,12 +53,18 @@ assert.match(
 );
 assert.doesNotMatch(workflow, /path:\s*node_modules/);
 
+const releaseValidationCommands = [
+  "node scripts/validate-release-docs.mjs build-cleanup",
+  "node scripts/validate-release-docs.mjs oauth",
+  "node scripts/validate-release-docs.mjs documentation",
+  "node scripts/validate-release-docs.mjs ci",
+];
 const regressionCommands = [
   "node scripts/validate-static.mjs",
   "node scripts/validate-round6-static.mjs",
   "node scripts/validate-round7-static.mjs",
   "node scripts/validate-round11-static.mjs",
-  "node scripts/validate-release-docs.mjs",
+  ...releaseValidationCommands,
   "node scripts/run-round12-fixtures.mjs",
   "node scripts/validate-round12-static.mjs",
   "node scripts/run-round13-fixtures.mjs",
@@ -107,9 +113,11 @@ for (const toolPath of ["node_modules/typescript/bin/tsc", "node_modules/esbuild
 for (const scriptName of ["test", "typecheck", "build", "build:blocker-only", "build:google", "clean"]) {
   assert.equal(typeof packageJson.scripts?.[scriptName], "string", `package.json is missing script: ${scriptName}`);
 }
+assert.ok(packageJson.scripts.test.includes("node scripts/validate-release-docs.mjs"),
+  "npm test must execute every release validation scope through the default all mode");
 await access("scripts/report-locale-parity.mjs");
 for (const command of regressionCommands) {
-  const relativePath = command.replace(/^node\s+/, "");
+  const [relativePath] = command.replace(/^node\s+/, "").split(/\s+/);
   await access(relativePath);
 }
 
