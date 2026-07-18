@@ -58,7 +58,7 @@ The workflow caches only npm's download cache, never `node_modules` or build out
 - Node.js major version 22;
 - `package-lock.json` hash.
 
-A runtime setup step resolves a project-specific cache path inside `RUNNER_TEMP` and exports it through `GITHUB_ENV` without creating or overwriting a stale path first. After checkout and the pinned Node.js setup, the shared cleanup script safely removes any old project cache, the GitHub cache action restores the requested entry, and the final `if: always()` cleanup removes the local cache again. In repository **Settings -> Actions -> General -> Cache settings**, keep cache retention at **1 day** and use a conservative repository cache-size limit.
+A runtime setup step resolves a project-specific cache directory inside `RUNNER_TEMP` and exports it through `GITHUB_ENV` without creating or overwriting a stale path first. After checkout and the pinned Node.js setup, the shared cleanup script safely removes any old project cache, the GitHub cache action restores the requested entry, and the final `if: always()` cleanup removes the local cache again. In repository **Settings -> Actions -> General -> Cache settings**, keep cache retention at **1 day** and use a conservative repository cache-size limit.
 
 ## Build outputs and artifacts
 
