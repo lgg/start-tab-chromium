@@ -21,6 +21,21 @@ let dynamicRuleUpdates = 0;
 let storageSetCalls = 0;
 let storageRemoveCalls = 0;
 
+function expectedRule(host = "example.com"): chrome.declarativeNetRequest.Rule {
+  return {
+    id: 1,
+    priority: 1,
+    action: {
+      type: chrome.declarativeNetRequest.RuleActionType.REDIRECT,
+      redirect: { url: `chrome-extension://round24/blocked.html?site=${encodeURIComponent(host)}` },
+    },
+    condition: {
+      requestDomains: [host],
+      resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
+    },
+  };
+}
+
 function selected(keys: string | string[] | null | undefined): Record<string, unknown> {
   if (keys === null || keys === undefined) return structuredClone(storage);
   const names = Array.isArray(keys) ? keys : [keys];
@@ -73,6 +88,7 @@ function resetCounters(): void {
 }
 
 try {
+  dynamicRules = [expectedRule()];
   const revisionBeforeNoOps = structuredClone(storage.startTabDataRevision);
   await blockHost("example.com");
   await replaceBlockedSites(["example.com"]);
@@ -84,6 +100,7 @@ try {
 
   storage.blockedSites = [];
   delete storage.lastBlockedUrls;
+  dynamicRules = [];
   resetCounters();
   const revisionBeforeClear = structuredClone(storage.startTabDataRevision);
   await clearAll();
