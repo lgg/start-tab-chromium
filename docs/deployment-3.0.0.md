@@ -17,7 +17,7 @@ npm run typecheck
 npm run build
 ```
 
-Load or package the generated `build/` directory. This profile owns the browser new-tab page and intentionally omits Google OAuth configuration and the `identity` permission.
+Load or package the generated `build/` directory. This profile owns the browser new-tab page and intentionally omits Google OAuth configuration and the `identity` permission. The profile is deterministic: an inherited `GOOGLE_OAUTH_CLIENT_ID` value is ignored unless `npm run build:google` selects the explicit Google profile.
 
 ### Blocker-only
 
@@ -28,7 +28,7 @@ npm run typecheck
 npm run build:blocker-only
 ```
 
-Load or package `build-blocker-only/`. It has no `chrome_url_overrides`, no new-tab assets, and no `history` permission.
+Load or package `build-blocker-only/`. It has no `chrome_url_overrides`, no new-tab assets, and no `history` permission. Its Options page detects that profile, does not offer the unavailable Open Start Tab action, and keeps the Start Tab runtime toggle disabled while preserving latent settings for a later full build.
 
 ### Full Start Tab with Google Calendar and Drive
 
@@ -45,7 +45,7 @@ $env:GOOGLE_OAUTH_CLIENT_ID = "1234567890-example.apps.googleusercontent.com"
 npm run build:google
 ```
 
-Load or package `build-google/`. The builder validates the client ID, injects the least-privilege Calendar/Drive scopes, and enables `identity`. Placeholder or malformed IDs fail the build.
+Load or package `build-google/`. The explicit Google profile validates the client ID, injects the least-privilege Calendar/Drive scopes, and enables `identity`. Placeholder or malformed IDs fail the build, and Google mode cannot be combined with blocker-only packaging.
 
 ## Pre-deployment checks
 
