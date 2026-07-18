@@ -15,15 +15,11 @@ permissions:
 # Intentionally no concurrency group: the dedicated single runner preserves every
 # queued job instead of replacing older pending runs.
 jobs:
-  validate-package:
+  validate:
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
-    runs-on:
-      - self-hosted
-      - windows
-      - x64
-      - start-tab-chromium-ci
+    runs-on: start-tab-chromium-ci
     timeout-minutes: 30
     defaults:
       run:
@@ -53,8 +49,6 @@ jobs:
             'build',
             'build-blocker-only',
             'build-google',
-            'ci-artifacts',
-            'validation-logs',
             'locale-parity-report.json'
           )
 
@@ -120,45 +114,6 @@ jobs:
           GOOGLE_OAUTH_CLIENT_ID: ci-validation.apps.googleusercontent.com
         run: npm run build:google
 
-      - name: Package deployable extension builds
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $artifactDirectory = Join-Path $env:GITHUB_WORKSPACE 'ci-artifacts'
-          New-Item -ItemType Directory -Force -Path $artifactDirectory | Out-Null
-          $shortSha = $env:GITHUB_SHA.Substring(0, [Math]::Min(12, $env:GITHUB_SHA.Length))
-
-          $packages = @(
-            @{
-              Source = 'build'
-              File = "start-tab-chromium-full-$shortSha.zip"
-            },
-            @{
-              Source = 'build-blocker-only'
-              File = "start-tab-chromium-blocker-only-$shortSha.zip"
-            }
-          )
-
-          foreach ($package in $packages) {
-            $source = Join-Path $env:GITHUB_WORKSPACE $package.Source
-            if (-not (Test-Path -LiteralPath (Join-Path $source 'manifest.json') -PathType Leaf)) {
-              throw "Missing deployable extension output: $source"
-            }
-            $items = @(Get-ChildItem -LiteralPath $source -Force)
-            if ($items.Count -eq 0) {
-              throw "Deployable extension output is empty: $source"
-            }
-            $destination = Join-Path $artifactDirectory $package.File
-            Compress-Archive -Path $items.FullName -DestinationPath $destination -CompressionLevel Optimal -Force
-          }
-
-      - name: Upload deployable extension packages
-        uses: actions/upload-artifact@v7
-        with:
-          name: start-tab-chromium-packages-${{ github.run_number }}
-          path: ci-artifacts/*.zip
-          if-no-files-found: error
-          retention-days: 1
-
       - name: Clean project workspace
         if: always()
         run: |
@@ -182,8 +137,6 @@ jobs:
             'build',
             'build-blocker-only',
             'build-google',
-            'ci-artifacts',
-            'validation-logs',
             'locale-parity-report.json'
           )
           $cleanupFailed = $false
