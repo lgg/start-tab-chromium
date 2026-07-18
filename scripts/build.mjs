@@ -6,10 +6,14 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const watch = process.argv.includes("--watch");
 const blockerOnly = process.argv.includes("--blocker-only") || process.argv.includes("--without-newtab");
+const googleEnabled = process.argv.includes("--google");
+if (googleEnabled && blockerOnly) {
+  throw new Error("The explicit Google build profile cannot be combined with blocker-only mode");
+}
 const outdirFlag = process.argv.find((argument) => argument.startsWith("--outdir="));
 const outdir = path.resolve(
   root,
-  outdirFlag?.slice("--outdir=".length) || (blockerOnly ? "build-blocker-only" : "build"),
+  outdirFlag?.slice("--outdir=".length) || (blockerOnly ? "build-blocker-only" : googleEnabled ? "build-google" : "build"),
 );
 const source = (...parts) => path.join(root, "src", ...parts);
 const output = (...parts) => path.join(outdir, ...parts);
@@ -51,12 +55,14 @@ async function copyStaticAssets() {
     delete manifest.chrome_url_overrides;
     manifest.permissions = (manifest.permissions ?? []).filter((permission) => permission !== "history");
   }
-  const googleOAuthClientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() ?? "";
-  const validGoogleOAuthClientId = /^[a-zA-Z0-9._-]+\.apps\.googleusercontent\.com$/.test(googleOAuthClientId);
-  if (googleOAuthClientId && !validGoogleOAuthClientId) {
-    throw new Error("GOOGLE_OAUTH_CLIENT_ID must be a Chrome OAuth client ending in .apps.googleusercontent.com");
-  }
-  if (validGoogleOAuthClientId) {
+  const googleOAuthClientId = googleEnabled ? process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() ?? "" : "";
+  if (googleEnabled) {
+    if (!googleOAuthClientId) {
+      throw new Error("GOOGLE_OAUTH_CLIENT_ID is required for the explicit Google build profile");
+    }
+    if (!/^[a-zA-Z0-9._-]+\.apps\.googleusercontent\.com$/.test(googleOAuthClientId)) {
+      throw new Error("GOOGLE_OAUTH_CLIENT_ID must be a Chrome OAuth client ending in .apps.googleusercontent.com");
+    }
     manifest.oauth2 = { ...manifest.oauth2, client_id: googleOAuthClientId };
   } else {
     delete manifest.oauth2;
@@ -96,7 +102,8 @@ const copyPlugin = {
       if (result.errors.length === 0) {
         assertProductionGraph(result.metafile);
         await copyStaticAssets();
-        console.log(`Built ${blockerOnly ? "blocker-only" : "full"} extension at ${outdir}`);
+        const profile = googleEnabled ? "Google-enabled full" : blockerOnly ? "blocker-only" : "full";
+        console.log(`Built ${profile} extension at ${outdir}`);
       }
     });
   },
@@ -123,7 +130,8 @@ const options = {
 if (watch) {
   const context = await esbuild.context(options);
   await context.watch();
-  console.log(`Watching ${blockerOnly ? "blocker-only" : "full"} extension sources...`);
+  const profile = googleEnabled ? "Google-enabled full" : blockerOnly ? "blocker-only" : "full";
+  console.log(`Watching ${profile} extension sources...`);
 } else {
   await esbuild.build(options);
 }
