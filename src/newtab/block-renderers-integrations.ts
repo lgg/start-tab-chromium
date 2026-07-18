@@ -75,15 +75,14 @@ export function renderGoogleCalendar(
     status.textContent = context.i18n.t("googleCalendarNotConfigured");
     return;
   }
-  const cacheKey = `calendar:${block.config.calendarId}:${block.config.maxResults}`;
-  void cachedRequest(cacheKey, 60_000, () => listCalendarEvents(block.config.calendarId, block.config.maxResults)).then((events) => {
+  const query = block.config.query.trim();
+  const cacheKey = `calendar:${JSON.stringify([block.config.calendarId, block.config.maxResults, query])}`;
+  void cachedRequest(cacheKey, 60_000, () => listCalendarEvents(block.config.calendarId, block.config.maxResults, query)).then((events) => {
     if (!attached(status)) return;
-    const query = block.config.query.trim().toLocaleLowerCase();
-    const filtered = query ? events.filter((event) => event.title.toLocaleLowerCase().includes(query)) : events;
     const list = element("div", "calendar-list");
     if (block.config.accountLabel) list.append(element("p", "block-meta", block.config.accountLabel));
-    list.append(...filtered.map((event) => element("div", "calendar-event", calendarEventLabel(event, context.i18n))));
-    if (filtered.length === 0) list.append(element("p", "empty-state", context.i18n.t("emptyList")));
+    list.append(...events.map((event) => element("div", "calendar-event", calendarEventLabel(event, context.i18n))));
+    if (events.length === 0) list.append(element("p", "empty-state", context.i18n.t("emptyList")));
     status.replaceWith(list);
   }).catch(() => {
     if (attached(status)) status.textContent = context.i18n.t("googleCalendarUnavailable");
