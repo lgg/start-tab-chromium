@@ -135,8 +135,71 @@ jobs:
       - name: Generate locale parity report
         run: node scripts/report-locale-parity.mjs
 
-      - name: Run tests
-        run: npm run test
+      - name: Validate core architecture
+        run: node scripts/validate-static.mjs
+
+      - name: Validate round 6
+        run: node scripts/validate-round6-static.mjs
+
+      - name: Validate round 7
+        run: node scripts/validate-round7-static.mjs
+
+      - name: Validate round 11
+        run: node scripts/validate-round11-static.mjs
+
+      - name: Validate release documentation
+        run: node scripts/validate-release-docs.mjs
+
+      - name: Run round 12 fixtures
+        run: node scripts/run-round12-fixtures.mjs
+
+      - name: Validate round 12
+        run: node scripts/validate-round12-static.mjs
+
+      - name: Run round 13 fixtures
+        run: node scripts/run-round13-fixtures.mjs
+
+      - name: Validate round 13
+        run: node scripts/validate-round13-static.mjs
+
+      - name: Run round 14 fixtures
+        run: node scripts/run-round14-fixtures.mjs
+
+      - name: Validate round 14
+        run: node scripts/validate-round14-static.mjs
+
+      - name: Run round 15 fixtures
+        run: node scripts/run-round15-fixtures.mjs
+
+      - name: Validate round 15
+        run: node scripts/validate-round15-static.mjs
+
+      - name: Run round 16 fixtures
+        run: node scripts/run-round16-fixtures.mjs
+
+      - name: Validate round 16
+        run: node scripts/validate-round16-static.mjs
+
+      - name: Run round 17 fixtures
+        run: node scripts/run-round17-fixtures.mjs
+
+      - name: Validate round 17
+        run: node scripts/validate-round17-static.mjs
+
+      - name: Run round 18 fixtures
+        run: node scripts/run-round18-fixtures.mjs
+
+      - name: Validate round 18
+        run: node scripts/validate-round18-static.mjs
+
+      - name: Run round 19 fixtures
+        run: node scripts/run-round19-fixtures.mjs
+
+      - name: Validate round 19
+        run: node scripts/validate-round19-static.mjs
+
+      - name: Validate self-hosted CI contract
+        run: node scripts/validate-self-hosted-ci.mjs
 
       - name: Typecheck
         run: npm run typecheck
