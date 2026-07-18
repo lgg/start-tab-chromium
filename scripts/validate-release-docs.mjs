@@ -35,8 +35,10 @@ assert.match(googleValidator, /GOOGLE_OAUTH_CLIENT_ID is required/,
   "Shared Google validation must reject a missing client ID");
 assert.ok(googleValidator.includes("\\.apps\\.googleusercontent\\.com"),
   "Shared Google validation must enforce the Chrome OAuth client format");
-assert.match(googleValidator, /REPLACE\|TODO/,
-  "Shared Google validation must reject documented placeholder client IDs");
+for (const placeholderToken of ["REPLACE", "TODO", "EXAMPLE", "YOUR", "CHANGEME", "PLACEHOLDER"]) {
+  assert.ok(googleValidator.includes(placeholderToken),
+    `Shared Google validation must reject placeholder token: ${placeholderToken}`);
+}
 
 for (const [name, source] of [
   ["README", readme],
@@ -47,6 +49,14 @@ for (const [name, source] of [
   assert.match(source, /build-google\//, `${name} must document build-google/`);
   assert.match(source, /GOOGLE_OAUTH_CLIENT_ID/, `${name} must document build-time Google OAuth configuration`);
   assert.doesNotMatch(source, /(?:^|\W)dist(?:-blocker-only)?\//m, `${name} must not reference obsolete dist output folders`);
+}
+for (const [name, source] of [["README", readme], ["release notes", releaseNotes], ["deployment guide", deployment]]) {
+  assert.ok(source.includes("REPLACE_WITH_REAL_CLIENT_ID.apps.googleusercontent.com"),
+    `${name} must show an explicitly rejected OAuth placeholder`);
+  assert.doesNotMatch(source, /1234567890-example\.apps\.googleusercontent\.com/,
+    `${name} must not publish a syntactically accepted fake OAuth ID`);
+  assert.match(source, /intentionally rejected/,
+    `${name} must explain that the shown OAuth placeholder cannot be used as-is`);
 }
 
 assert.match(readme, /Roadmap Status — Completed In 3\.0\.0/, "README must mark the completed roadmap as completed");
