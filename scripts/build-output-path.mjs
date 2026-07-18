@@ -1,3 +1,4 @@
+import { lstat } from "node:fs/promises";
 import path from "node:path";
 
 function samePath(left, right) {
@@ -9,6 +10,12 @@ function samePath(left, right) {
 function isStrictDescendant(parent, candidate) {
   const relative = path.relative(parent, candidate);
   return Boolean(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+function trustedRootFor(repositoryRoot, tempRoot, candidate) {
+  if (isStrictDescendant(repositoryRoot, candidate)) return repositoryRoot;
+  if (isStrictDescendant(tempRoot, candidate)) return tempRoot;
+  throw new Error(`Build output is outside its validated roots: ${candidate}`);
 }
 
 /**
@@ -42,4 +49,31 @@ export function resolveSafeBuildOutput(root, temporaryRoot, requested) {
     throw new Error(`External build output must be inside the operating-system temp directory: ${candidate}`);
   }
   return candidate;
+}
+
+/**
+ * Reject an existing symbolic link or Windows junction anywhere below the
+ * trusted repository/temp root. Recursive removal follows links used as an
+ * intermediate path component, so lexical containment alone is insufficient.
+ */
+export async function assertSafeBuildOutputFilesystem(root, temporaryRoot, output) {
+  const repositoryRoot = path.resolve(root);
+  const tempRoot = path.resolve(temporaryRoot);
+  const candidate = path.resolve(output);
+  const trustedRoot = trustedRootFor(repositoryRoot, tempRoot, candidate);
+  const relative = path.relative(trustedRoot, candidate);
+  let current = trustedRoot;
+
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    try {
+      const stats = await lstat(current);
+      if (stats.isSymbolicLink()) {
+        throw new Error(`Refusing to use a build output path containing a symbolic link or junction: ${current}`);
+      }
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return;
+      throw error;
+    }
+  }
 }
