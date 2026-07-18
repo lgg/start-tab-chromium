@@ -82,9 +82,12 @@ const SPLIT_VIEW_MARKERS = [
   "pane",
 ];
 
-
 interface LocaleCatalog {
   [key: string]: { message?: string };
+}
+
+interface HandlerResult {
+  changed?: boolean;
 }
 
 type ClockBlock = Extract<BlockInstance, { type: "timer" | "stopwatch" | "pomodoro" }>;
@@ -147,7 +150,7 @@ chrome.runtime.onMessage.addListener(
       return false;
     }
     handle(message)
-      .then(() => sendResponse({ ok: true }))
+      .then((result) => sendResponse({ ok: true, ...(result ?? {}) }))
       .catch((error: unknown) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
     return true;
   },
@@ -159,10 +162,10 @@ function runNativeTabJob(operation: () => Promise<void>): Promise<void> {
   return next;
 }
 
-async function handle(message: Message): Promise<void> {
+async function handle(message: Message): Promise<HandlerResult | void> {
   switch (message.type) {
     case "block": await blockHost(message.host); break;
-    case "unblock": await unblockHost(message.host); break;
+    case "unblock": return { changed: await unblockHost(message.host) };
     case "clear": await clearAll(); break;
     case "replace-blocked-sites": await replaceBlockedSites(message.sites); break;
     case "open-native-new-tab": await runNativeTabJob(openNativeNewTab); break;
