@@ -4,6 +4,7 @@ import {
   MAX_BLOCKED_SITES,
   MAX_CUSTOM_THEMES,
   MAX_LOCAL_TASKS_PER_INSTANCE,
+  MAX_LOCAL_TASK_TITLE_LENGTH,
   MAX_START_PAGE_BLOCKS,
 } from "./platform-limits.js";
 import type { LocalTask } from "./start-page-types.js";
@@ -42,7 +43,7 @@ function isLocalTask(value: unknown): value is LocalTask {
   return isRecord(value)
     && isSafeIdentifier(value.id)
     && typeof value.title === "string"
-    && value.title.length <= 500
+    && value.title.length <= MAX_LOCAL_TASK_TITLE_LENGTH
     && typeof value.done === "boolean"
     && typeof value.createdAt === "number"
     && Number.isFinite(value.createdAt)
