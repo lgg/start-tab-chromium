@@ -58,7 +58,7 @@ Output: `build-blocker-only/`
 
 ### Google-enabled Full Start Tab
 
-Create a Chrome extension OAuth client for the final extension ID and replace the entire placeholder below with that real client ID:
+The explicit Google profile is the only build profile that reads `GOOGLE_OAUTH_CLIENT_ID`. Create a Chrome extension OAuth client for the final extension ID and replace the entire placeholder below with that real client ID:
 
 ```bash
 GOOGLE_OAUTH_CLIENT_ID="REPLACE_WITH_REAL_CLIENT_ID.apps.googleusercontent.com" npm run build:google
