@@ -29,7 +29,7 @@ export type Message =
   | { type: "record-unblock"; host: string }
   | { type: "reset-stats" };
 
-export interface Ack { ok: boolean; error?: string }
+export interface Ack { ok: boolean; error?: string; changed?: boolean }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
