@@ -3,6 +3,8 @@ import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { isValidGoogleOAuthClientId } from "./google-oauth-client.mjs";
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const directory = process.argv[2];
 const variant = process.argv[3];
@@ -27,7 +29,8 @@ assert.equal(manifest.version, "3.0.0", "Build manifest version must match relea
 assert.equal(manifest.background?.service_worker, "service-worker.js", "Service worker output must be wired");
 const configuredGoogleClientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() ?? "";
 if (googleEnabled) {
-  assert.match(configuredGoogleClientId, /^[a-zA-Z0-9._-]+\.apps\.googleusercontent\.com$/, "Google profile requires the expected Chrome OAuth client format");
+  assert.equal(isValidGoogleOAuthClientId(configuredGoogleClientId), true,
+    "Google profile requires a valid non-placeholder Chrome OAuth client ID");
   assert.equal(manifest.oauth2?.client_id, configuredGoogleClientId, "Explicit Google profile must inject the configured OAuth client ID");
   assert.ok(manifest.permissions?.includes("identity"), "Google-enabled builds require the identity permission");
 } else {
