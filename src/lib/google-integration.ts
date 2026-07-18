@@ -7,6 +7,8 @@ const DRIVE_BACKUP_FILE_NAME = "start-tab-backup.json";
 const DEFAULT_CALENDAR_ID = "primary";
 const MIN_CALENDAR_RESULTS = 1;
 const MAX_CALENDAR_RESULTS = 25;
+const CALENDAR_QUERY_PAGE_SIZE = 100;
+const MAX_CALENDAR_QUERY_PAGES = 20;
 
 export interface GoogleCalendarEvent {
   id: string;
@@ -25,6 +27,7 @@ interface CalendarEventPayload {
 
 interface CalendarEventsResponse {
   items?: CalendarEventPayload[];
+  nextPageToken?: string;
 }
 
 interface DriveFile {
@@ -92,21 +95,58 @@ function normalizedCalendarMaxResults(maxResults: number): number {
   return Math.min(MAX_CALENDAR_RESULTS, Math.max(MIN_CALENDAR_RESULTS, Math.round(maxResults)));
 }
 
-export async function listCalendarEvents(calendarId = DEFAULT_CALENDAR_ID, maxResults = 8): Promise<GoogleCalendarEvent[]> {
-  const url = new URL(GOOGLE_CALENDAR_EVENTS_URL.replace("{calendarId}", encodeURIComponent(normalizedCalendarId(calendarId))));
-  url.searchParams.set("singleEvents", "true");
-  url.searchParams.set("orderBy", "startTime");
-  url.searchParams.set("timeMin", new Date().toISOString());
-  url.searchParams.set("maxResults", String(normalizedCalendarMaxResults(maxResults)));
+function calendarEvent(payload: CalendarEventPayload): GoogleCalendarEvent {
+  return {
+    id: payload.id ?? crypto.randomUUID(),
+    title: payload.summary ?? "Untitled event",
+    start: payload.start?.dateTime ?? payload.start?.date ?? "",
+    end: payload.end?.dateTime ?? payload.end?.date ?? "",
+    allDay: Boolean(payload.start?.date && !payload.start.dateTime),
+  };
+}
 
-  const payload = await googleFetch<CalendarEventsResponse>(url.toString());
-  return (payload.items ?? []).map((event) => ({
-    id: event.id ?? crypto.randomUUID(),
-    title: event.summary ?? "Untitled event",
-    start: event.start?.dateTime ?? event.start?.date ?? "",
-    end: event.end?.dateTime ?? event.end?.date ?? "",
-    allDay: Boolean(event.start?.date && !event.start.dateTime),
-  }));
+/**
+ * Query Google before applying the configured display limit. Google Calendar's
+ * `q` can also match descriptions and locations, so title matching remains a
+ * final client-side condition and additional result pages are read as needed.
+ */
+export async function listCalendarEvents(
+  calendarId = DEFAULT_CALENDAR_ID,
+  maxResults = 8,
+  query = "",
+): Promise<GoogleCalendarEvent[]> {
+  const limit = normalizedCalendarMaxResults(maxResults);
+  const normalizedQuery = query.trim();
+  const titleQuery = normalizedQuery.toLocaleLowerCase();
+  const events: GoogleCalendarEvent[] = [];
+  const seenPageTokens = new Set<string>();
+  let pageToken = "";
+  let pagesRead = 0;
+
+  while (events.length < limit && pagesRead < MAX_CALENDAR_QUERY_PAGES) {
+    const url = new URL(GOOGLE_CALENDAR_EVENTS_URL.replace("{calendarId}", encodeURIComponent(normalizedCalendarId(calendarId))));
+    url.searchParams.set("singleEvents", "true");
+    url.searchParams.set("orderBy", "startTime");
+    url.searchParams.set("timeMin", new Date().toISOString());
+    url.searchParams.set("maxResults", String(normalizedQuery ? CALENDAR_QUERY_PAGE_SIZE : limit));
+    if (normalizedQuery) url.searchParams.set("q", normalizedQuery);
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+
+    const payload = await googleFetch<CalendarEventsResponse>(url.toString());
+    for (const candidate of payload.items ?? []) {
+      const event = calendarEvent(candidate);
+      if (!titleQuery || event.title.toLocaleLowerCase().includes(titleQuery)) events.push(event);
+      if (events.length >= limit) break;
+    }
+    pagesRead += 1;
+
+    const nextPageToken = typeof payload.nextPageToken === "string" ? payload.nextPageToken : "";
+    if (!normalizedQuery || !nextPageToken || seenPageTokens.has(nextPageToken)) break;
+    seenPageTokens.add(nextPageToken);
+    pageToken = nextPageToken;
+  }
+
+  return events.slice(0, limit);
 }
 
 export function driveBackupListUrl(): string {
