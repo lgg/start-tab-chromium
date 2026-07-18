@@ -1,7 +1,11 @@
 import * as esbuild from "esbuild";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { resolveSafeBuildOutput } from "./build-output-path.mjs";
+import { requireGoogleOAuthClientId } from "./google-oauth-client.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const watch = process.argv.includes("--watch");
@@ -10,11 +14,11 @@ const googleEnabled = process.argv.includes("--google");
 if (googleEnabled && blockerOnly) {
   throw new Error("The explicit Google build profile cannot be combined with blocker-only mode");
 }
+const googleOAuthClientId = googleEnabled ? requireGoogleOAuthClientId() : "";
 const outdirFlag = process.argv.find((argument) => argument.startsWith("--outdir="));
-const outdir = path.resolve(
-  root,
-  outdirFlag?.slice("--outdir=".length) || (blockerOnly ? "build-blocker-only" : googleEnabled ? "build-google" : "build"),
-);
+const requestedOutdir = outdirFlag?.slice("--outdir=".length)
+  || (blockerOnly ? "build-blocker-only" : googleEnabled ? "build-google" : "build");
+const outdir = resolveSafeBuildOutput(root, tmpdir(), requestedOutdir);
 const source = (...parts) => path.join(root, "src", ...parts);
 const output = (...parts) => path.join(outdir, ...parts);
 
@@ -55,14 +59,7 @@ async function copyStaticAssets() {
     delete manifest.chrome_url_overrides;
     manifest.permissions = (manifest.permissions ?? []).filter((permission) => permission !== "history");
   }
-  const googleOAuthClientId = googleEnabled ? process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() ?? "" : "";
   if (googleEnabled) {
-    if (!googleOAuthClientId) {
-      throw new Error("GOOGLE_OAUTH_CLIENT_ID is required for the explicit Google build profile");
-    }
-    if (!/^[a-zA-Z0-9._-]+\.apps\.googleusercontent\.com$/.test(googleOAuthClientId)) {
-      throw new Error("GOOGLE_OAUTH_CLIENT_ID must be a Chrome OAuth client ending in .apps.googleusercontent.com");
-    }
     manifest.oauth2 = { ...manifest.oauth2, client_id: googleOAuthClientId };
   } else {
     delete manifest.oauth2;
