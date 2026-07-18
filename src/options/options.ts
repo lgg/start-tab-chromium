@@ -170,6 +170,7 @@ const sections = requireElement<HTMLElement>("sections");
 const status = requireElement<HTMLElement>("status");
 const backupImportInput = requireElement<HTMLInputElement>("backupImportInput");
 const themeImportInput = requireElement<HTMLInputElement>("themeImportInput");
+const startTabPageAvailable = chrome.runtime.getManifest().chrome_url_overrides?.newtab === "newtab.html";
 
 let i18n: I18n;
 let settings: StartPageSettings;
@@ -228,8 +229,11 @@ function renderHeader(): void {
   subtitleNode.textContent = i18n.t("optionsSubtitle");
   document.title = i18n.t("optionsTitle");
   headerActions.replaceChildren();
-  const openTab = button(i18n.t("openStartTab"), "button button--secondary");
-  openTab.addEventListener("click", () => runUiTask(() => chrome.tabs.create({ url: chrome.runtime.getURL("newtab.html") })));
+  if (startTabPageAvailable) {
+    const openTab = button(i18n.t("openStartTab"), "button button--secondary");
+    openTab.addEventListener("click", () => runUiTask(() => chrome.tabs.create({ url: chrome.runtime.getURL("newtab.html") })));
+    headerActions.append(openTab);
+  }
   const reset = button(i18n.t("resetStartPage"), "button button--danger");
   reset.addEventListener("click", () => {
     if (!window.confirm(i18n.t("resetStartPageConfirm"))) return;
@@ -238,7 +242,7 @@ function renderHeader(): void {
       runtime = await getStartPageRuntimeState(await getStartPageSettings());
     }, i18n.t("resetComplete"));
   });
-  headerActions.append(openTab, reset);
+  headerActions.append(reset);
 }
 
 function renderNavigation(sectionItems: Array<{ id: string; label: string }>): void {
@@ -253,6 +257,7 @@ function renderGeneral(): HTMLElement {
   const item = section("general", i18n.t("sectionGeneral"), i18n.t("sectionGeneralDescription"));
   const form = element("form", "option-form");
   const startTabEnabled = checkbox(settings.startTab.enabled);
+  startTabEnabled.disabled = !startTabPageAvailable;
   const locale = select<LocalePreference>(localePreference, [
     ["auto", i18n.t("localeAuto")],
     ["en", "English"],
@@ -283,7 +288,7 @@ function renderGeneral(): HTMLElement {
 
   form.append(
     settingField(i18n.t("locale"), locale),
-    settingField(i18n.t("startTabEnabled"), startTabEnabled),
+    settingField(i18n.t("startTabEnabled"), startTabEnabled, i18n.t("startTabEnabledNote")),
     settingField(i18n.t("settingsButtonVisibility"), buttonVisibility),
     settingField(i18n.t("settingsButtonHoverArea"), hoverArea),
     settingField(i18n.t("layoutMode"), mode),
@@ -307,7 +312,7 @@ function renderGeneral(): HTMLElement {
     if (preset.value !== "custom" && preset.value !== settings.layout.profile) {
       next = settingsWithLayoutPreset(next, preset.value as LayoutPresetId);
     }
-    next.startTab.enabled = startTabEnabled.checked;
+    next.startTab.enabled = startTabPageAvailable ? startTabEnabled.checked : settings.startTab.enabled;
     next.settingsButton.visibility = buttonVisibility.value as typeof next.settingsButton.visibility;
     next.settingsButton.hoverArea = hoverArea.value as typeof next.settingsButton.hoverArea;
     next.layout.mode = mode.value as LayoutMode;

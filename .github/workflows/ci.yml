@@ -210,6 +210,12 @@ jobs:
       - name: Validate round 21
         run: node scripts/validate-round21-static.mjs
 
+      - name: Run round 22 fixtures
+        run: node scripts/run-round22-fixtures.mjs
+
+      - name: Validate round 22
+        run: node scripts/validate-round22-static.mjs
+
       - name: Validate self-hosted CI contract
         run: node scripts/validate-self-hosted-ci.mjs
 
@@ -217,9 +223,13 @@ jobs:
         run: npm run typecheck
 
       - name: Build full extension
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: should-be-ignored.apps.googleusercontent.com
         run: npm run build
 
       - name: Build blocker-only extension
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: should-be-ignored.apps.googleusercontent.com
         run: npm run build:blocker-only
 
       - name: Validate Google-enabled build
