@@ -49,10 +49,35 @@ assert.match(
 );
 assert.doesNotMatch(workflow, /path:\s*node_modules/);
 
+const regressionCommands = [
+  "node scripts/validate-static.mjs",
+  "node scripts/validate-round6-static.mjs",
+  "node scripts/validate-round7-static.mjs",
+  "node scripts/validate-round11-static.mjs",
+  "node scripts/validate-release-docs.mjs",
+  "node scripts/run-round12-fixtures.mjs",
+  "node scripts/validate-round12-static.mjs",
+  "node scripts/run-round13-fixtures.mjs",
+  "node scripts/validate-round13-static.mjs",
+  "node scripts/run-round14-fixtures.mjs",
+  "node scripts/validate-round14-static.mjs",
+  "node scripts/run-round15-fixtures.mjs",
+  "node scripts/validate-round15-static.mjs",
+  "node scripts/run-round16-fixtures.mjs",
+  "node scripts/validate-round16-static.mjs",
+  "node scripts/run-round17-fixtures.mjs",
+  "node scripts/validate-round17-static.mjs",
+  "node scripts/run-round18-fixtures.mjs",
+  "node scripts/validate-round18-static.mjs",
+  "node scripts/run-round19-fixtures.mjs",
+  "node scripts/validate-round19-static.mjs",
+  "node scripts/validate-self-hosted-ci.mjs",
+];
+
 for (const command of [
   "npm ci --include=dev --bin-links=true --no-audit --no-fund --loglevel=error",
   "node scripts/report-locale-parity.mjs",
-  "npm run test",
+  ...regressionCommands,
   "npm run typecheck",
   "npm run build",
   "npm run build:blocker-only",
@@ -67,6 +92,10 @@ for (const scriptName of ["test", "typecheck", "build", "build:blocker-only", "b
   assert.equal(typeof packageJson.scripts?.[scriptName], "string", `package.json is missing script: ${scriptName}`);
 }
 await access("scripts/report-locale-parity.mjs");
+for (const command of regressionCommands) {
+  const relativePath = command.replace(/^node\s+/, "");
+  await access(relativePath);
+}
 
 assert.equal(packageJson.scripts?.clean, "node scripts/clean.mjs");
 assert.doesNotMatch(packageJson.scripts.clean, /\brm\b|rmdir|\bdel\b/i);
