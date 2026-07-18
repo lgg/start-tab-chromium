@@ -107,7 +107,10 @@ if (selected("ci")) {
     /GOOGLE_OAUTH_CLIENT_ID:\s*ci-validation\.apps\.googleusercontent\.com[\s\S]*run: npm run build:google/,
     "CI must execute the Google-enabled build with a non-production validation ID",
   );
-  assert.match(ci, /build-google/, "CI must generate and clean the build-google/ validation output");
+  assert.equal((ci.match(/run: node scripts\/clean-ci\.mjs/g) ?? []).length, 2,
+    "CI must invoke the shared cleanup before validation and in the final always() step");
+  assert.ok(cleanCiScript.includes('"build-google"'),
+    "The delegated CI cleanup must remove the Google build output");
   assert.doesNotMatch(ci, /actions\/upload-artifact|Compress-Archive|retention-days:/, "CI must not upload build artifacts");
 }
 
