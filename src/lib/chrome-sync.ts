@@ -47,18 +47,58 @@ async function checksum(value: string): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+type CanonicalPath = readonly string[];
 const VOLATILE_CONTENT_KEYS = new Set(["updatedAt", "createdAt"]);
-function canonicalValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalValue);
+
+function pathMatches(path: CanonicalPath, expected: readonly string[]): boolean {
+  return path.length === expected.length
+    && expected.every((part, index) => part === "*" || path[index] === part);
+}
+
+/** Remove generated timestamps only from known schema entities, never from user-keyed dictionaries. */
+function isVolatileTimestampField(path: CanonicalPath, key: string): boolean {
+  if (!VOLATILE_CONTENT_KEYS.has(key)) return false;
+  if (pathMatches(path, ["storage", "startPageSettings"])) return key === "updatedAt";
+  if (pathMatches(path, ["storage", "startPageSettings", "layout", "blocks", "[]"])) return true;
+  if (pathMatches(path, ["storage", "startPageSettings", "themes", "customThemes", "[]"])) return true;
+  if (pathMatches(path, ["storage", "startPageRuntimeState"])) return key === "updatedAt";
+  return pathMatches(path, ["storage", "startPageRuntimeState", "tasks", "*", "[]"]);
+}
+
+function canonicalValue(value: unknown, path: CanonicalPath = []): unknown {
+  if (Array.isArray(value)) return value.map((item) => canonicalValue(item, [...path, "[]"]));
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.keys(value)
+    .filter((key) => !isVolatileTimestampField(path, key))
+    .sort((left, right) => left.localeCompare(right))
+    .map((key) => [key, canonicalValue(value[key], [...path, key])]));
+}
+
+/** Previous v3 checksum behavior retained only to verify already-uploaded snapshots. */
+function previousCanonicalValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(previousCanonicalValue);
   if (!isRecord(value)) return value;
   return Object.fromEntries(Object.keys(value)
     .filter((key) => !VOLATILE_CONTENT_KEYS.has(key))
     .sort((left, right) => left.localeCompare(right))
-    .map((key) => [key, canonicalValue(value[key])]));
+    .map((key) => [key, previousCanonicalValue(value[key])]));
 }
-function stableJson(value: unknown): string { return JSON.stringify(canonicalValue(value)); }
-function canonicalBackupContent(bundle: BackupBundle): string {
-  return stableJson({ app: bundle.app, version: bundle.version, schema: bundle.schema, storage: bundle.storage });
+
+function sortedValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortedValue);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.keys(value)
+    .sort((left, right) => left.localeCompare(right))
+    .map((key) => [key, sortedValue(value[key])]));
+}
+
+function stableJson(value: unknown): string { return JSON.stringify(sortedValue(value)); }
+function canonicalJson(value: unknown, path: CanonicalPath): string { return JSON.stringify(canonicalValue(value, path)); }
+export function canonicalBackupContent(bundle: BackupBundle): string {
+  return JSON.stringify(canonicalValue({ app: bundle.app, version: bundle.version, schema: bundle.schema, storage: bundle.storage }));
+}
+export function previousCanonicalBackupContent(bundle: BackupBundle): string {
+  return JSON.stringify(previousCanonicalValue({ app: bundle.app, version: bundle.version, schema: bundle.schema, storage: bundle.storage }));
 }
 function legacyCanonicalBackupContent(bundle: BackupBundle): string {
   return JSON.stringify({ app: bundle.app, version: bundle.version, schema: bundle.schema, storage: bundle.storage });
@@ -67,10 +107,12 @@ function isPristineBackup(bundle: BackupBundle): boolean {
   const storage = bundle.storage;
   const settings = normalizeStartPageSettings(storage.startPageSettings);
   const defaults = normalizeStartPageSettings(DEFAULT_SETTINGS);
-  if (stableJson(settings) !== stableJson(defaults)) return false;
+  if (canonicalJson(settings, ["storage", "startPageSettings"])
+    !== canonicalJson(defaults, ["storage", "startPageSettings"])) return false;
   const runtime = normalizeRuntimeState(storage.startPageRuntimeState, settings);
   const defaultRuntime = normalizeRuntimeState(undefined, defaults);
-  if (stableJson(runtime) !== stableJson(defaultRuntime)) return false;
+  if (canonicalJson(runtime, ["storage", "startPageRuntimeState"])
+    !== canonicalJson(defaultRuntime, ["storage", "startPageRuntimeState"])) return false;
   if (Array.isArray(storage.blockedSites) && storage.blockedSites.length > 0) return false;
   if (isRecord(storage.lastBlockedUrls) && Object.keys(storage.lastBlockedUrls).length > 0) return false;
   if (isRecord(storage.startPageOnboarding) && storage.startPageOnboarding.onboarded === true) return false;
@@ -269,8 +311,13 @@ async function readRemoteBundle(parsed: ParsedMeta): Promise<BackupBundle> {
   const bundle = migrateBackup(value);
   if (!parsed.legacy) {
     const currentChecksum = await checksum(canonicalBackupContent(bundle));
+    const previousChecksum = await checksum(previousCanonicalBackupContent(bundle));
     const legacyChecksum = await checksum(legacyCanonicalBackupContent(bundle));
-    if (currentChecksum !== meta.contentChecksum && legacyChecksum !== meta.contentChecksum) throw new Error("Chrome sync backup content checksum mismatch");
+    if (currentChecksum !== meta.contentChecksum
+      && previousChecksum !== meta.contentChecksum
+      && legacyChecksum !== meta.contentChecksum) {
+      throw new Error("Chrome sync backup content checksum mismatch");
+    }
   }
   return bundle;
 }
