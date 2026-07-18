@@ -105,8 +105,8 @@ type UnblockResult = "removed" | "unchanged" | "failed";
 async function requestUnblock(): Promise<UnblockResult> {
   try {
     if (!await blockedHostIsActive()) return "unchanged";
-    await sendMessage({ type: "unblock", host });
-    return "removed";
+    const ack = await sendMessage({ type: "unblock", host });
+    return ack.changed === true ? "removed" : "unchanged";
   } catch {
     // The MV3 service worker can restart while the blocked page is open.
     return "failed";

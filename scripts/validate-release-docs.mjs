@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (relativePath) => readFile(path.join(root, relativePath), "utf8");
 
-const [packageSource, readme, releaseNotes, deployment, manualQa, ci, googleGuard, cleanScript] = await Promise.all([
+const [packageSource, readme, releaseNotes, deployment, manualQa, ci, googleGuard, googleValidator, cleanScript] = await Promise.all([
   read("package.json"),
   read("README.md"),
   read("docs/release.md"),
@@ -14,6 +14,7 @@ const [packageSource, readme, releaseNotes, deployment, manualQa, ci, googleGuar
   read("docs/manual-qa-3.0.0.md"),
   read(".github/workflows/ci.yml"),
   read("scripts/require-google-oauth.mjs"),
+  read("scripts/google-oauth-client.mjs"),
   read("scripts/clean.mjs"),
 ]);
 
@@ -28,8 +29,14 @@ assert.equal(packageJson.scripts?.clean, "node scripts/clean.mjs", "clean must u
 for (const directory of ["build", "build-blocker-only", "build-google"]) {
   assert.ok(cleanScript.includes(`"${directory}"`), `clean.mjs must remove ${directory}/`);
 }
-assert.match(googleGuard, /GOOGLE_OAUTH_CLIENT_ID is required/, "Google build guard must reject a missing client ID");
-assert.match(googleGuard, /\.apps\.googleusercontent\.com/, "Google build guard must validate the Chrome OAuth client format");
+assert.match(googleGuard, /requireGoogleOAuthClientId\(\)/,
+  "Google build guard must delegate to the shared strict OAuth validator");
+assert.match(googleValidator, /GOOGLE_OAUTH_CLIENT_ID is required/,
+  "Shared Google validation must reject a missing client ID");
+assert.ok(googleValidator.includes("\\.apps\\.googleusercontent\\.com"),
+  "Shared Google validation must enforce the Chrome OAuth client format");
+assert.match(googleValidator, /REPLACE\|TODO/,
+  "Shared Google validation must reject documented placeholder client IDs");
 
 for (const [name, source] of [
   ["README", readme],

@@ -88,7 +88,7 @@ assert.match(runtimeRenderers, /expectedTasks/, "Task writes must send their pre
 assert.match(staticRenderers, /expectedPage/, "Link page writes must send their previous page");
 assert.match(options, /type:\s*["']reset-start-page["']/, "Options reset must delegate to the service worker");
 assert.doesNotMatch(options, /chrome\.storage\.local\.(?:set|remove|clear)/, "Options must not bypass locked persistence APIs");
-assert.match(builder, /GOOGLE_OAUTH_CLIENT_ID/, "Builder must accept deployment OAuth configuration");
+assert.match(builder, /requireGoogleOAuthClientId/, "Builder must use centralized deployment OAuth validation");
 assert.match(builder, /delete manifest\.oauth2/, "Default builds must remove the placeholder OAuth block");
 assert.match(builder, /permission !== ["']identity["']/, "Default builds must remove the unused identity permission");
 assert.match(buildValidator, /Google-disabled builds must omit the identity permission/, "Build validation must enforce deployable Google-disabled manifests");

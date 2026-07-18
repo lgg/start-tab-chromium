@@ -20,8 +20,8 @@ assert.match(packageJson.scripts.test, /validate-round22-static\.mjs/);
 assert.match(build, /const googleEnabled = process\.argv\.includes\("--google"\)/);
 assert.match(build, /googleEnabled && blockerOnly/,
   "Impossible Google blocker-only combinations must fail before output generation");
-assert.match(build, /const googleOAuthClientId = googleEnabled \? process\.env\.GOOGLE_OAUTH_CLIENT_ID/,
-  "Inherited OAuth environment values must be ignored outside the explicit Google profile");
+assert.match(build, /const googleOAuthClientId = googleEnabled \? requireGoogleOAuthClientId\(\) : ""/,
+  "Inherited OAuth environment values must be ignored outside the explicit Google profile and validated centrally inside it");
 assert.match(build, /if \(googleEnabled\)[\s\S]*manifest\.oauth2[\s\S]*else \{[\s\S]*delete manifest\.oauth2/,
   "Default profiles must always strip OAuth metadata and identity");
 
