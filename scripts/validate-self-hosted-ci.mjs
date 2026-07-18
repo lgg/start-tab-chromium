@@ -75,6 +75,8 @@ const regressionCommands = [
   "node scripts/validate-round20-static.mjs",
   "node scripts/run-round21-fixtures.mjs",
   "node scripts/validate-round21-static.mjs",
+  "node scripts/run-round22-fixtures.mjs",
+  "node scripts/validate-round22-static.mjs",
   "node scripts/validate-self-hosted-ci.mjs",
 ];
 
@@ -100,6 +102,22 @@ for (const command of regressionCommands) {
   const relativePath = command.replace(/^node\s+/, "");
   await access(relativePath);
 }
+
+assert.match(
+  workflow,
+  /- name: Build full extension\s*\n\s*env:\s*\n\s*GOOGLE_OAUTH_CLIENT_ID: should-be-ignored\.apps\.googleusercontent\.com\s*\n\s*run: npm run build/,
+  "CI must prove the ordinary full profile ignores inherited Google OAuth configuration",
+);
+assert.match(
+  workflow,
+  /- name: Build blocker-only extension\s*\n\s*env:\s*\n\s*GOOGLE_OAUTH_CLIENT_ID: should-be-ignored\.apps\.googleusercontent\.com\s*\n\s*run: npm run build:blocker-only/,
+  "CI must prove blocker-only ignores inherited Google OAuth configuration",
+);
+assert.match(
+  workflow,
+  /- name: Validate Google-enabled build\s*\n\s*env:\s*\n\s*GOOGLE_OAUTH_CLIENT_ID: ci-validation\.apps\.googleusercontent\.com\s*\n\s*run: npm run build:google/,
+  "CI must validate the explicit Google profile with a non-production client ID",
+);
 
 assert.equal(packageJson.scripts?.clean, "node scripts/clean.mjs");
 assert.doesNotMatch(packageJson.scripts.clean, /\brm\b|rmdir|\bdel\b/i);
