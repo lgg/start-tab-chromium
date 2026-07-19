@@ -42,10 +42,12 @@ assert.ok(workflow.indexOf("uses: actions/setup-node@v6") < workflow.indexOf("ru
 
 assert.match(blocklist, /dynamicRulesEqual/,
   "Canonical blocklist no-ops must compare derived DNR state too");
-assert.match(blocklist, /if \(dynamicRulesEqual\(existingRules, expectedRules\)\) return previousSites;/,
+assert.match(blocklist, /if \(dynamicRulesEqual\(originalRules, expectedRules\)\) return previousSites;/,
   "A no-op may return only when storage and DNR are both canonical");
-assert.match(blocklist, /await replaceDynamicRules\(nextSites, existingRules\);\s*return previousSites;/,
+assert.match(blocklist, /await replaceDynamicRules\(nextSites, originalRules\);\s*return previousSites;/,
   "DNR drift must be repaired without rewriting storage or data revision");
+assert.match(blocklist, /restoreDynamicRulesSnapshot\(originalRules\)/,
+  "A failed DNR-only repair must restore its exact prior rule snapshot");
 assert.match(blocklist, /readLastBlockedUrlSnapshot/,
   "Blocked-navigation no-ops must retain the raw snapshot for canonical comparison");
 assert.match(blocklist, /ownValue\(urls, host\) === url && storedLastBlockedUrlsEqual\(snapshot, urls\)/,
