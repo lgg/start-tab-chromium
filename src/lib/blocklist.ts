@@ -277,27 +277,25 @@ export async function clearLastBlockedUrl(host: string): Promise<void> {
   });
 }
 
+function rulePriorityForHost(host: string): number {
+  return Math.max(1, host.split(".").length - 1);
+}
+
 function buildRules(sites: string[]): chrome.declarativeNetRequest.Rule[] {
   const normalized = normalizeBlockedSites(sites);
   assertBlockedSiteCapacity(normalized);
-  return normalized.map((host, index) => {
-    const excludedRequestDomains = normalized.filter(
-      (candidate) => candidate !== host && candidate.endsWith(`.${host}`),
-    );
-    return {
-      id: index + 1,
-      priority: 1,
-      action: {
-        type: chrome.declarativeNetRequest.RuleActionType.REDIRECT,
-        redirect: { url: chrome.runtime.getURL(`${BLOCKED_PAGE}?site=${encodeURIComponent(host)}`) },
-      },
-      condition: {
-        requestDomains: [host],
-        ...(excludedRequestDomains.length > 0 ? { excludedRequestDomains } : {}),
-        resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
-      },
-    };
-  });
+  return normalized.map((host, index) => ({
+    id: index + 1,
+    priority: rulePriorityForHost(host),
+    action: {
+      type: chrome.declarativeNetRequest.RuleActionType.REDIRECT,
+      redirect: { url: chrome.runtime.getURL(`${BLOCKED_PAGE}?site=${encodeURIComponent(host)}`) },
+    },
+    condition: {
+      requestDomains: [host],
+      resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
+    },
+  }));
 }
 
 function stableRuleValue(value: unknown): unknown {
