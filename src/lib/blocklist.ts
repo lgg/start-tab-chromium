@@ -1,15 +1,8 @@
-/**
- * Shared blocklist logic: persistence in chrome.storage.local and the
- * declarativeNetRequest (DNR) dynamic rules that actually do the blocking.
- *
- * Manifest V3 removed blocking webRequest, so instead of intercepting each
- * request in a background page we install one DNR redirect rule per blocked
- * host. Any top-level navigation to a blocked host is redirected to the
- * extension's blocked.html page.
- */
+// Shared blocklist persistence and the declarativeNetRequest rules that enforce it.
 
 import { commitStorageMutationWithRevision, DATA_REVISION_KEY, markStartTabDataChanged } from "./data-revision.js";
 import { cloneDictionary, createDictionary, ownValue } from "./dictionary.js";
+import { runIndependentEffects } from "./independent-effects.js";
 import { sendMessage } from "./messages.js";
 import { MAX_BLOCKED_SITES } from "./platform-limits.js";
 import { withStorageLock } from "./storage-lock.js";
@@ -116,6 +109,18 @@ function hostMatchesBlockedSite(host: string, site: string): boolean {
   return host === site || host.endsWith(`.${site}`);
 }
 
+/** Prefer the most-specific suffix when parent and child domains are both blocked. */
+function matchingBlockedSite(host: string, sites: readonly string[]): string | null {
+  let match: string | null = null;
+  for (const site of sites) {
+    if (!hostMatchesBlockedSite(host, site)) continue;
+    if (match === null || site.length > match.length || (site.length === match.length && site < match)) {
+      match = site;
+    }
+  }
+  return match;
+}
+
 function storedSitesEqual(raw: unknown, expected: readonly string[]): boolean {
   return Array.isArray(raw)
     && raw.length === expected.length
@@ -215,29 +220,35 @@ export async function blockedSiteForUrl(url: string): Promise<string | null> {
   const host = hostFromUrl(url);
   if (!host) return null;
   const sites = await getBlockedSites();
-  return sites.find((site) => hostMatchesBlockedSite(host, site)) ?? null;
+  return matchingBlockedSite(host, sites);
 }
 
 export async function isBlocked(url: string): Promise<boolean> {
   return (await blockedSiteForUrl(url)) !== null;
 }
 
-export async function rememberBlockedNavigation(url: string): Promise<void> {
+/**
+ * Remember one blocked navigation and return the exact site selected from the
+ * same locked blocklist snapshot. The worker uses this return value for stats,
+ * avoiding a second match against possibly changed storage.
+ */
+export async function rememberBlockedNavigation(url: string): Promise<string | null> {
   const urlHost = hostFromUrl(url);
-  if (!urlHost) return;
+  if (!urlHost) return null;
   await migrateLegacyStorage();
-  await withStorageLock("data-write", async () => {
+  return withStorageLock("data-write", async () => {
     const sites = await readBlockedSites();
-    const host = sites.find((site) => hostMatchesBlockedSite(urlHost, site));
-    if (!host) return;
+    const host = matchingBlockedSite(urlHost, sites);
+    if (!host) return null;
     const { snapshot, urls: storedUrls } = await readLastBlockedUrlSnapshot();
     const urls = lastBlockedUrlsForSites(storedUrls, sites);
-    if (ownValue(urls, host) === url && storedLastBlockedUrlsEqual(snapshot, urls)) return;
+    if (ownValue(urls, host) === url && storedLastBlockedUrlsEqual(snapshot, urls)) return host;
     urls[host] = url;
     await commitStorageMutationWithRevision(
       [LAST_BLOCKED_URLS_KEY],
       () => writeCanonicalLastBlockedUrls(urls),
     );
+    return host;
   });
 }
 
@@ -266,12 +277,17 @@ export async function clearLastBlockedUrl(host: string): Promise<void> {
   });
 }
 
+function rulePriorityForHost(host: string): number {
+  // A child domain is always longer than its parent suffix, so it must win.
+  return Math.max(1, host.length);
+}
+
 function buildRules(sites: string[]): chrome.declarativeNetRequest.Rule[] {
   const normalized = normalizeBlockedSites(sites);
   assertBlockedSiteCapacity(normalized);
   return normalized.map((host, index) => ({
     id: index + 1,
-    priority: 1,
+    priority: rulePriorityForHost(host),
     action: {
       type: chrome.declarativeNetRequest.RuleActionType.REDIRECT,
       redirect: { url: chrome.runtime.getURL(`${BLOCKED_PAGE}?site=${encodeURIComponent(host)}`) },
@@ -308,15 +324,34 @@ function dynamicRulesEqual(
   return JSON.stringify(normalized(actual)) === JSON.stringify(normalized(expected));
 }
 
-async function replaceDynamicRules(
-  sites: string[],
-  existing?: chrome.declarativeNetRequest.Rule[],
+export async function readDynamicRulesSnapshot(): Promise<chrome.declarativeNetRequest.Rule[]> {
+  return structuredClone(await chrome.declarativeNetRequest.getDynamicRules());
+}
+
+async function replaceDynamicRulesExact(
+  rules: readonly chrome.declarativeNetRequest.Rule[],
+  existing?: readonly chrome.declarativeNetRequest.Rule[],
 ): Promise<void> {
-  const currentRules = existing ?? await chrome.declarativeNetRequest.getDynamicRules();
+  const currentRules = existing ? structuredClone([...existing]) : await readDynamicRulesSnapshot();
   await chrome.declarativeNetRequest.updateDynamicRules({
     removeRuleIds: currentRules.map((rule) => rule.id),
-    addRules: buildRules(sites),
+    addRules: structuredClone([...rules]),
   });
+}
+
+export async function restoreDynamicRulesSnapshot(
+  snapshot: readonly chrome.declarativeNetRequest.Rule[],
+): Promise<void> {
+  const current = await readDynamicRulesSnapshot();
+  if (dynamicRulesEqual(current, snapshot)) return;
+  await replaceDynamicRulesExact(snapshot, current);
+}
+
+async function replaceDynamicRules(
+  sites: string[],
+  existing?: readonly chrome.declarativeNetRequest.Rule[],
+): Promise<void> {
+  await replaceDynamicRulesExact(buildRules(sites), existing);
 }
 
 export async function syncRulesInCurrentTransaction(): Promise<void> {
@@ -340,14 +375,27 @@ async function restoreBlocklistStorage(snapshot: Record<string, unknown>): Promi
     if (Object.prototype.hasOwnProperty.call(snapshot, key)) payload[key] = snapshot[key];
     else removals.push(key);
   }
-  if (Object.keys(payload).length > 0) await chrome.storage.local.set(payload);
-  if (removals.length > 0) await chrome.storage.local.remove(removals);
+  const effects: Array<() => Promise<void>> = [];
+  if (Object.keys(payload).length > 0) effects.push(() => chrome.storage.local.set(payload));
+  if (removals.length > 0) effects.push(() => chrome.storage.local.remove(removals));
+  await runIndependentEffects(effects, "Blocklist storage rollback was incomplete");
+}
+
+async function restoreBlocklistTransaction(
+  storageSnapshot: Record<string, unknown>,
+  rulesSnapshot: readonly chrome.declarativeNetRequest.Rule[],
+): Promise<void> {
+  await runIndependentEffects([
+    () => restoreBlocklistStorage(storageSnapshot),
+    () => restoreDynamicRulesSnapshot(rulesSnapshot),
+  ], "Blocklist storage and DNR rollback was incomplete");
 }
 
 async function applyBlocklistMutation(
   transform: (current: { sites: string[]; lastBlockedUrls: Record<string, string> }) => BlocklistMutationState,
 ): Promise<string[]> {
   const original = await chrome.storage.local.get([STORAGE_KEY, LAST_BLOCKED_URLS_KEY, DATA_REVISION_KEY]);
+  const originalRules = await readDynamicRulesSnapshot();
   const previousSites = normalizeBlockedSites(original[STORAGE_KEY]);
   const current = { sites: previousSites, lastBlockedUrls: normalizeLastBlockedUrls(original[LAST_BLOCKED_URLS_KEY]) };
   const requested = transform({
@@ -361,23 +409,30 @@ async function applyBlocklistMutation(
   const storageUnchanged = storedSitesEqual(original[STORAGE_KEY], nextSites)
     && storedLastBlockedUrlsEqual(original, nextUrls);
   if (storageUnchanged) {
-    const existingRules = await chrome.declarativeNetRequest.getDynamicRules();
     const expectedRules = buildRules(nextSites);
-    if (dynamicRulesEqual(existingRules, expectedRules)) return previousSites;
-    await replaceDynamicRules(nextSites, existingRules);
-    return previousSites;
+    if (dynamicRulesEqual(originalRules, expectedRules)) return previousSites;
+    try {
+      await replaceDynamicRules(nextSites, originalRules);
+      return previousSites;
+    } catch (error) {
+      try {
+        await restoreDynamicRulesSnapshot(originalRules);
+      } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], "DNR repair failed and its prior rule snapshot could not be restored");
+      }
+      throw error;
+    }
   }
   try {
     await chrome.storage.local.set({ [STORAGE_KEY]: nextSites });
     if (nextUrls === null || Object.keys(nextUrls).length === 0) await chrome.storage.local.remove(LAST_BLOCKED_URLS_KEY);
     else await chrome.storage.local.set({ [LAST_BLOCKED_URLS_KEY]: nextUrls });
-    await replaceDynamicRules(nextSites);
+    await replaceDynamicRules(nextSites, originalRules);
     await markStartTabDataChanged();
     return nextSites;
   } catch (error) {
     try {
-      await restoreBlocklistStorage(original);
-      await replaceDynamicRules(previousSites);
+      await restoreBlocklistTransaction(original, originalRules);
     } catch (rollbackError) {
       throw new AggregateError([error, rollbackError], "Blocklist mutation failed and rollback was incomplete");
     }
