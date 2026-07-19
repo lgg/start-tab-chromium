@@ -17,10 +17,14 @@ assert.match(blocklist, /function matchingBlockedSite\(/,
   "Overlapping blocked domains must use an explicit most-specific matcher");
 assert.match(blocklist, /site\.length > match\.length/,
   "The most-specific blocked suffix must win independently of storage order");
-assert.match(blocklist, /excludedRequestDomains/,
-  "Parent DNR rules must exclude more-specific blocked child domains");
-assert.match(blocklist, /candidate !== host && candidate\.endsWith\(`\.\$\{host\}`\)/,
-  "Only true blocked child suffixes may be excluded from a parent rule");
+assert.match(blocklist, /function rulePriorityForHost\(host: string\)/,
+  "DNR generation must define an explicit domain-specificity priority");
+assert.match(blocklist, /Math\.max\(1, host\.split\("\."\)\.length - 1\)/,
+  "Every additional subdomain label must raise DNR priority");
+assert.match(blocklist, /priority: rulePriorityForHost\(host\)/,
+  "Every generated redirect rule must use its domain-specificity priority");
+assert.doesNotMatch(blocklist, /excludedRequestDomains/,
+  "Specificity must not create growing nested-domain exclusion arrays");
 assert.match(blocklist, /rememberBlockedNavigation\(url: string\): Promise<string \| null>/,
   "Remembered navigation must return its atomically selected blocked site");
 assert.match(worker, /const host = await rememberBlockedNavigation\(url\);/,
@@ -48,7 +52,7 @@ assert.match(revision, /runIndependentEffects\(effects, "Revisioned storage roll
   "Revisioned storage rollback must attempt absent-key removal and snapshot writes independently");
 
 for (const marker of [
-  "Parent DNR rules must exclude blocked child domains instead of competing at equal priority",
+  "A blocked child domain must have higher DNR priority than its blocked parent",
   "Failed blocklist mutation must restore the exact original DNR snapshot",
   "DNR rollback must still run after storage rollback fails",
   "Snapshot set must still run when removal of an absent-at-snapshot key fails",
