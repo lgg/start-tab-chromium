@@ -1,3 +1,4 @@
+import { runIndependentEffects } from "./independent-effects.js";
 import { withStorageLock } from "./storage-lock.js";
 
 export const DATA_REVISION_KEY = "startTabDataRevision";
@@ -72,8 +73,10 @@ function uniqueStorageKeys(keys: readonly string[]): string[] {
 
 async function restoreExactStorageSnapshot(snapshot: Record<string, unknown>, keys: readonly string[]): Promise<void> {
   const absent = keys.filter((key) => !Object.prototype.hasOwnProperty.call(snapshot, key));
-  if (absent.length > 0) await chrome.storage.local.remove(absent);
-  if (Object.keys(snapshot).length > 0) await chrome.storage.local.set(snapshot);
+  const effects: Array<() => Promise<void>> = [];
+  if (absent.length > 0) effects.push(() => chrome.storage.local.remove(absent));
+  if (Object.keys(snapshot).length > 0) effects.push(() => chrome.storage.local.set(snapshot));
+  await runIndependentEffects(effects, "Revisioned storage rollback was incomplete");
 }
 
 /**
