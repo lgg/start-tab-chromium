@@ -34,17 +34,16 @@ function selected(keys?: string | string[] | Record<string, unknown> | null): Re
   return output;
 }
 
-function redirectRule(id: number, host: string, excludedRequestDomains: string[] = []): chrome.declarativeNetRequest.Rule {
+function redirectRule(id: number, host: string, priority = 1): chrome.declarativeNetRequest.Rule {
   return {
     id,
-    priority: 1,
+    priority,
     action: {
       type: chrome.declarativeNetRequest.RuleActionType.REDIRECT,
       redirect: { url: `chrome-extension://round27/blocked.html?site=${encodeURIComponent(host)}` },
     },
     condition: {
       requestDomains: [host],
-      ...(excludedRequestDomains.length > 0 ? { excludedRequestDomains } : {}),
       resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
     },
   };
@@ -132,9 +131,9 @@ function resetState(): void {
   alarmCreateCalls = 0;
 }
 
-// Parent and child block entries overlap in requestDomains. The parent rule must
-// explicitly exclude every more-specific blocked child, and JS matching must
-// choose the same child deterministically.
+// Parent and child block entries overlap in requestDomains. The child rule must
+// have strictly higher priority, and JavaScript matching must choose the same
+// child deterministically.
 resetState();
 storage = {
   blockedSites: ["app.example.com", "example.com"],
@@ -142,9 +141,9 @@ storage = {
 };
 await blocklist.syncRules();
 assert.deepEqual(dynamicRules, [
-  redirectRule(1, "app.example.com"),
-  redirectRule(2, "example.com", ["app.example.com"]),
-], "Parent DNR rules must exclude blocked child domains instead of competing at equal priority");
+  redirectRule(1, "app.example.com", 2),
+  redirectRule(2, "example.com", 1),
+], "A blocked child domain must have higher DNR priority than its blocked parent");
 assert.equal(
   await blocklist.blockedSiteForUrl("https://deep.app.example.com/private"),
   "app.example.com",
