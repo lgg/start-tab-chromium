@@ -24,7 +24,7 @@ let storageRemoveCalls = 0;
 function expectedRule(host = "example.com"): chrome.declarativeNetRequest.Rule {
   return {
     id: 1,
-    priority: 1,
+    priority: host.split(".").length,
     action: {
       type: chrome.declarativeNetRequest.RuleActionType.REDIRECT,
       redirect: { url: `chrome-extension://round24/blocked.html?site=${encodeURIComponent(host)}` },
