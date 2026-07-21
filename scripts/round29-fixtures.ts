@@ -158,10 +158,8 @@ assert.deepEqual(dynamicRules, [collidingRule], "A DNR ownership collision must 
 // Round 28.
 resetState();
 const settings = settingsLibrary.createDefaultStartPageSettings(100);
-const timerBlock = settings.layout.blocks.find(
-  (block): block is Extract<typeof block, { type: "timer" }> => block.id === "timer-main" && block.type === "timer",
-);
-assert.ok(timerBlock, "Default settings must contain timer-main for the fixture");
+const timerBlock = settings.layout.blocks.find((block) => block.id === "timer-main");
+assert.ok(timerBlock && timerBlock.type === "timer", "Default settings must contain timer-main for the fixture");
 const runtimeState = runtime.normalizeRuntimeState(undefined, settings);
 const runningClock = runtime.startClockState(runtime.defaultClockForBlock(timerBlock), Date.now());
 runtimeState.updatedAt = 200;
