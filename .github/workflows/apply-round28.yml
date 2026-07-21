@@ -1,0 +1,39 @@
+name: Apply Round 28 Patch
+
+on:
+  push:
+    branches:
+      - codex/post-round27-deep-audit-20260721
+    paths:
+      - scripts/apply-round28.mjs
+      - .github/workflows/apply-round28.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: start-tab-chromium-ci
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          clean: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Apply exact source patches
+        shell: pwsh
+        run: node scripts/apply-round28.mjs
+      - name: Commit patched files
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/blocklist.ts src/lib/start-page-runtime.ts scripts/round27-fixtures.ts scripts/validate-round27-static.mjs docs/audit-2026-07-19-round-27.md
+          if (-not (git diff --cached --quiet)) {
+            git commit -m "Apply Round 28 production hardening"
+            git push origin HEAD:codex/post-round27-deep-audit-20260721
+          }
