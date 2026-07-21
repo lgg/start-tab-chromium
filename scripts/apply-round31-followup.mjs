@@ -102,10 +102,12 @@ assert.match(syncSource, /stale-chunk rollback was incomplete/, "A failed upload
 assert.doesNotMatch(syncSource, /staleRemovedBeforeWrite|stale-chunk rollback was incomplete/, "Browser Sync must not delete or roll back stale chunks after another device may have committed");`,
 );
 
-await replaceOnce(
-  "scripts/round27-fixtures.ts",
-  '      redirect: { url: `chrome-extension://round27/blocked.html?site=${encodeURIComponent(host)}` },',
-  '      redirect: { url: `chrome-extension://round27/blocked.html?site=${encodeURIComponent(host)}&owner=start-tab-blocklist-v1` },',
-);
+for (const fixture of ["round24", "round25", "round26", "round27", "round28"]) {
+  await replaceOnce(
+    `scripts/${fixture}-fixtures.ts`,
+    `      redirect: { url: \`chrome-extension://${fixture}/blocked.html?site=\${encodeURIComponent(host)}\` },`,
+    `      redirect: { url: \`chrome-extension://${fixture}/blocked.html?site=\${encodeURIComponent(host)}&owner=start-tab-blocklist-v1\` },`,
+  );
+}
 
 console.log("Round 31 follow-up hardening and historical contract migration applied");
