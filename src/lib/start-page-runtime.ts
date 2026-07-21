@@ -418,9 +418,12 @@ export async function updateStartPageRuntimeState(
 
 async function clearClockAlarms(): Promise<void> {
   const alarms = await chrome.alarms.getAll();
-  await Promise.all(alarms
-    .filter((alarm) => alarm.name.startsWith(CLOCK_ALARM_PREFIX))
-    .map((alarm) => chrome.alarms.clear(alarm.name)));
+  await runIndependentEffects(
+    alarms
+      .filter((alarm) => alarm.name.startsWith(CLOCK_ALARM_PREFIX))
+      .map((alarm) => async () => { await chrome.alarms.clear(alarm.name); }),
+    "Clock alarm cleanup was incomplete",
+  );
 }
 
 export interface ClockAlarmSnapshot {
@@ -484,9 +487,12 @@ export async function reconcileClockAlarmsForRuntime(runtime: StartPageRuntimeSt
   }
   try {
     const existing = await chrome.alarms.getAll();
-    await Promise.all(existing
-      .filter((alarm) => alarm.name.startsWith(CLOCK_ALARM_PREFIX) && !desired.has(alarm.name))
-      .map((alarm) => chrome.alarms.clear(alarm.name)));
+    await runIndependentEffects(
+      existing
+        .filter((alarm) => alarm.name.startsWith(CLOCK_ALARM_PREFIX) && !desired.has(alarm.name))
+        .map((alarm) => async () => { await chrome.alarms.clear(alarm.name); }),
+      "Clock alarm reconciliation cleanup was incomplete",
+    );
     for (const [name, when] of desired) await chrome.alarms.create(name, { when });
   } catch (error) {
     try {
@@ -758,7 +764,12 @@ export function parseClockAlarmName(name: string): { instanceId: string; token: 
 
 export async function clearClockAlarm(instanceId: string): Promise<void> {
   const alarms = await chrome.alarms.getAll();
-  await Promise.all(alarms.filter((alarm) => parseClockAlarmName(alarm.name)?.instanceId === instanceId).map((alarm) => chrome.alarms.clear(alarm.name)));
+  await runIndependentEffects(
+    alarms
+      .filter((alarm) => parseClockAlarmName(alarm.name)?.instanceId === instanceId)
+      .map((alarm) => async () => { await chrome.alarms.clear(alarm.name); }),
+    "Clock instance alarm cleanup was incomplete",
+  );
 }
 
 export async function scheduleClockAlarm(instanceId: string, _clock: ClockRuntimeState): Promise<void> {
