@@ -141,8 +141,8 @@ storage = {
 };
 await blocklist.syncRules();
 assert.deepEqual(dynamicRules, [
-  redirectRule(1, "app.example.com", 2),
-  redirectRule(2, "example.com", 1),
+  redirectRule(1, "app.example.com", 3),
+  redirectRule(2, "example.com", 2),
 ], "A blocked child domain must have higher DNR priority than its blocked parent");
 assert.equal(
   await blocklist.blockedSiteForUrl("https://deep.app.example.com/private"),

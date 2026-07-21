@@ -278,7 +278,10 @@ export async function clearLastBlockedUrl(host: string): Promise<void> {
 }
 
 function rulePriorityForHost(host: string): number {
-  return Math.max(1, host.split(".").length - 1);
+  // A proper child suffix always contains at least one additional label. Using
+  // the complete label depth keeps that ordering strict even for one-label
+  // parents such as localhost or a deliberately blocked public suffix.
+  return host.split(".").length;
 }
 
 function buildRules(sites: string[]): chrome.declarativeNetRequest.Rule[] {

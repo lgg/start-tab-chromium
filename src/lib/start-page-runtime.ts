@@ -1,5 +1,6 @@
 import { commitStorageMutationWithRevision, DATA_REVISION_KEY, markStartTabDataChanged } from "./data-revision.js";
 import { cloneDictionary, createDictionary, ownValue } from "./dictionary.js";
+import { runIndependentEffects } from "./independent-effects.js";
 import { withStorageLock } from "./storage-lock.js";
 import { MAX_LOCAL_TASKS_PER_INSTANCE } from "./platform-limits.js";
 import { sendMessage } from "./messages.js";
@@ -365,8 +366,11 @@ async function runRuntimeMutation<T>(
         if (reconcileAlarms) await reconcileClockAlarmsForRuntime(saved);
       } catch (error) {
         try {
-          await restoreStorageKeysSnapshot(previousStorage, rollbackKeys);
-          if (previousAlarms) await restoreClockAlarmSnapshot(previousAlarms);
+          const rollbackEffects: Array<() => Promise<void>> = [
+            () => restoreStorageKeysSnapshot(previousStorage, rollbackKeys),
+          ];
+          if (previousAlarms) rollbackEffects.push(() => restoreClockAlarmSnapshot(previousAlarms));
+          await runIndependentEffects(rollbackEffects, "Clock runtime storage/alarm rollback was incomplete");
         } catch (rollbackError) {
           throw new AggregateError(
             [error, rollbackError],
@@ -414,9 +418,12 @@ export async function updateStartPageRuntimeState(
 
 async function clearClockAlarms(): Promise<void> {
   const alarms = await chrome.alarms.getAll();
-  await Promise.all(alarms
-    .filter((alarm) => alarm.name.startsWith(CLOCK_ALARM_PREFIX))
-    .map((alarm) => chrome.alarms.clear(alarm.name)));
+  await runIndependentEffects(
+    alarms
+      .filter((alarm) => alarm.name.startsWith(CLOCK_ALARM_PREFIX))
+      .map((alarm) => async () => { await chrome.alarms.clear(alarm.name); }),
+    "Clock alarm cleanup was incomplete",
+  );
 }
 
 export interface ClockAlarmSnapshot {
@@ -436,13 +443,39 @@ export async function readClockAlarmSnapshot(): Promise<ClockAlarmSnapshot[]> {
 }
 
 export async function restoreClockAlarmSnapshot(snapshot: ClockAlarmSnapshot[]): Promise<void> {
-  await clearClockAlarms();
-  for (const alarm of snapshot) {
-    await chrome.alarms.create(alarm.name, {
-      when: alarm.scheduledTime,
-      ...(typeof alarm.periodInMinutes === "number" ? { periodInMinutes: alarm.periodInMinutes } : {}),
-    });
+  const errors: unknown[] = [];
+  try {
+    const existing = await chrome.alarms.getAll();
+    try {
+      await runIndependentEffects(
+        existing
+          .filter((alarm) => alarm.name.startsWith(CLOCK_ALARM_PREFIX))
+          .map((alarm) => async () => { await chrome.alarms.clear(alarm.name); }),
+        "Clock alarm snapshot cleanup was incomplete",
+      );
+    } catch (error) {
+      errors.push(error);
+    }
+  } catch (error) {
+    errors.push(error);
   }
+
+  try {
+    await runIndependentEffects(
+      snapshot.map((alarm) => async () => {
+        await chrome.alarms.create(alarm.name, {
+          when: alarm.scheduledTime,
+          ...(typeof alarm.periodInMinutes === "number" ? { periodInMinutes: alarm.periodInMinutes } : {}),
+        });
+      }),
+      "Clock alarm snapshot recreation was incomplete",
+    );
+  } catch (error) {
+    errors.push(error);
+  }
+
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, "Clock alarm snapshot restoration was incomplete");
 }
 
 export async function reconcileClockAlarmsForRuntime(runtime: StartPageRuntimeState): Promise<void> {
@@ -454,9 +487,12 @@ export async function reconcileClockAlarmsForRuntime(runtime: StartPageRuntimeSt
   }
   try {
     const existing = await chrome.alarms.getAll();
-    await Promise.all(existing
-      .filter((alarm) => alarm.name.startsWith(CLOCK_ALARM_PREFIX) && !desired.has(alarm.name))
-      .map((alarm) => chrome.alarms.clear(alarm.name)));
+    await runIndependentEffects(
+      existing
+        .filter((alarm) => alarm.name.startsWith(CLOCK_ALARM_PREFIX) && !desired.has(alarm.name))
+        .map((alarm) => async () => { await chrome.alarms.clear(alarm.name); }),
+      "Clock alarm reconciliation cleanup was incomplete",
+    );
     for (const [name, when] of desired) await chrome.alarms.create(name, { when });
   } catch (error) {
     try {
@@ -573,8 +609,10 @@ function absentStorageKeys(storage: Record<string, unknown>, keys: readonly stri
 
 async function restoreStorageKeysSnapshot(snapshot: Record<string, unknown>, keys: readonly string[]): Promise<void> {
   const absent = absentStorageKeys(snapshot, keys);
-  if (absent.length > 0) await chrome.storage.local.remove(absent);
-  if (Object.keys(snapshot).length > 0) await chrome.storage.local.set(snapshot);
+  const effects: Array<() => Promise<void>> = [];
+  if (absent.length > 0) effects.push(() => chrome.storage.local.remove(absent));
+  if (Object.keys(snapshot).length > 0) effects.push(() => chrome.storage.local.set(snapshot));
+  await runIndependentEffects(effects, "Start Tab runtime storage rollback was incomplete");
 }
 
 export async function resetStartPageRuntimeState(): Promise<void> {
@@ -587,8 +625,10 @@ export async function resetStartPageRuntimeState(): Promise<void> {
       await markStartTabDataChanged();
     } catch (error) {
       try {
-        await restoreStorageKeysSnapshot(previous, RUNTIME_STORAGE_KEYS);
-        await restoreClockAlarmSnapshot(previousAlarms);
+        await runIndependentEffects([
+          () => restoreStorageKeysSnapshot(previous, RUNTIME_STORAGE_KEYS),
+          () => restoreClockAlarmSnapshot(previousAlarms),
+        ], "Start Tab runtime reset rollback was incomplete");
       } catch (rollbackError) {
         throw new AggregateError([error, rollbackError], "Failed to reset Start Tab runtime and restore the previous state");
       }
@@ -617,8 +657,10 @@ export async function resetStartPageData(): Promise<StartPageSettings> {
       return settings;
     } catch (error) {
       try {
-        await restoreStorageKeysSnapshot(previous, RESET_STORAGE_KEYS);
-        await restoreClockAlarmSnapshot(previousAlarms);
+        await runIndependentEffects([
+          () => restoreStorageKeysSnapshot(previous, RESET_STORAGE_KEYS),
+          () => restoreClockAlarmSnapshot(previousAlarms),
+        ], "Start Tab data reset rollback was incomplete");
       } catch (rollbackError) {
         throw new AggregateError([error, rollbackError], "Failed to reset Start Tab data and restore the previous state");
       }
@@ -722,7 +764,12 @@ export function parseClockAlarmName(name: string): { instanceId: string; token: 
 
 export async function clearClockAlarm(instanceId: string): Promise<void> {
   const alarms = await chrome.alarms.getAll();
-  await Promise.all(alarms.filter((alarm) => parseClockAlarmName(alarm.name)?.instanceId === instanceId).map((alarm) => chrome.alarms.clear(alarm.name)));
+  await runIndependentEffects(
+    alarms
+      .filter((alarm) => parseClockAlarmName(alarm.name)?.instanceId === instanceId)
+      .map((alarm) => async () => { await chrome.alarms.clear(alarm.name); }),
+    "Clock instance alarm cleanup was incomplete",
+  );
 }
 
 export async function scheduleClockAlarm(instanceId: string, _clock: ClockRuntimeState): Promise<void> {

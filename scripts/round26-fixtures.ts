@@ -14,7 +14,7 @@ let failNextStorageRemove = false;
 function expectedRule(host: string): chrome.declarativeNetRequest.Rule {
   return {
     id: 1,
-    priority: 1,
+    priority: host.split(".").length,
     action: {
       type: chrome.declarativeNetRequest.RuleActionType.REDIRECT,
       redirect: { url: `chrome-extension://round26/blocked.html?site=${encodeURIComponent(host)}` },
