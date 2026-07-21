@@ -40,14 +40,17 @@ jobs:
 
       - name: Reset only Round 31 patch targets
         run: |
-          git restore --source=HEAD --staged --worktree -- src/lib/blocklist.ts src/lib/chrome-sync.ts package.json scripts/validate-self-hosted-ci.mjs scripts/apply-round31.mjs scripts/apply-round31-followup.mjs
+          git restore --source=HEAD --staged --worktree -- src/lib/blocklist.ts src/lib/chrome-sync.ts package.json scripts/validate-self-hosted-ci.mjs scripts/validate-round6-static.mjs scripts/round6-fixtures.ts scripts/validate-round13-static.mjs scripts/round27-fixtures.ts scripts/apply-round31.mjs scripts/apply-round31-followup.mjs
 
       - name: Detect applied Round 31 stages
         run: |
           $blocklist = Get-Content -LiteralPath 'src/lib/blocklist.ts' -Raw
           $sync = Get-Content -LiteralPath 'src/lib/chrome-sync.ts' -Raw
+          $round6 = Get-Content -LiteralPath 'scripts/validate-round6-static.mjs' -Raw
+          $round13 = Get-Content -LiteralPath 'scripts/validate-round13-static.mjs' -Raw
+          $round27 = Get-Content -LiteralPath 'scripts/round27-fixtures.ts' -Raw
           $mainApplied = $blocklist.Contains('start-tab-blocklist-v1') -and $sync.Contains('completeChromeSyncPayload')
-          $followupApplied = $blocklist.Contains('url.host !== blockedUrl.host') -and $sync.Contains('meta.chunks !== chunks.length')
+          $followupApplied = $blocklist.Contains('url.host !== blockedUrl.host') -and $sync.Contains('meta.chunks !== chunks.length') -and $round6.Contains('complete upload frame') -and $round13.Contains('must not delete or roll back stale chunks') -and $round27.Contains('owner=start-tab-blocklist-v1')
           "ROUND31_ALREADY_APPLIED=$($mainApplied.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "ROUND31_FOLLOWUP_APPLIED=$($followupApplied.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
@@ -71,7 +74,7 @@ jobs:
         if: env.ROUND31_ALREADY_APPLIED != 'true' || env.ROUND31_FOLLOWUP_APPLIED != 'true'
         run: |
           git diff --check
-          git add src/lib/blocklist.ts src/lib/chrome-sync.ts package.json scripts/validate-self-hosted-ci.mjs
+          git add src/lib/blocklist.ts src/lib/chrome-sync.ts package.json scripts/validate-self-hosted-ci.mjs scripts/validate-round6-static.mjs scripts/round6-fixtures.ts scripts/validate-round13-static.mjs scripts/round27-fixtures.ts
           git diff --cached --stat
 
       - name: Commit Round 31 source patch
