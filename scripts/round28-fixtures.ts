@@ -136,7 +136,7 @@ function redirectRule(id: number, host: string, priority: number): chrome.declar
     priority,
     action: {
       type: chrome.declarativeNetRequest.RuleActionType.REDIRECT,
-      redirect: { url: `chrome-extension://round28/blocked.html?site=${encodeURIComponent(host)}` },
+      redirect: { url: `chrome-extension://round28/blocked.html?site=${encodeURIComponent(host)}&owner=start-tab-blocklist-v1` },
     },
     condition: {
       requestDomains: [host],

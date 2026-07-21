@@ -17,7 +17,7 @@ function expectedRule(host: string): chrome.declarativeNetRequest.Rule {
     priority: host.split(".").length,
     action: {
       type: chrome.declarativeNetRequest.RuleActionType.REDIRECT,
-      redirect: { url: `chrome-extension://round26/blocked.html?site=${encodeURIComponent(host)}` },
+      redirect: { url: `chrome-extension://round26/blocked.html?site=${encodeURIComponent(host)}&owner=start-tab-blocklist-v1` },
     },
     condition: {
       requestDomains: [host],

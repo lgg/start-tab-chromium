@@ -365,8 +365,9 @@ function parseBlocklistDynamicRule(rule: chrome.declarativeNetRequest.Rule): Par
   if (url.protocol !== blockedUrl.protocol || url.host !== blockedUrl.host || url.pathname !== blockedUrl.pathname || url.hash) return null;
   const siteValues = url.searchParams.getAll("site");
   if (siteValues.length !== 1) return null;
-  const site = normalizeStoredHost(siteValues[0] ?? "");
-  if (!site) return null;
+  const rawSite = siteValues[0] ?? "";
+  const site = normalizeStoredHost(rawSite);
+  if (!site || rawSite !== site) return null;
 
   const actionKeys = Object.keys(rule.action).sort();
   const redirectKeys = rule.action.redirect ? Object.keys(rule.action.redirect).sort() : [];
@@ -386,7 +387,7 @@ function parseBlocklistDynamicRule(rule: chrome.declarativeNetRequest.Rule): Par
     || conditionKeys[0] !== "requestDomains"
     || conditionKeys[1] !== "resourceTypes"
     || requestDomains?.length !== 1
-    || normalizeStoredHost(requestDomains[0] ?? "") !== site
+    || requestDomains[0] !== site
     || resourceTypes?.length !== 1
     || resourceTypes[0] !== chrome.declarativeNetRequest.ResourceType.MAIN_FRAME) {
     return null;
@@ -395,8 +396,19 @@ function parseBlocklistDynamicRule(rule: chrome.declarativeNetRequest.Rule): Par
   let parameterCount = 0;
   url.searchParams.forEach(() => { parameterCount += 1; });
   const owners = url.searchParams.getAll("owner");
-  if (parameterCount === 1 && owners.length === 0 && rule.id >= 1 && rule.id <= MAX_BLOCKED_SITES) return { site, legacy: true };
-  if (parameterCount === 2 && owners.length === 1 && owners[0] === BLOCKLIST_RULE_OWNER_VALUE) {
+  const legacyRedirectUrl = chrome.runtime.getURL(`${BLOCKED_PAGE}?site=${encodeURIComponent(site)}`);
+  const currentRedirectUrl = chrome.runtime.getURL(`${BLOCKED_PAGE}?site=${encodeURIComponent(site)}&owner=${BLOCKLIST_RULE_OWNER_VALUE}`);
+  if (parameterCount === 1
+    && owners.length === 0
+    && rule.id >= 1
+    && rule.id <= MAX_BLOCKED_SITES
+    && redirectUrl === legacyRedirectUrl) {
+    return { site, legacy: true };
+  }
+  if (parameterCount === 2
+    && owners.length === 1
+    && owners[0] === BLOCKLIST_RULE_OWNER_VALUE
+    && redirectUrl === currentRedirectUrl) {
     return { site, legacy: false };
   }
   return null;
