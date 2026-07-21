@@ -50,10 +50,4 @@ await replaceOnce(
   `node scripts/run-round28-fixtures.mjs && node scripts/validate-round28-static.mjs && node scripts/run-round29-fixtures.mjs && node scripts/validate-round29-static.mjs && node scripts/validate-self-hosted-ci.mjs`,
 );
 
-await replaceOnce(
-  ".github/workflows/ci.yml",
-  `      - name: Validate round 28\n        run: node scripts/validate-round28-static.mjs\n\n      - name: Validate self-hosted CI contract`,
-  `      - name: Validate round 28\n        run: node scripts/validate-round28-static.mjs\n\n      - name: Run round 29 fixtures\n        run: node scripts/run-round29-fixtures.mjs\n\n      - name: Validate round 29\n        run: node scripts/validate-round29-static.mjs\n\n      - name: Validate self-hosted CI contract`,
-);
-
-console.log("Round 29 production, fixture, package, and CI patches applied");
+console.log("Round 29 production, fixture, and package patches applied");
