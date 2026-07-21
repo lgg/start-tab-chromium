@@ -36,8 +36,8 @@ assert.match(blocklist, /storedLastBlockedUrlsEqual/,
   "Blocklist mutations must compare canonical URL side data before writing");
 assert.match(blocklist, /const storageUnchanged = storedSitesEqual\([\s\S]*storedLastBlockedUrlsEqual\(/,
   "Canonical storage no-ops must be identified before writes");
-assert.match(blocklist, /if \(ownValue\(urls, host\) === url && storedLastBlockedUrlsEqual\(snapshot, urls\)\) return;/,
-  "Identical blocked-navigation metadata must remain a true no-op only when raw storage is canonical");
+assert.match(blocklist, /if \(ownValue\(urls, host\) === url && storedLastBlockedUrlsEqual\(snapshot, urls\)\) return host;/,
+  "Canonical identical navigation metadata must avoid writes and return the atomically selected site");
 
 assert.match(deployment, /inherited `GOOGLE_OAUTH_CLIENT_ID` value is ignored/,
   "Deployment documentation must describe deterministic default profiles");

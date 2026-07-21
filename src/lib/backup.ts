@@ -2,9 +2,12 @@ import { normalizeBackupLastBlockedUrls, type BackupCollectionMode } from "./bac
 import {
   assertBlockedSiteCapacity,
   normalizeBlockedSites,
+  readDynamicRulesSnapshot,
+  restoreDynamicRulesSnapshot,
   syncRulesInCurrentTransaction,
 } from "./blocklist.js";
 import { DATA_REVISION_KEY, markStartTabDataChanged, readStartTabDataRevision } from "./data-revision.js";
+import { runIndependentEffects } from "./independent-effects.js";
 import { withStorageLock } from "./storage-lock.js";
 import { FOCUS_STATS_KEY, isFutureFocusStatsSchema, normalizeFocusStats } from "./focus-stats.js";
 import {
@@ -240,8 +243,10 @@ function keysAbsentFrom(storage: Record<string, unknown>, keys: readonly string[
 
 async function restoreStorageSnapshot(snapshot: Record<string, unknown>): Promise<void> {
   const absent = keysAbsentFrom(snapshot, ROLLBACK_KEYS);
-  await chrome.storage.local.set(snapshot);
-  if (absent.length > 0) await chrome.storage.local.remove(absent);
+  const effects: Array<() => Promise<void>> = [];
+  if (Object.keys(snapshot).length > 0) effects.push(() => chrome.storage.local.set(snapshot));
+  if (absent.length > 0) effects.push(() => chrome.storage.local.remove(absent));
+  await runIndependentEffects(effects, "Backup storage rollback was incomplete");
 }
 
 export async function importBackup(value: unknown, options: BackupImportOptions = {}): Promise<BackupImportReport> {
@@ -250,8 +255,9 @@ export async function importBackup(value: unknown, options: BackupImportOptions 
 
   return withStorageLock("data-write", async () => {
     const current = await chrome.storage.local.get([...ROLLBACK_KEYS]);
-    const currentAlarms = await readClockAlarmSnapshot();
     assertSupportedSchemas(current);
+    const currentRules = await readDynamicRulesSnapshot();
+    const currentAlarms = await readClockAlarmSnapshot();
     const next = { ...migrated.storage };
     const removals = keysAbsentFrom(next, SNAPSHOT_KEYS);
     const recovery = currentSchema(normalizedStorage(current, "local-recovery"), new Date().toISOString(), backupId());
@@ -265,9 +271,11 @@ export async function importBackup(value: unknown, options: BackupImportOptions 
       await markStartTabDataChanged(options.dataRevisionAt);
     } catch (error) {
       try {
-        await restoreStorageSnapshot(current);
-        await syncRulesInCurrentTransaction();
-        await restoreClockAlarmSnapshot(currentAlarms);
+        await runIndependentEffects([
+          () => restoreStorageSnapshot(current),
+          () => restoreDynamicRulesSnapshot(currentRules),
+          () => restoreClockAlarmSnapshot(currentAlarms),
+        ], "Backup storage, DNR, and alarm rollback was incomplete");
       } catch (rollbackError) {
         throw new AggregateError([error, rollbackError], "Backup import failed and rollback was incomplete");
       }

@@ -6,7 +6,6 @@
  */
 
 import {
-  blockedSiteForUrl,
   blockHost,
   clearAll,
   migrateLegacyStorage,
@@ -365,9 +364,8 @@ function isNativeSplitViewPickerUrl(url: string): boolean {
 }
 
 async function rememberIfBlocked(url: string): Promise<void> {
-  const host = await blockedSiteForUrl(url);
+  const host = await rememberBlockedNavigation(url);
   if (!host) return;
-  await rememberBlockedNavigation(url);
   await runStatsJob(() => recordBlockedNavigation(host));
 }
 
