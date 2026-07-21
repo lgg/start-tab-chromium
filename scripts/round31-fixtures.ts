@@ -26,16 +26,20 @@ function selected(keys?: string | string[] | Record<string, unknown> | null): Re
   return output;
 }
 
-function foreignRule(id: number, redirectUrl = "chrome-extension://round31/another-feature.html"): chrome.declarativeNetRequest.Rule {
+function foreignRule(
+  id: number,
+  redirectUrl = "chrome-extension://round31/another-feature.html",
+  host = "foreign.example",
+): chrome.declarativeNetRequest.Rule {
   return {
     id,
-    priority: 1,
+    priority: host.split(".").length,
     action: {
       type: chrome.declarativeNetRequest.RuleActionType.REDIRECT,
       redirect: { url: redirectUrl },
     },
     condition: {
-      requestDomains: ["foreign.example"],
+      requestDomains: [host],
       resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
     },
   };
@@ -147,12 +151,32 @@ const ownedRule = dynamicRules.find((rule) => rule.id !== samePageForeign.id);
 assert.ok(ownedRule?.action.redirect?.url?.includes("owner=start-tab-blocklist-v1"),
   "Current blocklist rules must carry an explicit ownership marker");
 
+// URL.origin is opaque (`null`) for chrome-extension URLs. An otherwise exact
+// rule from another extension ID must never be mistaken for this extension's
+// legacy rule merely because pathname and query are identical.
+resetDnrState();
+localStorage = {
+  blockedSites: ["blocked.example"],
+  startTabDataRevision: { version: 1, updatedAt: 2 },
+};
+const crossExtensionSameShape = legacyBlocklistRule(1, "foreign.example");
+crossExtensionSameShape.action.redirect = {
+  url: "chrome-extension://another-extension/blocked.html?site=foreign.example",
+};
+dynamicRules = [crossExtensionSameShape];
+await blocklist.syncRules();
+assert.deepEqual(dynamicRules.find((rule) => rule.id === crossExtensionSameShape.id), crossExtensionSameShape,
+  "A cross-extension same-path redirect must remain foreign despite an opaque URL origin");
+assert.ok(dynamicRules.some((rule) => rule.id === 2
+  && rule.action.redirect?.url?.includes("owner=start-tab-blocklist-v1")),
+"The blocklist must allocate around the preserved cross-extension rule");
+
 // Exact pre-marker rules remain recognized as bounded legacy ownership and are
 // migrated to the marker on the next reconciliation.
 resetDnrState();
 localStorage = {
   blockedSites: ["example.com"],
-  startTabDataRevision: { version: 1, updatedAt: 2 },
+  startTabDataRevision: { version: 1, updatedAt: 3 },
 };
 dynamicRules = [legacyBlocklistRule(1, "example.com")];
 await blocklist.syncRules();
@@ -160,13 +184,29 @@ assert.equal(dynamicRules.length, 1);
 assert.ok(dynamicRules[0]?.action.redirect?.url?.includes("owner=start-tab-blocklist-v1"),
   "Exact legacy blocklist rules must migrate to explicit ownership");
 
+// Pre-marker ownership is bounded to the historical 1..MAX_BLOCKED_SITES ID
+// range. An exact-looking high-ID rule remains foreign and must survive.
+resetDnrState();
+localStorage = {
+  blockedSites: ["blocked.example"],
+  startTabDataRevision: { version: 1, updatedAt: 4 },
+};
+const highIdLegacyLookalike = legacyBlocklistRule(6_000, "foreign.example");
+dynamicRules = [highIdLegacyLookalike];
+await blocklist.syncRules();
+assert.deepEqual(dynamicRules.find((rule) => rule.id === highIdLegacyLookalike.id), highIdLegacyLookalike,
+  "A high-ID legacy lookalike must remain foreign to the bounded migration path");
+assert.ok(dynamicRules.some((rule) => rule.id === 1
+  && rule.action.redirect?.url?.includes("owner=start-tab-blocklist-v1")),
+"Bounded legacy detection must not prevent current blocklist installation");
+
 // A foreign rule can appear between allocation and the final ownership check.
 // Reconciliation must re-read and allocate the next free ID instead of failing
 // a safe operation that has a valid collision-free solution.
 resetDnrState();
 localStorage = {
   blockedSites: ["example.com"],
-  startTabDataRevision: { version: 1, updatedAt: 3 },
+  startTabDataRevision: { version: 1, updatedAt: 5 },
 };
 injectForeignCollisionOnSecondRead = true;
 await blocklist.syncRules();
@@ -204,6 +244,11 @@ assert.equal(
   Object.keys(payload).filter((key) => key.startsWith("startTabSyncChunk")).length,
   12,
   "Every Browser Sync upload must contain all canonical chunk slots",
+);
+assert.throws(
+  () => chromeSync.completeChromeSyncPayload({ ...meta, chunks: 1 }, ["first", "second"]),
+  /Invalid Browser Sync chunk frame/,
+  "Browser Sync metadata and frame chunk counts must agree",
 );
 
 console.log("Round 31 fixtures passed");
