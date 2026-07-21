@@ -142,7 +142,7 @@ export async function listCalendarEvents(
     pagesRead += 1;
 
     const nextPageToken = typeof payload.nextPageToken === "string" ? payload.nextPageToken : "";
-    if (!normalizedQuery || !nextPageToken || seenPageTokens.has(nextPageToken)) break;
+    if (!nextPageToken || seenPageTokens.has(nextPageToken)) break;
     seenPageTokens.add(nextPageToken);
     pageToken = nextPageToken;
   }

@@ -284,21 +284,30 @@ function rulePriorityForHost(host: string): number {
   return host.split(".").length;
 }
 
-function buildRules(sites: string[]): chrome.declarativeNetRequest.Rule[] {
+function buildRules(
+  sites: string[],
+  occupiedRuleIds: ReadonlySet<number> = new Set<number>(),
+): chrome.declarativeNetRequest.Rule[] {
   const normalized = normalizeBlockedSites(sites);
   assertBlockedSiteCapacity(normalized);
-  return normalized.map((host, index) => ({
-    id: index + 1,
-    priority: rulePriorityForHost(host),
-    action: {
-      type: chrome.declarativeNetRequest.RuleActionType.REDIRECT,
-      redirect: { url: chrome.runtime.getURL(`${BLOCKED_PAGE}?site=${encodeURIComponent(host)}`) },
-    },
-    condition: {
-      requestDomains: [host],
-      resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
-    },
-  }));
+  let nextRuleId = 1;
+  return normalized.map((host) => {
+    while (occupiedRuleIds.has(nextRuleId)) nextRuleId += 1;
+    const id = nextRuleId;
+    nextRuleId += 1;
+    return {
+      id,
+      priority: rulePriorityForHost(host),
+      action: {
+        type: chrome.declarativeNetRequest.RuleActionType.REDIRECT,
+        redirect: { url: chrome.runtime.getURL(`${BLOCKED_PAGE}?site=${encodeURIComponent(host)}`) },
+      },
+      condition: {
+        requestDomains: [host],
+        resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
+      },
+    };
+  });
 }
 
 function stableRuleValue(value: unknown): unknown {
@@ -339,9 +348,53 @@ function blocklistDynamicRules(
   return rules.filter(isBlocklistDynamicRule);
 }
 
+function foreignDynamicRules(
+  rules: readonly chrome.declarativeNetRequest.Rule[],
+): chrome.declarativeNetRequest.Rule[] {
+  return rules.filter((rule) => !isBlocklistDynamicRule(rule));
+}
+
 export async function readDynamicRulesSnapshot(): Promise<chrome.declarativeNetRequest.Rule[]> {
   const rules = await chrome.declarativeNetRequest.getDynamicRules();
   return structuredClone(blocklistDynamicRules(rules));
+}
+
+const SAFE_DYNAMIC_RULE_ACTIONS = new Set(["allow", "allowAllRequests", "block", "upgradeScheme"]);
+
+interface DynamicRuleLimitSurface {
+  MAX_NUMBER_OF_UNSAFE_DYNAMIC_RULES?: number;
+  MAX_NUMBER_OF_DYNAMIC_RULES?: number;
+}
+
+function dynamicRuleLimit(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : fallback;
+}
+
+function isUnsafeDynamicRule(rule: chrome.declarativeNetRequest.Rule): boolean {
+  return !SAFE_DYNAMIC_RULE_ACTIONS.has(String(rule.action.type));
+}
+
+function assertDynamicRuleCapacity(
+  foreignRules: readonly chrome.declarativeNetRequest.Rule[],
+  rules: readonly chrome.declarativeNetRequest.Rule[],
+): void {
+  const limits = chrome.declarativeNetRequest as typeof chrome.declarativeNetRequest & DynamicRuleLimitSurface;
+  const unsafeLimit = dynamicRuleLimit(limits.MAX_NUMBER_OF_UNSAFE_DYNAMIC_RULES, MAX_BLOCKED_SITES);
+  const totalLimit = dynamicRuleLimit(limits.MAX_NUMBER_OF_DYNAMIC_RULES, unsafeLimit);
+  const finalRules = [...foreignRules, ...rules];
+  const unsafeCount = finalRules.filter(isUnsafeDynamicRule).length;
+  if (unsafeCount > unsafeLimit) {
+    throw new Error(
+      `Start Tab blocklist exceeds Chrome's shared unsafe dynamic-rule capacity (${unsafeCount}/${unsafeLimit})`,
+    );
+  }
+  if (finalRules.length > totalLimit) {
+    throw new Error(
+      `Start Tab blocklist exceeds Chrome's shared dynamic-rule capacity (${finalRules.length}/${totalLimit})`,
+    );
+  }
 }
 
 async function replaceDynamicRulesExact(
@@ -350,11 +403,9 @@ async function replaceDynamicRulesExact(
 ): Promise<void> {
   const allCurrentRules = await chrome.declarativeNetRequest.getDynamicRules();
   const currentRules = blocklistDynamicRules(allCurrentRules);
-  const foreignRuleIds = new Set(
-    allCurrentRules
-      .filter((rule) => !isBlocklistDynamicRule(rule))
-      .map((rule) => rule.id),
-  );
+  const foreignRules = foreignDynamicRules(allCurrentRules);
+  assertDynamicRuleCapacity(foreignRules, rules);
+  const foreignRuleIds = new Set(foreignRules.map((rule) => rule.id));
   const collision = rules.find((rule) => foreignRuleIds.has(rule.id));
   if (collision) {
     throw new Error(
@@ -377,9 +428,12 @@ export async function restoreDynamicRulesSnapshot(
 
 async function replaceDynamicRules(
   sites: string[],
-  existing?: readonly chrome.declarativeNetRequest.Rule[],
+  _existing?: readonly chrome.declarativeNetRequest.Rule[],
 ): Promise<void> {
-  await replaceDynamicRulesExact(buildRules(sites), existing);
+  const allCurrentRules = await chrome.declarativeNetRequest.getDynamicRules();
+  const foreignRules = foreignDynamicRules(allCurrentRules);
+  const rules = buildRules(sites, new Set(foreignRules.map((rule) => rule.id)));
+  await replaceDynamicRulesExact(rules, allCurrentRules);
 }
 
 export async function syncRulesInCurrentTransaction(): Promise<void> {
@@ -437,8 +491,11 @@ async function applyBlocklistMutation(
   const storageUnchanged = storedSitesEqual(original[STORAGE_KEY], nextSites)
     && storedLastBlockedUrlsEqual(original, nextUrls);
   if (storageUnchanged) {
-    const expectedRules = buildRules(nextSites);
-    if (dynamicRulesEqual(originalRules, expectedRules)) return previousSites;
+    const allCurrentRules = await chrome.declarativeNetRequest.getDynamicRules();
+    const foreignRules = foreignDynamicRules(allCurrentRules);
+    const currentRules = blocklistDynamicRules(allCurrentRules);
+    const expectedRules = buildRules(nextSites, new Set(foreignRules.map((rule) => rule.id)));
+    if (dynamicRulesEqual(currentRules, expectedRules)) return previousSites;
     try {
       await replaceDynamicRules(nextSites, originalRules);
       return previousSites;

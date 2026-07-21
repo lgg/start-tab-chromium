@@ -35,7 +35,7 @@ assert.doesNotMatch(google, /while \(events\.length < limit[\s\S]{0,900}url\.sea
 
 for (const marker of [
   "Blocklist synchronization must preserve unrelated dynamic rules",
-  "DNR ownership collisions must fail before any foreign rule is removed",
+  "Low-ID foreign rules must not block blocklist synchronization",
   "Alarm rollback must still run after instance storage rollback fails",
   "Every page of one Calendar query must reuse the exact same timeMin",
 ]) {
