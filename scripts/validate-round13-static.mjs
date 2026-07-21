@@ -15,8 +15,8 @@ const [syncSource, googleSource, newtabSource, planSource, contextSource, common
 
 assert.match(syncSource, /QUOTA_BYTES(?!_PER_ITEM)/, "Browser Sync must enforce the total runtime quota");
 assert.match(syncSource, /chromeSyncStorageBytes\(finalState\)/, "The eventual remote state must be checked before writing");
-assert.match(syncSource, /staleRemovedBeforeWrite/, "Temporary quota pressure must use recoverable stale-chunk cleanup");
-assert.match(syncSource, /stale-chunk rollback was incomplete/, "A failed upload must report incomplete stale-chunk rollback");
+assert.match(syncSource, /completeChromeSyncPayload/, "Browser Sync must clear inactive chunk slots in the same committed frame");
+assert.doesNotMatch(syncSource, /staleRemovedBeforeWrite|stale-chunk rollback was incomplete/, "Browser Sync must not delete or roll back stale chunks after another device may have committed");
 assert.match(googleSource, /orderBy", "modifiedTime desc"/, "Drive lookup must prefer the latest backup");
 assert.match(googleSource, /pageSize", "1"/, "Drive lookup must request only the deterministic latest backup");
 assert.match(newtabSource, /planStartPageStorageChange/, "New-tab storage events must use the mixed-change planner");

@@ -25,6 +25,16 @@ function isPageContext(): boolean {
 
 export const BLOCKED_PAGE = "blocked.html";
 
+const BLOCKLIST_RULE_OWNER_VALUE = "start-tab-blocklist-v1";
+const MAX_DNR_RECONCILE_ATTEMPTS = 4;
+
+class DynamicRuleCollisionError extends Error {
+  constructor(readonly ruleId: number, message: string) {
+    super(message);
+    this.name = "DynamicRuleCollisionError";
+  }
+}
+
 export function normalizeHost(host: string): string {
   return host.trim().replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
 }
@@ -300,7 +310,7 @@ function buildRules(
       priority: rulePriorityForHost(host),
       action: {
         type: chrome.declarativeNetRequest.RuleActionType.REDIRECT,
-        redirect: { url: chrome.runtime.getURL(`${BLOCKED_PAGE}?site=${encodeURIComponent(host)}`) },
+        redirect: { url: chrome.runtime.getURL(`${BLOCKED_PAGE}?site=${encodeURIComponent(host)}&owner=${BLOCKLIST_RULE_OWNER_VALUE}`) },
       },
       condition: {
         requestDomains: [host],
@@ -335,11 +345,77 @@ function dynamicRulesEqual(
   return JSON.stringify(normalized(actual)) === JSON.stringify(normalized(expected));
 }
 
-function isBlocklistDynamicRule(rule: chrome.declarativeNetRequest.Rule): boolean {
+interface ParsedBlocklistDynamicRule {
+  site: string;
+  legacy: boolean;
+}
+
+function parseBlocklistDynamicRule(rule: chrome.declarativeNetRequest.Rule): ParsedBlocklistDynamicRule | null {
   const redirectUrl = rule.action.redirect?.url;
-  return rule.action.type === chrome.declarativeNetRequest.RuleActionType.REDIRECT
-    && typeof redirectUrl === "string"
-    && redirectUrl.startsWith(chrome.runtime.getURL(BLOCKED_PAGE) + "?site=");
+  if (rule.action.type !== chrome.declarativeNetRequest.RuleActionType.REDIRECT || typeof redirectUrl !== "string") {
+    return null;
+  }
+  let url: URL;
+  try {
+    url = new URL(redirectUrl);
+  } catch {
+    return null;
+  }
+  const blockedUrl = new URL(chrome.runtime.getURL(BLOCKED_PAGE));
+  if (url.protocol !== blockedUrl.protocol || url.host !== blockedUrl.host || url.pathname !== blockedUrl.pathname || url.hash) return null;
+  const siteValues = url.searchParams.getAll("site");
+  if (siteValues.length !== 1) return null;
+  const rawSite = siteValues[0] ?? "";
+  const site = normalizeStoredHost(rawSite);
+  if (!site || rawSite !== site) return null;
+
+  const actionKeys = Object.keys(rule.action).sort();
+  const redirectKeys = rule.action.redirect ? Object.keys(rule.action.redirect).sort() : [];
+  if (actionKeys.length !== 2
+    || actionKeys[0] !== "redirect"
+    || actionKeys[1] !== "type"
+    || redirectKeys.length !== 1
+    || redirectKeys[0] !== "url"
+    || rule.priority !== rulePriorityForHost(site)) {
+    return null;
+  }
+
+  const requestDomains = rule.condition.requestDomains;
+  const resourceTypes = rule.condition.resourceTypes;
+  const conditionKeys = Object.keys(rule.condition).sort();
+  if (conditionKeys.length !== 2
+    || conditionKeys[0] !== "requestDomains"
+    || conditionKeys[1] !== "resourceTypes"
+    || requestDomains?.length !== 1
+    || requestDomains[0] !== site
+    || resourceTypes?.length !== 1
+    || resourceTypes[0] !== chrome.declarativeNetRequest.ResourceType.MAIN_FRAME) {
+    return null;
+  }
+
+  let parameterCount = 0;
+  url.searchParams.forEach(() => { parameterCount += 1; });
+  const owners = url.searchParams.getAll("owner");
+  const legacyRedirectUrl = chrome.runtime.getURL(`${BLOCKED_PAGE}?site=${encodeURIComponent(site)}`);
+  const currentRedirectUrl = chrome.runtime.getURL(`${BLOCKED_PAGE}?site=${encodeURIComponent(site)}&owner=${BLOCKLIST_RULE_OWNER_VALUE}`);
+  if (parameterCount === 1
+    && owners.length === 0
+    && rule.id >= 1
+    && rule.id <= MAX_BLOCKED_SITES
+    && redirectUrl === legacyRedirectUrl) {
+    return { site, legacy: true };
+  }
+  if (parameterCount === 2
+    && owners.length === 1
+    && owners[0] === BLOCKLIST_RULE_OWNER_VALUE
+    && redirectUrl === currentRedirectUrl) {
+    return { site, legacy: false };
+  }
+  return null;
+}
+
+function isBlocklistDynamicRule(rule: chrome.declarativeNetRequest.Rule): boolean {
+  return parseBlocklistDynamicRule(rule) !== null;
 }
 
 function blocklistDynamicRules(
@@ -408,14 +484,28 @@ async function replaceDynamicRulesExact(
   const foreignRuleIds = new Set(foreignRules.map((rule) => rule.id));
   const collision = rules.find((rule) => foreignRuleIds.has(rule.id));
   if (collision) {
-    throw new Error(
+    throw new DynamicRuleCollisionError(
+      collision.id,
       `Blocklist DNR rule ID ${collision.id} conflicts with a dynamic rule owned by another Start Tab feature`,
     );
   }
-  await chrome.declarativeNetRequest.updateDynamicRules({
-    removeRuleIds: currentRules.map((rule) => rule.id),
-    addRules: structuredClone([...rules]),
-  });
+  try {
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: currentRules.map((rule) => rule.id),
+      addRules: structuredClone([...rules]),
+    });
+  } catch (error) {
+    const latestRules = await chrome.declarativeNetRequest.getDynamicRules();
+    const latestForeignIds = new Set(foreignDynamicRules(latestRules).map((rule) => rule.id));
+    const latestCollision = rules.find((rule) => latestForeignIds.has(rule.id));
+    if (latestCollision) {
+      throw new DynamicRuleCollisionError(
+        latestCollision.id,
+        `Blocklist DNR rule ID ${latestCollision.id} was claimed concurrently by another Start Tab feature`,
+      );
+    }
+    throw error;
+  }
 }
 
 export async function restoreDynamicRulesSnapshot(
@@ -430,10 +520,20 @@ async function replaceDynamicRules(
   sites: string[],
   _existing?: readonly chrome.declarativeNetRequest.Rule[],
 ): Promise<void> {
-  const allCurrentRules = await chrome.declarativeNetRequest.getDynamicRules();
-  const foreignRules = foreignDynamicRules(allCurrentRules);
-  const rules = buildRules(sites, new Set(foreignRules.map((rule) => rule.id)));
-  await replaceDynamicRulesExact(rules, allCurrentRules);
+  let lastCollision: DynamicRuleCollisionError | undefined;
+  for (let attempt = 0; attempt < MAX_DNR_RECONCILE_ATTEMPTS; attempt += 1) {
+    const allCurrentRules = await chrome.declarativeNetRequest.getDynamicRules();
+    const foreignRules = foreignDynamicRules(allCurrentRules);
+    const rules = buildRules(sites, new Set(foreignRules.map((rule) => rule.id)));
+    try {
+      await replaceDynamicRulesExact(rules, allCurrentRules);
+      return;
+    } catch (error) {
+      if (!(error instanceof DynamicRuleCollisionError)) throw error;
+      lastCollision = error;
+    }
+  }
+  throw lastCollision ?? new Error("Blocklist DNR reconciliation exhausted its retry limit");
 }
 
 export async function syncRulesInCurrentTransaction(): Promise<void> {

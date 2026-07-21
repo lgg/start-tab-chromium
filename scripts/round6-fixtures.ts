@@ -171,7 +171,7 @@ await settingsApi.setStartPageSettings(remoteSettings);
 syncState.startTabSyncMeta = { invalid: true };
 syncState.startTabSyncChunk9 = "orphan";
 await syncApi.uploadChromeSyncBackup();
-assert.equal(Object.prototype.hasOwnProperty.call(syncState, "startTabSyncChunk9"), false, "Orphaned sync chunks must be removed even when prior metadata is corrupt");
+assert.equal(syncState.startTabSyncChunk9, "", "Orphaned sync chunks must be cleared inside the complete upload frame even when prior metadata is corrupt");
 const remoteMeta = structuredClone(syncState.startTabSyncMeta) as Record<string, unknown>;
 assert.ok(remoteMeta, "Remote sync metadata must be written");
 const localBeforeConcurrentRestore = structuredClone(localState);

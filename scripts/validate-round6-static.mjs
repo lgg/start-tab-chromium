@@ -32,7 +32,8 @@ assert.match(sync, /withStorageLock\(["']chrome-sync["']/, "Sync operations must
 assert.match(sync, /exportBackupSnapshot/, "Sync content and revision must come from one atomic snapshot");
 assert.match(sync, /isPristineBackup/, "Sync must protect a pre-existing remote snapshot on a clean device");
 assert.match(sync, /Object\.keys\(value\).*sort/s, "Canonical sync JSON must sort object keys");
-assert.match(sync, /startsWith\(CHUNK_PREFIX\)/, "Sync uploads must clean orphaned chunks even when old metadata is corrupt");
+assert.match(sync, /completeChromeSyncPayload/, "Sync uploads must replace orphaned chunks through one complete frame");
+assert.doesNotMatch(sync, /staleRemovedBeforeWrite|const staleKeys/, "Sync uploads must not perform a destructive post-write stale cleanup");
 assert.match(sync, /backupVersion > BACKUP_VERSION/, "Sync must not overwrite a future backup schema carried by the current metadata protocol");
 assert.match(sync, /syncMetaEqual/, "Sync must detect concurrent remote snapshot replacement before local commit");
 for (const type of ["replace-blocked-sites", "open-native-new-tab", "reset-start-page"]) {
