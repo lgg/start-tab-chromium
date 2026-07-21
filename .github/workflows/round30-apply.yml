@@ -58,20 +58,20 @@ jobs:
         if: env.ROUND30_ALREADY_APPLIED != 'true'
         run: node scripts/apply-round30.mjs
 
-      - name: Validate and stage Round 30 patch
+      - name: Validate and stage Round 30 source patch
         if: env.ROUND30_ALREADY_APPLIED != 'true'
         run: |
           git diff --check
-          git add src/lib/blocklist.ts src/lib/google-integration.ts scripts/round29-fixtures.ts scripts/validate-round29-static.mjs package.json .github/workflows/ci.yml scripts/validate-self-hosted-ci.mjs
+          git add src/lib/blocklist.ts src/lib/google-integration.ts scripts/round29-fixtures.ts scripts/validate-round29-static.mjs package.json scripts/validate-self-hosted-ci.mjs
           git diff --cached --stat
 
-      - name: Commit Round 30 patch
+      - name: Commit Round 30 source patch
         if: env.ROUND30_ALREADY_APPLIED != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "Apply Round 30 audit hardening"
 
-      - name: Push Round 30 patch
+      - name: Push Round 30 source patch
         if: env.ROUND30_ALREADY_APPLIED != 'true'
         run: git push origin HEAD:codex/post-round29-deep-audit-20260721
