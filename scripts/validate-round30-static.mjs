@@ -13,16 +13,16 @@ const packageJson = JSON.parse(read("package.json"));
 const workflow = read(".github/workflows/ci.yml");
 const selfHostedValidation = read("scripts/validate-self-hosted-ci.mjs");
 
-assert.match(blocklist, /export const BLOCKLIST_RULE_ID_BASE = 1_000_000;/,
-  "Blocklist rules must use a documented dedicated dynamic-rule ID namespace");
-assert.match(blocklist, /id: BLOCKLIST_RULE_ID_BASE \+ index/,
-  "Every generated blocklist rule must use the dedicated namespace");
-assert.match(blocklist, /function isNamespacedBlocklistRuleId\(id: number\)/,
-  "DNR ownership must recognize the reserved blocklist ID range");
-assert.match(blocklist, /function isLegacyBlocklistDynamicRule\(rule: chrome\.declarativeNetRequest\.Rule\)/,
-  "DNR ownership must retain a bounded migration path for exact legacy redirects");
-assert.match(blocklist, /isNamespacedBlocklistRuleId\(rule\.id\) \|\| isLegacyBlocklistDynamicRule\(rule\)/,
-  "DNR snapshots must combine namespaced ownership with exact legacy migration");
+assert.match(blocklist, /function buildRules\(\s*sites: string\[],\s*occupiedRuleIds: ReadonlySet<number>/,
+  "Blocklist rule generation must accept the foreign-ID occupancy snapshot");
+assert.match(blocklist, /while \(occupiedRuleIds\.has\(nextRuleId\)\) nextRuleId \+= 1;/,
+  "Blocklist allocation must deterministically skip every occupied foreign ID");
+assert.match(blocklist, /const id = nextRuleId;[\s\S]*nextRuleId \+= 1;[\s\S]*id,/,
+  "Every generated rule must reserve one free positive ID before advancing");
+assert.match(blocklist, /function foreignDynamicRules\(/,
+  "Normal synchronization must separate foreign rules before ID allocation");
+assert.match(blocklist, /buildRules\(sites, new Set\(foreignRules\.map\(\(rule\) => rule\.id\)\)\)/,
+  "Desired blocklist rules must be allocated around the complete foreign ID set");
 assert.match(blocklist, /function assertDynamicRuleCapacity\(/,
   "Shared dynamic-rule capacity must be validated explicitly");
 assert.match(blocklist, /MAX_NUMBER_OF_UNSAFE_DYNAMIC_RULES/,
@@ -42,7 +42,7 @@ assert.ok(round29Fixtures.includes("Low-ID foreign rules must not block blocklis
   "Round 29 regression coverage must be superseded by successful low-ID coexistence");
 for (const marker of [
   "Low-ID foreign rules must survive blocklist synchronization",
-  "Legacy low-ID blocklist rules must be removed during namespace migration",
+  "Blocklist rule allocation must skip every occupied foreign ID deterministically",
   "Capacity rejection must happen before updateDynamicRules",
   "Calendar pagination without a search query must follow an incomplete page token",
 ]) {
