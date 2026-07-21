@@ -8,26 +8,55 @@ on:
       - opened
       - synchronize
       - reopened
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
+# Intentionally no concurrency group: the dedicated single runner preserves every
+# queued job instead of replacing older pending runs.
 jobs:
   validate:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: start-tab-chromium-ci
-    timeout-minutes: 10
+    timeout-minutes: 30
     defaults:
       run:
         shell: pwsh
+    env:
+      CI: "true"
+
     steps:
-      - name: Checkout exact audit branch
+      - name: Configure isolated CI paths
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
+            throw 'RUNNER_TEMP is empty'
+          }
+
+          $runnerTemp = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\', '/')
+          $volumeRoot = [System.IO.Path]::GetPathRoot($runnerTemp).TrimEnd('\', '/')
+          if ([string]::IsNullOrWhiteSpace($runnerTemp) -or $runnerTemp -eq $volumeRoot) {
+            throw "Unsafe RUNNER_TEMP: $runnerTemp"
+          }
+
+          $cacheRoot = [System.IO.Path]::GetFullPath((Join-Path $runnerTemp 'start-tab-chromium-cache')).TrimEnd('\', '/')
+          $runnerTempPrefix = $runnerTemp + [System.IO.Path]::DirectorySeparatorChar
+          if (-not $cacheRoot.StartsWith($runnerTempPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "CI cache path escaped RUNNER_TEMP: $cacheRoot"
+          }
+
+          "CI_CACHE_ROOT=$cacheRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "NPM_CONFIG_CACHE=$(Join-Path $cacheRoot 'npm')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: codex/post-round28-deep-audit-20260721
           clean: false
           fetch-depth: 1
-          persist-credentials: true
+          persist-credentials: false
           show-progress: false
 
       - name: Setup Node.js
@@ -37,16 +66,194 @@ jobs:
           architecture: x64
           package-manager-cache: false
 
-      - name: Apply exact Round 29 source patch
-        run: node scripts/apply-round29.mjs
+      - name: Remove stale project outputs
+        run: node scripts/clean-ci.mjs
 
-      - name: Commit Round 29 source patch
+      - name: Restore npm download cache
+        id: npm-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ env.NPM_CONFIG_CACHE }}
+          key: start-tab-chromium-npm-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        run: npm ci --include=dev --bin-links=true --no-audit --no-fund --loglevel=error
+
+      - name: Verify required toolchain
         run: |
-          $ErrorActionPreference = 'Stop'
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/lib/blocklist.ts src/lib/start-page-runtime.ts src/lib/google-integration.ts scripts/round29-fixtures.ts package.json
-          if (-not (git diff --cached --quiet)) {
-            git commit -m "Apply Round 29 production hardening"
-            git push origin HEAD:codex/post-round28-deep-audit-20260721
+          $requiredFiles = @(
+            'node_modules/typescript/bin/tsc',
+            'node_modules/esbuild/bin/esbuild'
+          )
+          foreach ($relativePath in $requiredFiles) {
+            if (-not (Test-Path -LiteralPath (Join-Path $env:GITHUB_WORKSPACE $relativePath))) {
+              throw "Required CI tool is missing after npm ci: $relativePath"
+            }
           }
+
+      - name: Save npm download cache
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ env.NPM_CONFIG_CACHE }}
+          key: ${{ steps.npm-cache.outputs.cache-primary-key }}
+
+      - name: Generate locale parity report
+        run: node scripts/report-locale-parity.mjs
+
+      - name: Validate core architecture
+        run: node scripts/validate-static.mjs
+
+      - name: Validate round 6
+        run: node scripts/validate-round6-static.mjs
+
+      - name: Validate round 7
+        run: node scripts/validate-round7-static.mjs
+
+      - name: Validate round 11
+        run: node scripts/validate-round11-static.mjs
+
+      - name: Validate release build and cleanup
+        run: node scripts/validate-release-docs.mjs build-cleanup
+
+      - name: Validate release OAuth
+        run: node scripts/validate-release-docs.mjs oauth
+
+      - name: Validate release documentation
+        run: node scripts/validate-release-docs.mjs documentation
+
+      - name: Validate release CI contract
+        run: node scripts/validate-release-docs.mjs ci
+
+      - name: Run round 12 fixtures
+        run: node scripts/run-round12-fixtures.mjs
+
+      - name: Validate round 12
+        run: node scripts/validate-round12-static.mjs
+
+      - name: Run round 13 fixtures
+        run: node scripts/run-round13-fixtures.mjs
+
+      - name: Validate round 13
+        run: node scripts/validate-round13-static.mjs
+
+      - name: Run round 14 fixtures
+        run: node scripts/run-round14-fixtures.mjs
+
+      - name: Validate round 14
+        run: node scripts/validate-round14-static.mjs
+
+      - name: Run round 15 fixtures
+        run: node scripts/run-round15-fixtures.mjs
+
+      - name: Validate round 15
+        run: node scripts/validate-round15-static.mjs
+
+      - name: Run round 16 fixtures
+        run: node scripts/run-round16-fixtures.mjs
+
+      - name: Validate round 16
+        run: node scripts/validate-round16-static.mjs
+
+      - name: Run round 17 fixtures
+        run: node scripts/run-round17-fixtures.mjs
+
+      - name: Validate round 17
+        run: node scripts/validate-round17-static.mjs
+
+      - name: Run round 18 fixtures
+        run: node scripts/run-round18-fixtures.mjs
+
+      - name: Validate round 18
+        run: node scripts/validate-round18-static.mjs
+
+      - name: Run round 19 fixtures
+        run: node scripts/run-round19-fixtures.mjs
+
+      - name: Validate round 19
+        run: node scripts/validate-round19-static.mjs
+
+      - name: Run round 20 fixtures
+        run: node scripts/run-round20-fixtures.mjs
+
+      - name: Validate round 20
+        run: node scripts/validate-round20-static.mjs
+
+      - name: Run round 21 fixtures
+        run: node scripts/run-round21-fixtures.mjs
+
+      - name: Validate round 21
+        run: node scripts/validate-round21-static.mjs
+
+      - name: Run round 22 fixtures
+        run: node scripts/run-round22-fixtures.mjs
+
+      - name: Validate round 22
+        run: node scripts/validate-round22-static.mjs
+
+      - name: Run round 23 fixtures
+        run: node scripts/run-round23-fixtures.mjs
+
+      - name: Validate round 23
+        run: node scripts/validate-round23-static.mjs
+
+      - name: Run round 24 fixtures
+        run: node scripts/run-round24-fixtures.mjs
+
+      - name: Validate round 24
+        run: node scripts/validate-round24-static.mjs
+
+      - name: Run round 25 fixtures
+        run: node scripts/run-round25-fixtures.mjs
+
+      - name: Validate round 25
+        run: node scripts/validate-round25-static.mjs
+
+      - name: Run round 26 fixtures
+        run: node scripts/run-round26-fixtures.mjs
+
+      - name: Validate round 26
+        run: node scripts/validate-round26-static.mjs
+
+      - name: Run round 27 fixtures
+        run: node scripts/run-round27-fixtures.mjs
+
+      - name: Validate round 27
+        run: node scripts/validate-round27-static.mjs
+
+      - name: Run round 28 fixtures
+        run: node scripts/run-round28-fixtures.mjs
+
+      - name: Validate round 28
+        run: node scripts/validate-round28-static.mjs
+
+      - name: Run round 29 fixtures
+        run: node scripts/run-round29-fixtures.mjs
+
+      - name: Validate round 29
+        run: node scripts/validate-round29-static.mjs
+
+      - name: Validate self-hosted CI contract
+        run: node scripts/validate-self-hosted-ci.mjs
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build full extension
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: should-be-ignored.apps.googleusercontent.com
+        run: npm run build
+
+      - name: Build blocker-only extension
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: should-be-ignored.apps.googleusercontent.com
+        run: npm run build:blocker-only
+
+      - name: Validate Google-enabled build
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: ci-validation.apps.googleusercontent.com
+        run: npm run build:google
+
+      - name: Clean project workspace
+        if: always()
+        run: node scripts/clean-ci.mjs
