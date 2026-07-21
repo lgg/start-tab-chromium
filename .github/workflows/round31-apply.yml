@@ -41,6 +41,7 @@ jobs:
       - name: Reset only Round 31 patch targets
         run: |
           git restore --source=HEAD --staged --worktree -- src/lib/blocklist.ts src/lib/chrome-sync.ts package.json scripts/validate-self-hosted-ci.mjs scripts/validate-round6-static.mjs scripts/round6-fixtures.ts scripts/validate-round13-static.mjs scripts/round24-fixtures.ts scripts/round25-fixtures.ts scripts/round26-fixtures.ts scripts/round27-fixtures.ts scripts/round28-fixtures.ts scripts/apply-round31.mjs scripts/apply-round31-followup.mjs
+          if (Test-Path -LiteralPath '.round31-apply-error.txt') { Remove-Item -LiteralPath '.round31-apply-error.txt' -Force }
 
       - name: Detect applied Round 31 stages
         run: |
@@ -70,7 +71,18 @@ jobs:
 
       - name: Apply exact Round 31 follow-up
         if: env.ROUND31_FOLLOWUP_APPLIED != 'true'
-        run: node scripts/apply-round31-followup.mjs
+        run: |
+          node scripts/apply-round31-followup.mjs *>&1 | Tee-Object -FilePath '.round31-apply-error.txt'
+          $exitCode = $LASTEXITCODE
+          if ($exitCode -ne 0) {
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .round31-apply-error.txt
+            git commit -m "Capture Round 31 applicator failure"
+            git push origin HEAD:codex/post-round30-deep-audit-20260721
+            exit $exitCode
+          }
+          Remove-Item -LiteralPath '.round31-apply-error.txt' -Force
 
       - name: Validate and stage Round 31 source patch
         if: env.ROUND31_ALREADY_APPLIED != 'true' || env.ROUND31_FOLLOWUP_APPLIED != 'true'
