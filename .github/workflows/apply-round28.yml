@@ -37,3 +37,5 @@ jobs:
             git commit -m "Apply Round 28 production hardening"
             git push origin HEAD:codex/post-round27-deep-audit-20260721
           }
+
+# Separate trigger commit: the workflow must already exist before GitHub can run it.
