@@ -38,21 +38,40 @@ jobs:
           architecture: x64
           package-manager-cache: false
 
+      - name: Reset only Round 30 patch targets
+        run: |
+          git restore --source=HEAD --staged --worktree -- src/lib/blocklist.ts src/lib/google-integration.ts scripts/round29-fixtures.ts scripts/validate-round29-static.mjs package.json .github/workflows/ci.yml scripts/validate-self-hosted-ci.mjs scripts/apply-round30.mjs scripts/fix-round30-applicator.mjs
+
+      - name: Detect an already applied patch
+        run: |
+          $source = Get-Content -LiteralPath 'src/lib/blocklist.ts' -Raw
+          $applied = $source.Contains('function assertDynamicRuleCapacity(')
+          "ROUND30_ALREADY_APPLIED=$($applied.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Repair and validate exact applicator
+        if: env.ROUND30_ALREADY_APPLIED != 'true'
         run: |
           node scripts/fix-round30-applicator.mjs
           node --check scripts/apply-round30.mjs
 
       - name: Apply exact Round 30 patch
+        if: env.ROUND30_ALREADY_APPLIED != 'true'
         run: node scripts/apply-round30.mjs
 
-      - name: Commit final Round 30 tree
+      - name: Validate and stage Round 30 patch
+        if: env.ROUND30_ALREADY_APPLIED != 'true'
         run: |
-          $ErrorActionPreference = 'Stop'
           git diff --check
+          git add src/lib/blocklist.ts src/lib/google-integration.ts scripts/round29-fixtures.ts scripts/validate-round29-static.mjs package.json .github/workflows/ci.yml scripts/validate-self-hosted-ci.mjs
+          git diff --cached --stat
+
+      - name: Commit Round 30 patch
+        if: env.ROUND30_ALREADY_APPLIED != 'true'
+        run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/lib/blocklist.ts src/lib/google-integration.ts scripts/round29-fixtures.ts scripts/validate-round29-static.mjs package.json .github/workflows/ci.yml scripts/validate-self-hosted-ci.mjs
-          git rm scripts/apply-round30.mjs scripts/fix-round30-applicator.mjs .github/workflows/round30-apply.yml
           git commit -m "Apply Round 30 audit hardening"
-          git push origin HEAD:codex/post-round29-deep-audit-20260721
+
+      - name: Push Round 30 patch
+        if: env.ROUND30_ALREADY_APPLIED != 'true'
+        run: git push origin HEAD:codex/post-round29-deep-audit-20260721
