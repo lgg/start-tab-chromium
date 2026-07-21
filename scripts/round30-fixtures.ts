@@ -103,21 +103,6 @@ function foreignRedirectRule(id: number, host = "foreign.example"): chrome.decla
   };
 }
 
-function legacyBlocklistRule(id: number, host: string): chrome.declarativeNetRequest.Rule {
-  return {
-    id,
-    priority: host.split(".").length,
-    action: {
-      type: chrome.declarativeNetRequest.RuleActionType.REDIRECT,
-      redirect: { url: `chrome-extension://round30/blocked.html?site=${encodeURIComponent(host)}` },
-    },
-    condition: {
-      requestDomains: [host],
-      resourceTypes: [chrome.declarativeNetRequest.ResourceType.MAIN_FRAME],
-    },
-  };
-}
-
 // A different feature is free to use low dynamic-rule IDs. Round 29 rejected
 // this safe coexistence case and left the user's blocklist unenforced.
 resetState();
@@ -130,27 +115,28 @@ dynamicRules = [lowIdForeignRule];
 await blocklist.syncRules();
 assert.deepEqual(dynamicRules.find((rule) => rule.id === lowIdForeignRule.id), lowIdForeignRule,
   "Low-ID foreign rules must survive blocklist synchronization");
-const namespacedRule = dynamicRules.find((rule) => rule.id === blocklist.BLOCKLIST_RULE_ID_BASE);
-assert.ok(namespacedRule?.action.redirect?.url?.includes("blocked.html?site=example.com"),
-  "A low-ID foreign rule must not prevent installation of the blocklist rule");
+assert.ok(dynamicRules.some((rule) => rule.id === 2
+  && rule.action.redirect?.url?.includes("blocked.html?site=example.com")),
+"A low-ID foreign rule must not prevent installation of the blocklist rule");
 
-// Exact legacy rules from pre-Round-30 versions must be migrated out of the low
-// ID range while unrelated low-ID rules remain untouched.
+// Allocation must skip every occupied foreign ID deterministically without
+// renumbering the ordinary no-collision case exercised by historical fixtures.
 resetState();
 storage = {
-  blockedSites: ["example.com"],
+  blockedSites: ["a.example", "b.example"],
   startTabDataRevision: { version: 1, updatedAt: 2 },
 };
-const legacyRule = legacyBlocklistRule(1, "example.com");
-const unrelatedLowIdRule = foreignRedirectRule(2);
-dynamicRules = [legacyRule, unrelatedLowIdRule];
+const foreignOne = foreignRedirectRule(1, "one.foreign");
+const foreignThree = foreignRedirectRule(3, "three.foreign");
+dynamicRules = [foreignOne, foreignThree];
 await blocklist.syncRules();
-assert.equal(dynamicRules.some((rule) => rule.id === legacyRule.id), false,
-  "Legacy low-ID blocklist rules must be removed during namespace migration");
-assert.deepEqual(dynamicRules.find((rule) => rule.id === unrelatedLowIdRule.id), unrelatedLowIdRule,
-  "Namespace migration must preserve unrelated low-ID dynamic rules");
-assert.ok(dynamicRules.some((rule) => rule.id === blocklist.BLOCKLIST_RULE_ID_BASE),
-  "Namespace migration must install the equivalent namespaced rule");
+assert.deepEqual(dynamicRules.filter((rule) => rule.id === 1 || rule.id === 3), [foreignOne, foreignThree],
+  "Sparse foreign IDs must remain byte-for-byte unchanged");
+assert.deepEqual(
+  dynamicRules.filter((rule) => rule.action.redirect?.url?.includes("blocked.html?site=")).map((rule) => rule.id),
+  [2, 4],
+  "Blocklist rule allocation must skip every occupied foreign ID deterministically",
+);
 
 // Chrome's unsafe dynamic-rule quota is shared by every feature in this
 // extension. Capacity failure must be detected before the atomic API call.
