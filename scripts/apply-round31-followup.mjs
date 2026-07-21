@@ -49,8 +49,8 @@ await transformIfNeeded("src/lib/blocklist.ts", "const legacyRedirectUrl = chrom
   const end = start < 0 ? -1 : source.indexOf("  return null;", start);
   if (start < 0 || end < 0) return source;
   const replacement = `  const owners = url.searchParams.getAll("owner");
-  const legacyRedirectUrl = chrome.runtime.getURL(\`${BLOCKED_PAGE}?site=\${encodeURIComponent(site)}\`);
-  const currentRedirectUrl = chrome.runtime.getURL(\`${BLOCKED_PAGE}?site=\${encodeURIComponent(site)}&owner=\${BLOCKLIST_RULE_OWNER_VALUE}\`);
+  const legacyRedirectUrl = chrome.runtime.getURL(\`\${BLOCKED_PAGE}?site=\${encodeURIComponent(site)}\`);
+  const currentRedirectUrl = chrome.runtime.getURL(\`\${BLOCKED_PAGE}?site=\${encodeURIComponent(site)}&owner=\${BLOCKLIST_RULE_OWNER_VALUE}\`);
   if (parameterCount === 1
     && owners.length === 0
     && rule.id >= 1
