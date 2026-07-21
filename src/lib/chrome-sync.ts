@@ -34,7 +34,7 @@ export { DATA_REVISION_KEY, markStartTabDataChanged };
 
 function chunkKey(index: number): string { return `${CHUNK_PREFIX}${index}`; }
 export function completeChromeSyncPayload(meta: SyncMeta, chunks: readonly string[]): Record<string, unknown> {
-  if (chunks.length < 1 || chunks.length > MAX_SYNC_CHUNKS) throw new Error("Invalid Browser Sync chunk frame");
+  if (chunks.length < 1 || chunks.length > MAX_SYNC_CHUNKS || meta.chunks !== chunks.length) throw new Error("Invalid Browser Sync chunk frame");
   const payload: Record<string, unknown> = { [META_KEY]: meta };
   for (let index = 0; index < MAX_SYNC_CHUNKS; index += 1) {
     payload[chunkKey(index)] = chunks[index] ?? "";

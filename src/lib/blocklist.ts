@@ -362,11 +362,22 @@ function parseBlocklistDynamicRule(rule: chrome.declarativeNetRequest.Rule): Par
     return null;
   }
   const blockedUrl = new URL(chrome.runtime.getURL(BLOCKED_PAGE));
-  if (url.origin !== blockedUrl.origin || url.pathname !== blockedUrl.pathname || url.hash) return null;
+  if (url.protocol !== blockedUrl.protocol || url.host !== blockedUrl.host || url.pathname !== blockedUrl.pathname || url.hash) return null;
   const siteValues = url.searchParams.getAll("site");
   if (siteValues.length !== 1) return null;
   const site = normalizeStoredHost(siteValues[0] ?? "");
   if (!site) return null;
+
+  const actionKeys = Object.keys(rule.action).sort();
+  const redirectKeys = rule.action.redirect ? Object.keys(rule.action.redirect).sort() : [];
+  if (actionKeys.length !== 2
+    || actionKeys[0] !== "redirect"
+    || actionKeys[1] !== "type"
+    || redirectKeys.length !== 1
+    || redirectKeys[0] !== "url"
+    || rule.priority !== rulePriorityForHost(site)) {
+    return null;
+  }
 
   const requestDomains = rule.condition.requestDomains;
   const resourceTypes = rule.condition.resourceTypes;
@@ -384,7 +395,7 @@ function parseBlocklistDynamicRule(rule: chrome.declarativeNetRequest.Rule): Par
   let parameterCount = 0;
   url.searchParams.forEach(() => { parameterCount += 1; });
   const owners = url.searchParams.getAll("owner");
-  if (parameterCount === 1 && owners.length === 0) return { site, legacy: true };
+  if (parameterCount === 1 && owners.length === 0 && rule.id >= 1 && rule.id <= MAX_BLOCKED_SITES) return { site, legacy: true };
   if (parameterCount === 2 && owners.length === 1 && owners[0] === BLOCKLIST_RULE_OWNER_VALUE) {
     return { site, legacy: false };
   }
