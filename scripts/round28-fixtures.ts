@@ -12,6 +12,7 @@ const alarms = new Map<string, AlarmState>();
 const clearAttempts: string[] = [];
 const createAttempts: string[] = [];
 const clearCounts = new Map<string, number>();
+const alarmEvents: string[] = [];
 const failingClearNames = new Set<string>();
 const failingCreateNames = new Set<string>();
 let delayedFirstClearName: string | null = null;
@@ -86,17 +87,26 @@ const chromeMock = {
       if (delayedFirstClearName === name && count === 1) {
         await new Promise((resolve) => setTimeout(resolve, 60));
       }
-      if (failingClearNames.has(name)) throw new Error(`simulated clear failure for ${name}`);
-      return alarms.delete(name);
+      if (failingClearNames.has(name)) {
+        alarmEvents.push(`clear-failed:${name}`);
+        throw new Error(`simulated clear failure for ${name}`);
+      }
+      const changed = alarms.delete(name);
+      alarmEvents.push(`clear-complete:${name}`);
+      return changed;
     },
     create: async (name: string, info: chrome.alarms.AlarmCreateInfo) => {
       createAttempts.push(name);
-      if (failingCreateNames.has(name)) throw new Error(`simulated create failure for ${name}`);
+      if (failingCreateNames.has(name)) {
+        alarmEvents.push(`create-failed:${name}`);
+        throw new Error(`simulated create failure for ${name}`);
+      }
       alarms.set(name, {
         name,
         scheduledTime: typeof info.when === "number" ? info.when : Date.now(),
         ...(typeof info.periodInMinutes === "number" ? { periodInMinutes: info.periodInMinutes } : {}),
       });
+      alarmEvents.push(`create-complete:${name}`);
     },
   },
 } as unknown as typeof chrome;
@@ -111,6 +121,7 @@ function resetState(): void {
   alarms.clear();
   clearAttempts.length = 0;
   createAttempts.length = 0;
+  alarmEvents.length = 0;
   clearCounts.clear();
   failingClearNames.clear();
   failingCreateNames.clear();
@@ -222,8 +233,10 @@ await assert.rejects(
   "Failed alarm cleanup must enter rollback only after every primary clear settles",
 );
 await new Promise((resolve) => setTimeout(resolve, 90));
-assert.ok((clearCounts.get(raceAlarmB) ?? 0) >= 2,
-  "The delayed alarm must be cleared by the primary operation and again by exact rollback");
+const delayedClearCompletedAt = alarmEvents.indexOf(`clear-complete:${raceAlarmB}`);
+const delayedAlarmRecreatedAt = alarmEvents.lastIndexOf(`create-complete:${raceAlarmB}`);
+assert.ok(delayedClearCompletedAt >= 0 && delayedAlarmRecreatedAt > delayedClearCompletedAt,
+  "Rollback must recreate the delayed alarm only after its primary clear has settled");
 assert.ok(alarms.has(raceAlarmA) && alarms.has(raceAlarmB),
   "No late primary clear may delete alarms recreated by rollback");
 
