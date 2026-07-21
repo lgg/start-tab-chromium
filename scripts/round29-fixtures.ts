@@ -137,8 +137,8 @@ assert.deepEqual(dynamicRules.find((rule) => rule.id === foreignRule.id), foreig
 assert.ok(dynamicRules.some((rule) => rule.action.redirect?.url?.includes("blocked.html?site=example.com")),
   "Blocklist synchronization must still install its owned redirect rule");
 
-// A foreign rule that occupies a blocklist rule ID must cause a safe failure,
-// never silent deletion or replacement of the foreign rule.
+// A low-ID foreign rule must remain untouched while the blocklist allocates a
+// different free ID and still enforces the requested site.
 resetState();
 storage = {
   blockedSites: ["example.com"],
@@ -146,12 +146,12 @@ storage = {
 };
 const collidingRule = foreignRedirectRule(1);
 dynamicRules = [collidingRule];
-await assert.rejects(
-  () => blocklist.syncRules(),
-  /conflicts with a dynamic rule owned by another Start Tab feature/,
-  "DNR ownership collisions must fail before any foreign rule is removed",
-);
-assert.deepEqual(dynamicRules, [collidingRule], "A DNR ownership collision must leave the complete rule set untouched");
+await blocklist.syncRules();
+assert.deepEqual(dynamicRules.find((rule) => rule.id === collidingRule.id), collidingRule,
+  "Low-ID foreign rules must remain untouched during blocklist synchronization");
+assert.ok(dynamicRules.some((rule) => rule.id !== collidingRule.id
+  && rule.action.redirect?.url?.includes("blocked.html?site=example.com")),
+"Low-ID foreign rules must not block blocklist synchronization");
 
 // Instance deletion must attempt alarm restoration even when storage rollback
 // itself fails. This is a separate path from the reset transactions covered by
