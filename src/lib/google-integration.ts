@@ -119,6 +119,7 @@ export async function listCalendarEvents(
   const normalizedQuery = query.trim();
   const titleQuery = normalizedQuery.toLocaleLowerCase();
   const events: GoogleCalendarEvent[] = [];
+  const timeMin = new Date().toISOString();
   const seenPageTokens = new Set<string>();
   let pageToken = "";
   let pagesRead = 0;
@@ -127,7 +128,7 @@ export async function listCalendarEvents(
     const url = new URL(GOOGLE_CALENDAR_EVENTS_URL.replace("{calendarId}", encodeURIComponent(normalizedCalendarId(calendarId))));
     url.searchParams.set("singleEvents", "true");
     url.searchParams.set("orderBy", "startTime");
-    url.searchParams.set("timeMin", new Date().toISOString());
+    url.searchParams.set("timeMin", timeMin);
     url.searchParams.set("maxResults", String(normalizedQuery ? CALENDAR_QUERY_PAGE_SIZE : limit));
     if (normalizedQuery) url.searchParams.set("q", normalizedQuery);
     if (pageToken) url.searchParams.set("pageToken", pageToken);

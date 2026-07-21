@@ -326,15 +326,41 @@ function dynamicRulesEqual(
   return JSON.stringify(normalized(actual)) === JSON.stringify(normalized(expected));
 }
 
+function isBlocklistDynamicRule(rule: chrome.declarativeNetRequest.Rule): boolean {
+  const redirectUrl = rule.action.redirect?.url;
+  return rule.action.type === chrome.declarativeNetRequest.RuleActionType.REDIRECT
+    && typeof redirectUrl === "string"
+    && redirectUrl.startsWith(chrome.runtime.getURL(BLOCKED_PAGE) + "?site=");
+}
+
+function blocklistDynamicRules(
+  rules: readonly chrome.declarativeNetRequest.Rule[],
+): chrome.declarativeNetRequest.Rule[] {
+  return rules.filter(isBlocklistDynamicRule);
+}
+
 export async function readDynamicRulesSnapshot(): Promise<chrome.declarativeNetRequest.Rule[]> {
-  return structuredClone(await chrome.declarativeNetRequest.getDynamicRules());
+  const rules = await chrome.declarativeNetRequest.getDynamicRules();
+  return structuredClone(blocklistDynamicRules(rules));
 }
 
 async function replaceDynamicRulesExact(
   rules: readonly chrome.declarativeNetRequest.Rule[],
-  existing?: readonly chrome.declarativeNetRequest.Rule[],
+  _existing?: readonly chrome.declarativeNetRequest.Rule[],
 ): Promise<void> {
-  const currentRules = existing ? structuredClone([...existing]) : await readDynamicRulesSnapshot();
+  const allCurrentRules = await chrome.declarativeNetRequest.getDynamicRules();
+  const currentRules = blocklistDynamicRules(allCurrentRules);
+  const foreignRuleIds = new Set(
+    allCurrentRules
+      .filter((rule) => !isBlocklistDynamicRule(rule))
+      .map((rule) => rule.id),
+  );
+  const collision = rules.find((rule) => foreignRuleIds.has(rule.id));
+  if (collision) {
+    throw new Error(
+      `Blocklist DNR rule ID ${collision.id} conflicts with a dynamic rule owned by another Start Tab feature`,
+    );
+  }
   await chrome.declarativeNetRequest.updateDynamicRules({
     removeRuleIds: currentRules.map((rule) => rule.id),
     addRules: structuredClone([...rules]),

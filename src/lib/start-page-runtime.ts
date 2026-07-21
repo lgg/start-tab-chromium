@@ -925,8 +925,10 @@ export async function deleteInstanceRuntime(instanceId: string): Promise<void> {
       await clearClockAlarm(instanceId);
     } catch (error) {
       try {
-        await restoreStorageKeysSnapshot(previous, RUNTIME_STORAGE_KEYS);
-        await restoreClockAlarmSnapshot(previousAlarms);
+        await runIndependentEffects([
+          () => restoreStorageKeysSnapshot(previous, RUNTIME_STORAGE_KEYS),
+          () => restoreClockAlarmSnapshot(previousAlarms),
+        ], "Instance runtime storage/alarm rollback was incomplete");
       } catch (rollbackError) {
         throw new AggregateError([error, rollbackError], "Failed to delete instance runtime and restore the previous state");
       }
