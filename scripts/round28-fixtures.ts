@@ -11,8 +11,10 @@ let dynamicRules: chrome.declarativeNetRequest.Rule[] = [];
 const alarms = new Map<string, AlarmState>();
 const clearAttempts: string[] = [];
 const createAttempts: string[] = [];
+const clearCounts = new Map<string, number>();
 const failingClearNames = new Set<string>();
 const failingCreateNames = new Set<string>();
+let delayedFirstClearName: string | null = null;
 let failSingleLegacyRemoval = false;
 let runtimeSnapshotSetAttempted = false;
 
@@ -79,6 +81,11 @@ const chromeMock = {
     getAll: async () => clone([...alarms.values()]),
     clear: async (name: string) => {
       clearAttempts.push(name);
+      const count = (clearCounts.get(name) ?? 0) + 1;
+      clearCounts.set(name, count);
+      if (delayedFirstClearName === name && count === 1) {
+        await new Promise((resolve) => setTimeout(resolve, 60));
+      }
       if (failingClearNames.has(name)) throw new Error(`simulated clear failure for ${name}`);
       return alarms.delete(name);
     },
@@ -104,8 +111,10 @@ function resetState(): void {
   alarms.clear();
   clearAttempts.length = 0;
   createAttempts.length = 0;
+  clearCounts.clear();
   failingClearNames.clear();
   failingCreateNames.clear();
+  delayedFirstClearName = null;
   failSingleLegacyRemoval = false;
   runtimeSnapshotSetAttempted = false;
 }
@@ -196,5 +205,26 @@ assert.equal(clearAttempts.includes(unrelated), false,
   "Alarm rollback must not touch unrelated extension alarms");
 assert.ok(alarms.has(unrelated), "Unrelated alarms must remain present");
 assert.ok(alarms.has(alarmC), "Later snapshot alarms must still be recreated");
+
+// Promise.all rejects before sibling clears settle. A delayed clear from the
+// failed primary operation must not run after rollback and delete a recreated
+// snapshot alarm.
+resetState();
+const raceAlarmA = `${runtime.CLOCK_ALARM_PREFIX}race-a:one`;
+const raceAlarmB = `${runtime.CLOCK_ALARM_PREFIX}race-b:two`;
+alarms.set(raceAlarmA, { name: raceAlarmA, scheduledTime: 1000 });
+alarms.set(raceAlarmB, { name: raceAlarmB, scheduledTime: 2000 });
+failingClearNames.add(raceAlarmA);
+delayedFirstClearName = raceAlarmB;
+await assert.rejects(
+  () => runtime.resetStartPageRuntimeState(),
+  /Failed to reset Start Tab runtime and restore the previous state/,
+  "Failed alarm cleanup must enter rollback only after every primary clear settles",
+);
+await new Promise((resolve) => setTimeout(resolve, 90));
+assert.ok((clearCounts.get(raceAlarmB) ?? 0) >= 2,
+  "The delayed alarm must be cleared by the primary operation and again by exact rollback");
+assert.ok(alarms.has(raceAlarmA) && alarms.has(raceAlarmB),
+  "No late primary clear may delete alarms recreated by rollback");
 
 console.log("Round 28 fixtures passed");
