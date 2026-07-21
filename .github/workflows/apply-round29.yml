@@ -1,0 +1,49 @@
+name: Apply Round 29 Patch
+
+on:
+  push:
+    branches:
+      - codex/post-round28-deep-audit-20260721
+    paths:
+      - scripts/round29-trigger.txt
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: start-tab-chromium-ci
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout exact audit branch
+        uses: actions/checkout@v6
+        with:
+          ref: codex/post-round28-deep-audit-20260721
+          clean: false
+          fetch-depth: 1
+          persist-credentials: true
+          show-progress: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          architecture: x64
+          package-manager-cache: false
+
+      - name: Apply exact Round 29 patch
+        run: node scripts/apply-round29.mjs
+
+      - name: Commit patched sources
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/blocklist.ts src/lib/start-page-runtime.ts src/lib/google-integration.ts scripts/round29-fixtures.ts package.json .github/workflows/ci.yml
+          if (-not (git diff --cached --quiet)) {
+            git commit -m "Apply Round 29 production hardening"
+            git push origin HEAD:codex/post-round28-deep-audit-20260721
+          }
