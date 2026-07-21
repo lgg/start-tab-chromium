@@ -18,10 +18,18 @@ assert.match(blocklist, /owner=\$\{BLOCKLIST_RULE_OWNER_VALUE\}/,
   "Generated redirect URLs must include the ownership marker");
 assert.match(blocklist, /function parseBlocklistDynamicRule\(rule: chrome\.declarativeNetRequest\.Rule\)/,
   "DNR ownership must be parsed from a bounded rule shape");
+assert.match(blocklist, /url\.protocol !== blockedUrl\.protocol \|\| url\.host !== blockedUrl\.host/,
+  "Opaque chrome-extension origins must be disambiguated by protocol and extension host");
+assert.doesNotMatch(blocklist, /url\.origin !== blockedUrl\.origin/,
+  "DNR ownership must not compare opaque chrome-extension URL origins");
+assert.match(blocklist, /actionKeys[\s\S]*redirectKeys[\s\S]*rule\.priority !== rulePriorityForHost\(site\)/,
+  "Ownership must require the exact generated action shape and priority");
 assert.match(blocklist, /conditionKeys[\s\S]*requestDomains[\s\S]*resourceTypes/,
   "Ownership must require the exact generated condition shape");
-assert.match(blocklist, /parameterCount === 1[\s\S]*parameterCount === 2/,
-  "Ownership must distinguish exact legacy and current query shapes");
+assert.match(blocklist, /parameterCount === 1[\s\S]*rule\.id >= 1[\s\S]*rule\.id <= MAX_BLOCKED_SITES/,
+  "Pre-marker ownership must remain bounded to the historical rule-ID range");
+assert.match(blocklist, /parameterCount === 2[\s\S]*BLOCKLIST_RULE_OWNER_VALUE/,
+  "Current ownership must require the explicit marker");
 assert.match(blocklist, /class DynamicRuleCollisionError extends Error/,
   "Transient foreign-ID collisions must have a dedicated retryable error");
 assert.match(blocklist, /const MAX_DNR_RECONCILE_ATTEMPTS = 4;/,
@@ -33,6 +41,8 @@ assert.match(blocklist, /error instanceof DynamicRuleCollisionError/,
 
 assert.match(chromeSync, /export function completeChromeSyncPayload\(/,
   "Browser Sync must expose one canonical complete-frame constructor");
+assert.match(chromeSync, /meta\.chunks !== chunks\.length/,
+  "Browser Sync metadata must agree with the committed frame length");
 assert.match(chromeSync, /for \(let index = 0; index < MAX_SYNC_CHUNKS; index \+= 1\)/,
   "The committed Browser Sync frame must include every canonical chunk slot");
 assert.match(chromeSync, /payload\[chunkKey\(index\)\] = chunks\[index\] \?\? "";/,
@@ -44,9 +54,12 @@ assert.doesNotMatch(chromeSync, /staleRemovedBeforeWrite|chrome\.storage\.sync\.
 
 for (const marker of [
   "A same-page foreign redirect must survive blocklist synchronization",
+  "A cross-extension same-path redirect must remain foreign despite an opaque URL origin",
   "Exact legacy blocklist rules must migrate to explicit ownership",
+  "A high-ID legacy lookalike must remain foreign to the bounded migration path",
   "A transient foreign-ID collision must be retried before the DNR update",
   "Every Browser Sync upload must contain all canonical chunk slots",
+  "Browser Sync metadata and frame chunk counts must agree",
 ]) {
   assert.ok(fixtures.includes(marker), `Round 31 fixture is missing: ${marker}`);
 }
