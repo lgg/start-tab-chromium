@@ -19,8 +19,8 @@ assert.match(blocklist, /site\.length > match\.length/,
   "The most-specific blocked suffix must win independently of storage order");
 assert.match(blocklist, /function rulePriorityForHost\(host: string\)/,
   "DNR generation must define an explicit domain-specificity priority");
-assert.match(blocklist, /Math\.max\(1, host\.split\("\."\)\.length - 1\)/,
-  "Every additional subdomain label must raise DNR priority");
+assert.match(blocklist, /return host\.split\("\."\)\.length;/,
+  "Every additional subdomain label, including one-label to two-label nesting, must raise DNR priority");
 assert.match(blocklist, /priority: rulePriorityForHost\(host\)/,
   "Every generated redirect rule must use its domain-specificity priority");
 assert.doesNotMatch(blocklist, /excludedRequestDomains/,
