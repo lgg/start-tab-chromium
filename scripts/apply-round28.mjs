@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 
 async function replaceOnce(path, before, after) {
-  const source = await readFile(path, "utf8");
+  const source = (await readFile(path, "utf8")).replace(/\r\n/g, "\n");
   const first = source.indexOf(before);
   if (first < 0) throw new Error(`Round 28 patch source not found in ${path}: ${before.slice(0, 100)}`);
   if (source.indexOf(before, first + before.length) >= 0) throw new Error(`Round 28 patch source is ambiguous in ${path}`);
