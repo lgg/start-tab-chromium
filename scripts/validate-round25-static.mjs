@@ -42,8 +42,8 @@ assert.ok(workflow.indexOf("uses: actions/setup-node@v6") < workflow.indexOf("ru
 
 assert.match(blocklist, /dynamicRulesEqual/,
   "Canonical blocklist no-ops must compare derived DNR state too");
-assert.match(blocklist, /if \(dynamicRulesEqual\(originalRules, expectedRules\)\) return previousSites;/,
-  "A no-op may return only when storage and DNR are both canonical");
+assert.match(blocklist, /if \(dynamicRulesEqual\(currentRules, expectedRules\)\) return previousSites;/,
+  "A no-op may return only when the current owned DNR rules are canonical");
 assert.match(blocklist, /await replaceDynamicRules\(nextSites, originalRules\);\s*return previousSites;/,
   "DNR drift must be repaired without rewriting storage or data revision");
 assert.match(blocklist, /restoreDynamicRulesSnapshot\(originalRules\)/,
