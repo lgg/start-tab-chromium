@@ -32,6 +32,14 @@ assert.match(runtime, /Clock alarm snapshot recreation was incomplete/,
   "Alarm snapshot restoration must attempt every snapshot recreation");
 assert.match(runtime, /Clock alarm snapshot restoration was incomplete/,
   "Alarm snapshot restoration must aggregate cleanup and recreation failures");
+assert.match(runtime, /async function clearClockAlarms\(\)[\s\S]*Clock alarm cleanup was incomplete/,
+  "Primary alarm cleanup must wait for every clear before rollback begins");
+assert.match(runtime, /Clock alarm reconciliation cleanup was incomplete/,
+  "Alarm reconciliation must wait for every obsolete-alarm clear");
+assert.match(runtime, /Clock instance alarm cleanup was incomplete/,
+  "Per-instance alarm cleanup must wait for every matching clear");
+assert.doesNotMatch(runtime, /Promise\.all\(alarms[\s\S]{0,220}chrome\.alarms\.clear/,
+  "Alarm cleanup must not reject while sibling clear promises continue in the background");
 
 for (const marker of [
   "A two-label child must have strictly higher DNR priority than its one-label parent",
@@ -40,6 +48,7 @@ for (const marker of [
   "Every existing Start Tab alarm must receive a clear attempt",
   "Every snapshot alarm must receive a create attempt even after an earlier failure",
   "Alarm rollback must not touch unrelated extension alarms",
+  "No late primary clear may delete alarms recreated by rollback",
 ]) {
   assert.ok(fixtures.includes(marker), `Round 28 fixture is missing: ${marker}`);
 }
