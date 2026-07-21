@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 # Intentionally no concurrency group: the dedicated single runner preserves every
 # queued job instead of replacing older pending runs.
@@ -45,10 +45,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: codex/post-round27-deep-audit-20260721
           clean: false
           fetch-depth: 1
-          persist-credentials: true
+          persist-credentials: false
           show-progress: false
 
       - name: Setup Node.js
@@ -57,26 +56,6 @@ jobs:
           node-version: 22
           architecture: x64
           package-manager-cache: false
-
-      - name: Apply exact Round 28 source patch
-        run: |
-          $source = Get-Content -LiteralPath 'src/lib/blocklist.ts' -Raw
-          if ($source.Contains('return Math.max(1, host.split(".").length - 1);')) {
-            node scripts/apply-round28.mjs
-          } elseif (-not $source.Contains('return host.split(".").length;')) {
-            throw 'Round 28 blocklist source is neither the verified old state nor the patched state'
-          }
-
-      - name: Commit Round 28 source patch
-        run: |
-          $ErrorActionPreference = 'Stop'
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/lib/blocklist.ts src/lib/start-page-runtime.ts scripts/round27-fixtures.ts scripts/validate-round27-static.mjs docs/audit-2026-07-19-round-27.md
-          if (-not (git diff --cached --quiet)) {
-            git commit -m "Apply Round 28 production hardening"
-            git push origin HEAD:codex/post-round27-deep-audit-20260721
-          }
 
       - name: Remove stale project outputs
         run: node scripts/clean-ci.mjs
