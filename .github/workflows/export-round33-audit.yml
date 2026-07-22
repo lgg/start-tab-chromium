@@ -32,9 +32,14 @@ jobs:
 
       - name: Apply exact audited source payload
         run: |
+          echo "payload bytes: $(wc -c < scripts/round33-payload.b64)"
+          sha256sum scripts/round33-payload.b64
+          test "$(wc -c < scripts/round33-payload.b64)" = "60684"
+          echo "b361ed14dc38124ccb6b79f55869878402d642b8c1aefd7a1678f64a5461e261  scripts/round33-payload.b64" | sha256sum --check --strict
           base64 --decode scripts/round33-payload.b64 > "$RUNNER_TEMP/round33-payload.tar.gz"
+          echo "13d6662349146e462225d79f4fee2286f1370bf9ad23986d637efcbe866d6e42  $RUNNER_TEMP/round33-payload.tar.gz" | sha256sum --check --strict
           tar -xzf "$RUNNER_TEMP/round33-payload.tar.gz" -C .
-          rm -f scripts/round33-payload.b64 .github/workflows/export-round33-audit.yml
+          rm -f scripts/round33-payload.b64 scripts/round33-payload-part-*.b64 .github/workflows/export-round33-audit.yml
           git diff --check
 
       - name: Install dependencies
