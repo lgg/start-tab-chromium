@@ -4,6 +4,8 @@ import { sendMessage } from "../lib/messages.js";
 import { withStorageLock } from "../lib/storage-lock.js";
 import {
   getStartPageRuntimeState,
+  isFutureRuntimeSchema,
+  normalizeRuntimeState,
   type StartPageRuntimeState,
 } from "../lib/start-page-runtime.js";
 import {
@@ -20,7 +22,7 @@ import { renderBlockContent, type BlockRenderContext } from "./block-renderers.j
 import { LayoutEditor } from "./layout-editor.js";
 import { RenderScheduler } from "./render-scheduler.js";
 import { recoverRuntimeMutation } from "./runtime-mutation-recovery.js";
-import { planStartPageStorageChange } from "./storage-change-plan.js";
+import { planStartPageStorageChange, sameRuntimeContent } from "./storage-change-plan.js";
 import { applyTheme } from "./theme-runtime.js";
 
 const ONBOARDING_KEY = "startPageOnboarding";
@@ -329,9 +331,18 @@ function handleStorageChange(changes: Record<string, chrome.storage.StorageChang
     return;
   }
   if (changes.startPageSettings || changes.startPageRuntimeState || changes.focusStats) {
+    let runtimeNeedsRefresh = Boolean(changes.startPageRuntimeState);
+    const runtimeChange = changes.startPageRuntimeState;
+    if (runtimeChange && !isFutureRuntimeSchema(runtimeChange.newValue)) {
+      const incomingRuntime = normalizeRuntimeState(runtimeChange.newValue, editor.settings);
+      if (sameRuntimeContent(runtime, incomingRuntime)) {
+        runtime = incomingRuntime;
+        runtimeNeedsRefresh = false;
+      }
+    }
     const plan = planStartPageStorageChange(editor.hasUnsavedChanges, {
       settings: Boolean(changes.startPageSettings),
-      runtime: Boolean(changes.startPageRuntimeState),
+      runtime: runtimeNeedsRefresh,
       focusStats: Boolean(changes.focusStats),
     });
     if (plan.announceIgnoredSettings) announce(i18n.t("externalSettingsChangeIgnored"));

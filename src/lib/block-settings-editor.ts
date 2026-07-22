@@ -141,6 +141,18 @@ function linksEditor(i18n: I18n, initial: readonly StartLink[]): { root: HTMLEle
   };
 }
 
+export function providerSelectionIndexAfterEdit(
+  selectedId: string,
+  selectedIndex: number,
+  providers: readonly SearchProvider[],
+): number {
+  if (providers.length === 0) return -1;
+  if (selectedIndex >= 0 && providers[selectedIndex]?.id === selectedId) return selectedIndex;
+  const matchingIndex = providers.findIndex((provider) => provider.id === selectedId);
+  if (matchingIndex >= 0) return matchingIndex;
+  return Math.min(Math.max(selectedIndex, 0), providers.length - 1);
+}
+
 function providersEditor(
   i18n: I18n,
   initial: readonly SearchProvider[],
@@ -235,13 +247,14 @@ function configFields(
     case "search": {
       const provider = selectInput(block.config.provider, block.config.providers.map((item) => [item.id, item.title]));
       const syncProviderOptions = (items: SearchProvider[]): void => {
-        const selected = provider.value;
+        const selectedId = provider.value;
+        const selectedIndex = provider.selectedIndex;
         provider.replaceChildren(...items.map((item) => {
           const option = element("option", "", item.title || item.id);
           option.value = item.id;
           return option;
         }));
-        provider.value = items.some((item) => item.id === selected) ? selected : (items[0]?.id ?? "");
+        provider.selectedIndex = providerSelectionIndexAfterEdit(selectedId, selectedIndex, items);
       };
       const providers = providersEditor(i18n, block.config.providers, syncProviderOptions);
       const placeholder = textInput(block.config.placeholder);

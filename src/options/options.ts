@@ -331,17 +331,30 @@ function renderGeneral(): HTMLElement {
 
     void runAction(async () => {
       const localeChanged = locale.value !== localePreference;
-      if (localeChanged) {
-        await setLocalePreference(locale.value as LocalePreference);
-        localePreference = locale.value as LocalePreference;
+      const settingsChanged = JSON.stringify(next) !== JSON.stringify(settings);
+      let settingsPersisted = false;
+      try {
+        if (settingsChanged) {
+          await sendMessage({
+            type: "replace-start-page-settings",
+            settings: next,
+            expectedSettingsUpdatedAt: settings.updatedAt,
+            expectedRuntimeUpdatedAt: runtime.updatedAt,
+          });
+          settingsPersisted = true;
+        }
+        if (localeChanged) {
+          await setLocalePreference(locale.value as LocalePreference);
+          localePreference = locale.value as LocalePreference;
+          location.reload();
+        }
+      } catch (error) {
+        if (settingsPersisted) {
+          await reloadState();
+          render();
+        }
+        throw error;
       }
-      await sendMessage({
-        type: "replace-start-page-settings",
-        settings: next,
-        expectedSettingsUpdatedAt: settings.updatedAt,
-        expectedRuntimeUpdatedAt: runtime.updatedAt,
-      });
-      if (localeChanged) location.reload();
     }, i18n.t("settingsSaved"));
   });
   item.body.append(form);

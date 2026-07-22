@@ -90,6 +90,22 @@ export function renderGoogleCalendar(
   });
 }
 
+export function validatedWeatherCoordinates(
+  latitude: unknown,
+  longitude: unknown,
+): { latitude: number; longitude: number } | null {
+  return typeof latitude === "number"
+    && Number.isFinite(latitude)
+    && latitude >= -90
+    && latitude <= 90
+    && typeof longitude === "number"
+    && Number.isFinite(longitude)
+    && longitude >= -180
+    && longitude <= 180
+    ? { latitude, longitude }
+    : null;
+}
+
 async function geocodeCity(endpoint: string, city: string): Promise<{ latitude: number; longitude: number } | null> {
   if (!city.trim()) return null;
   const url = new URL(endpoint);
@@ -101,9 +117,7 @@ async function geocodeCity(endpoint: string, city: string): Promise<{ latitude: 
   if (!response.ok) throw new Error(`Geocoding returned ${response.status}`);
   const payload = await response.json() as { results?: Array<{ latitude?: number; longitude?: number }> };
   const first = payload.results?.[0];
-  return typeof first?.latitude === "number" && typeof first.longitude === "number"
-    ? { latitude: first.latitude, longitude: first.longitude }
-    : null;
+  return validatedWeatherCoordinates(first?.latitude, first?.longitude);
 }
 
 async function weatherCoordinates(block: Extract<BlockInstance, { type: "weather" }>): Promise<{ latitude: number; longitude: number }> {
@@ -167,7 +181,8 @@ export function renderWeather(
   void cachedRequest(cacheKey, 10 * 60_000, () => fetchWeather(block)).then((weather) => {
     if (!attached(status)) return;
     const content = element("div", "weather");
-    if (block.config.city) content.append(element("p", "block-meta", block.config.city));
+    const city = block.config.city.trim();
+    if (city) content.append(element("p", "block-meta", city));
     if (block.config.displayMode === "current") {
       if (weather.currentTemperature === null) throw new Error("Missing current weather");
       content.append(element("p", "weather__current", context.i18n.t("weatherCurrent", { temp: Math.round(weather.currentTemperature), unit: weather.unit, summary: weatherSummary(weather.currentCode, context.i18n) })));
@@ -187,19 +202,39 @@ export function renderWeather(
   });
 }
 
-function webUrlItem(title: string | undefined, value: string | undefined): UrlItem[] {
-  const url = value ? safeWebUrl(value) : null;
-  return url ? [{ title: title || url, url }] : [];
+export function visibleWebUrlItems(
+  items: readonly { title?: string; url?: string }[],
+  maxResults = Number.MAX_SAFE_INTEGER,
+): UrlItem[] {
+  const result: UrlItem[] = [];
+  const limit = Number.isFinite(maxResults) ? Math.max(0, Math.floor(maxResults)) : 0;
+  if (limit === 0) return result;
+  for (const item of items) {
+    const url = item.url ? safeWebUrl(item.url) : null;
+    if (!url) continue;
+    result.push({ title: item.title?.trim() || url, url });
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
+export function recentHistorySearchLimit(maxResults: number): number {
+  const requested = Number.isFinite(maxResults) ? Math.max(0, Math.ceil(maxResults)) : 0;
+  return requested === 0 ? 0 : Math.min(500, Math.max(100, requested * 10));
 }
 
 async function recentHistory(maxResults: number): Promise<UrlItem[]> {
-  const items = await chrome.history.search({ text: "", maxResults, startTime: Date.now() - 30 * 24 * 60 * 60 * 1000 });
-  return items.flatMap((item) => webUrlItem(item.title, item.url));
+  const items = await chrome.history.search({
+    text: "",
+    maxResults: recentHistorySearchLimit(maxResults),
+    startTime: Date.now() - 30 * 24 * 60 * 60 * 1000,
+  });
+  return visibleWebUrlItems(items, maxResults);
 }
 
 async function browserPinnedTabs(): Promise<UrlItem[]> {
   const tabs = await chrome.tabs.query({ pinned: true });
-  return tabs.flatMap((tab) => webUrlItem(tab.title, tab.url));
+  return visibleWebUrlItems(tabs);
 }
 
 function urlList(items: readonly UrlItem[], i18n: I18n): HTMLElement {
