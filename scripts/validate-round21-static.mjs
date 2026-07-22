@@ -18,8 +18,9 @@ assert.match(chromeSync, /canonicalValue\(value\[key\], \[\.\.\.path, key\]\)/,
   "Canonicalization must carry the complete schema path");
 assert.match(chromeSync, /export function previousCanonicalBackupContent/,
   "Previously uploaded v3 checksums must remain verifiable after the canonicalization fix");
-assert.match(chromeSync, /previousChecksum[\s\S]*legacyChecksum[\s\S]*content checksum mismatch/,
-  "Remote restore must accept current, previous-v3, and legacy content checksums");
+assert.match(chromeSync,
+  /const rawBundle = value as BackupBundle;[\s\S]*previousCanonicalBackupContent\(rawBundle\)[\s\S]*legacyCanonicalBackupContent\(rawBundle\)[\s\S]*previousCanonicalBackupContent\(bundle\)[\s\S]*legacyCanonicalBackupContent\(bundle\)[\s\S]*acceptedChecksums\.includes\(meta\.contentChecksum\)/,
+  "Remote restore must accept validated raw and migrated current, previous-v3, and legacy content checksums");
 
 assert.match(google, /url\.searchParams\.set\("q", normalizedQuery\)/,
   "Calendar query must be sent to Google before applying the configured display limit");
