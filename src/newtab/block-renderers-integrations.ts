@@ -1,5 +1,6 @@
 import { backupFileName, exportBackup } from "../lib/backup.js";
 import { getFocusStats } from "../lib/focus-stats.js";
+import { safeWebUrl } from "../lib/start-page-validation-primitives.js";
 import { isGoogleIntegrationConfigured, listCalendarEvents, type GoogleCalendarEvent } from "../lib/google-integration.js";
 import type { I18n } from "../lib/i18n.js";
 import { sendMessage } from "../lib/messages.js";
@@ -105,10 +106,15 @@ async function geocodeCity(endpoint: string, city: string): Promise<{ latitude: 
     : null;
 }
 
+async function weatherCoordinates(block: Extract<BlockInstance, { type: "weather" }>): Promise<{ latitude: number; longitude: number }> {
+  if (!block.config.city.trim()) return { latitude: block.config.latitude, longitude: block.config.longitude };
+  const geocoded = await geocodeCity(block.config.geocodingEndpoint, block.config.city);
+  if (!geocoded) throw new Error("The configured weather city could not be geocoded");
+  return geocoded;
+}
+
 async function fetchWeather(block: Extract<BlockInstance, { type: "weather" }>): Promise<WeatherResult> {
-  const geocoded = await geocodeCity(block.config.geocodingEndpoint, block.config.city).catch(() => null);
-  const latitude = geocoded?.latitude ?? block.config.latitude;
-  const longitude = geocoded?.longitude ?? block.config.longitude;
+  const { latitude, longitude } = await weatherCoordinates(block);
   const url = new URL(block.config.forecastEndpoint);
   url.searchParams.set("latitude", String(latitude));
   url.searchParams.set("longitude", String(longitude));
@@ -181,14 +187,19 @@ export function renderWeather(
   });
 }
 
+function webUrlItem(title: string | undefined, value: string | undefined): UrlItem[] {
+  const url = value ? safeWebUrl(value) : null;
+  return url ? [{ title: title || url, url }] : [];
+}
+
 async function recentHistory(maxResults: number): Promise<UrlItem[]> {
   const items = await chrome.history.search({ text: "", maxResults, startTime: Date.now() - 30 * 24 * 60 * 60 * 1000 });
-  return items.flatMap((item) => item.url ? [{ title: item.title || item.url, url: item.url }] : []);
+  return items.flatMap((item) => webUrlItem(item.title, item.url));
 }
 
 async function browserPinnedTabs(): Promise<UrlItem[]> {
   const tabs = await chrome.tabs.query({ pinned: true });
-  return tabs.flatMap((tab) => tab.url ? [{ title: tab.title || tab.url, url: tab.url }] : []);
+  return tabs.flatMap((tab) => webUrlItem(tab.title, tab.url));
 }
 
 function urlList(items: readonly UrlItem[], i18n: I18n): HTMLElement {

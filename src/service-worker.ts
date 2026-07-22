@@ -22,6 +22,7 @@ import {
   resetFocusStats,
 } from "./lib/focus-stats.js";
 import { ownValue } from "./lib/dictionary.js";
+import { MAX_NOTE_LENGTH } from "./lib/platform-limits.js";
 import { runIndependentEffects } from "./lib/independent-effects.js";
 import { isMessage, type Ack, type ClockAction, type Message } from "./lib/messages.js";
 import { consumeNativeNewTabBypass, openNativeNewTab } from "./lib/native-new-tab.js";
@@ -198,7 +199,7 @@ async function updateRuntimeNote(instanceId: string, value: string, expectedValu
     if (current !== expectedValue) {
       throw new Error("Start Tab note changed in another extension context; latest data was kept");
     }
-    runtime.notes[instanceId] = value.slice(0, 200_000);
+    runtime.notes[instanceId] = value.slice(0, MAX_NOTE_LENGTH);
     return runtime;
   });
 }

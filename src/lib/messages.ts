@@ -5,6 +5,7 @@ import {
   MAX_CUSTOM_THEMES,
   MAX_LOCAL_TASKS_PER_INSTANCE,
   MAX_LOCAL_TASK_TITLE_LENGTH,
+  MAX_NOTE_LENGTH,
   MAX_START_PAGE_BLOCKS,
 } from "./platform-limits.js";
 import type { LocalTask } from "./start-page-types.js";
@@ -90,8 +91,8 @@ export function isMessage(value: unknown): value is Message {
       return isSafeIdentifier(value.instanceId) && isSafeIdentifier(value.token);
     case "runtime-note":
       return isSafeIdentifier(value.instanceId)
-        && typeof value.value === "string" && value.value.length <= 200_000
-        && typeof value.expectedValue === "string" && value.expectedValue.length <= 200_000;
+        && typeof value.value === "string" && value.value.length <= MAX_NOTE_LENGTH
+        && typeof value.expectedValue === "string" && value.expectedValue.length <= MAX_NOTE_LENGTH;
     case "runtime-tasks":
       return isSafeIdentifier(value.instanceId)
         && Array.isArray(value.tasks) && value.tasks.length <= MAX_LOCAL_TASKS_PER_INSTANCE && value.tasks.every(isLocalTask)
