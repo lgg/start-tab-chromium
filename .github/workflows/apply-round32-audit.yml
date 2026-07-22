@@ -64,18 +64,21 @@ jobs:
         run: npm run build:google
 
       - name: Create validated Git commit object
+        id: publish-commit
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.repository }}
         run: |
           rm -f .github/workflows/apply-round32-audit.yml
           git diff --check
-          python - <<'PY'
+          cat > /tmp/publish-round32.py <<'PY'
           import base64
           import json
           import os
           import pathlib
           import subprocess
+          import urllib.error
           import urllib.request
 
           repository = os.environ["GH_REPOSITORY"]
@@ -95,8 +98,12 @@ jobs:
                       "Content-Type": "application/json",
                   },
               )
-              with urllib.request.urlopen(request) as response:
-                  return json.load(response)
+              try:
+                  with urllib.request.urlopen(request) as response:
+                      return json.load(response)
+              except urllib.error.HTTPError as error:
+                  body = error.read().decode("utf-8", errors="replace")
+                  raise RuntimeError(f"{method} {endpoint} failed with HTTP {error.code}: {body}") from error
 
           base_tree = api("GET", f"/git/commits/{head}")["tree"]["sha"]
           status = subprocess.check_output(
@@ -123,6 +130,21 @@ jobs:
           pathlib.Path("round32-validated-commit.txt").write_text(commit["sha"] + "\n")
           print(json.dumps({"head": head, "tree": tree["sha"], "commit": commit["sha"], "entries": len(entries)}))
           PY
+          set -o pipefail
+          python /tmp/publish-round32.py 2>&1 | tee round32-publication-diagnostic.txt
+
+      - name: Upload publication diagnostic
+        if: steps.publish-commit.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: round32-publication-diagnostic
+          path: round32-publication-diagnostic.txt
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Enforce publication result
+        if: steps.publish-commit.outcome == 'failure'
+        run: exit 1
 
       - name: Upload validated commit reference
         uses: actions/upload-artifact@v4
