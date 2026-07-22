@@ -10,7 +10,7 @@ on:
       - reopened
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   apply:
@@ -23,7 +23,6 @@ jobs:
         with:
           ref: codex/post-round31-deep-audit-20260722
           fetch-depth: 0
-          persist-credentials: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -44,38 +43,10 @@ jobs:
         run: npm ci --include=dev --bin-links=true --no-audit --no-fund --loglevel=error
 
       - name: Run Round 32 corruption fixtures
-        id: round32-fixtures
-        continue-on-error: true
-        run: node scripts/run-round32-fixtures.mjs 2>&1 | tee /tmp/round32-fixtures.log
-
-      - name: Publish Round 32 fixture diagnostic
-        if: steps.round32-fixtures.outcome == 'failure'
-        run: |
-          git restore .
-          cp /tmp/round32-fixtures.log round32-diagnostic.txt
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add round32-diagnostic.txt
-          git commit -m "Record Round 32 fixture diagnostic"
-          git push origin HEAD:codex/post-round31-deep-audit-20260722
-          exit 1
+        run: node scripts/run-round32-fixtures.mjs
 
       - name: Validate Round 32 contracts
-        id: round32-contracts
-        continue-on-error: true
-        run: node scripts/validate-round32-static.mjs 2>&1 | tee /tmp/round32-contracts.log
-
-      - name: Publish Round 32 contract diagnostic
-        if: steps.round32-contracts.outcome == 'failure'
-        run: |
-          git restore .
-          cp /tmp/round32-contracts.log round32-diagnostic.txt
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add round32-diagnostic.txt
-          git commit -m "Record Round 32 contract diagnostic"
-          git push origin HEAD:codex/post-round31-deep-audit-20260722
-          exit 1
+        run: node scripts/validate-round32-static.mjs
 
       - name: Typecheck audited source
         run: npm run typecheck
@@ -91,10 +62,22 @@ jobs:
           GOOGLE_OAUTH_CLIENT_ID: round32-ci.apps.googleusercontent.com
         run: npm run build:google
 
-      - name: Publish audited source patch
+      - name: Package validated source files
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Repair corrupt matching Browser Sync snapshots"
-          git push origin HEAD:codex/round32-validated-output-20260722
+          tar -czf round32-validated-output.tar.gz \
+            src/lib/chrome-sync.ts \
+            package.json \
+            .github/workflows/ci.yml \
+            scripts/validate-self-hosted-ci.mjs \
+            scripts/round32-fixtures.ts \
+            scripts/run-round32-fixtures.mjs \
+            scripts/validate-round32-static.mjs \
+            docs/audit-2026-07-22-round-32.md
+
+      - name: Upload validated source package
+        uses: actions/upload-artifact@v4
+        with:
+          name: round32-validated-output
+          path: round32-validated-output.tar.gz
+          if-no-files-found: error
+          retention-days: 1
