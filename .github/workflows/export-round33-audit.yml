@@ -27,6 +27,8 @@ jobs:
         run: |
           git ls-files -z | tar --null --files-from=- -czf round33-source.tar.gz
           git ls-files > round33-file-list.txt
+          printf '{"head":"%s","tree":"%s"}\n' "$(git rev-parse HEAD)" "$(git rev-parse 'HEAD^{tree}')" > round33-base.json
+          cat round33-base.json
 
       - name: Upload source package
         uses: actions/upload-artifact@v4
@@ -35,5 +37,6 @@ jobs:
           path: |
             round33-source.tar.gz
             round33-file-list.txt
+            round33-base.json
           if-no-files-found: error
           retention-days: 1
