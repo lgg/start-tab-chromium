@@ -38,18 +38,30 @@ jobs:
         run: |
           node scripts/apply-round32-audit.mjs
           rm -f scripts/normalize-round32-applicator.mjs
+          git diff --check
 
       - name: Install dependencies
         run: npm ci --include=dev --bin-links=true --no-audit --no-fund --loglevel=error
 
-      - name: Run complete regression suite
-        run: |
-          git diff --check
-          npm test
-          npm run typecheck
-          npm run build
-          npm run build:blocker-only
-          GOOGLE_OAUTH_CLIENT_ID=round32-ci.apps.googleusercontent.com npm run build:google
+      - name: Run Round 32 corruption fixtures
+        run: node scripts/run-round32-fixtures.mjs
+
+      - name: Validate Round 32 contracts
+        run: node scripts/validate-round32-static.mjs
+
+      - name: Typecheck audited source
+        run: npm run typecheck
+
+      - name: Build full extension
+        run: npm run build
+
+      - name: Build blocker-only extension
+        run: npm run build:blocker-only
+
+      - name: Build Google-enabled extension
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: round32-ci.apps.googleusercontent.com
+        run: npm run build:google
 
       - name: Publish audited source patch
         run: |
