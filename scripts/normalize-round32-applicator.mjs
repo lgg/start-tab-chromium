@@ -32,7 +32,7 @@ async function fixtureChecksum(value: string): Promise<string> {
 }
 const repairedMeta = clone(syncStorage.startTabSyncMeta as Record<string, unknown>);
 const repairedChunkCount = Number(repairedMeta.chunks);
-const repairedJson = Array.from({ length: repairedChunkCount }, (_, index) => String(syncStorage[\`startTabSyncChunk\${index}\`] ?? "")).join("");
+const repairedJson = Array.from({ length: repairedChunkCount }, (_, index) => String(syncStorage["startTabSyncChunk" + index] ?? "")).join("");
 const repairedBundle = backupModule.migrateBackup(JSON.parse(repairedJson));
 const localBundleBeforeNoOp = await backupModule.exportBackup();
 console.log("Round 32 checksum diagnostic", JSON.stringify({
