@@ -223,6 +223,9 @@ function syncMetaEqual(left: SyncMeta, right: SyncMeta): boolean {
     && left.chunks === right.chunks
     && left.backupVersion === right.backupVersion;
 }
+function parsedMetaEqual(left: ParsedMeta | null, right: ParsedMeta): boolean {
+  return left !== null && left.legacy === right.legacy && syncMetaEqual(left.meta, right.meta);
+}
 function assertCompatibleSyncMeta(value: unknown, location: "remote" | "local"): void {
   if (isFutureSyncMeta(value)) {
     throw new Error(`The ${location} Start Tab sync metadata was created by a newer extension version`);
@@ -295,23 +298,31 @@ async function readRemoteBundle(parsed: ParsedMeta): Promise<BackupBundle> {
   try { value = JSON.parse(json); } catch { throw new Error("Chrome sync backup contains invalid JSON"); }
   const bundle = migrateBackup(value);
   if (!parsed.legacy) {
-    const currentChecksum = await checksum(canonicalBackupContent(bundle));
-    const previousChecksum = await checksum(previousCanonicalBackupContent(bundle));
-    const legacyChecksum = await checksum(legacyCanonicalBackupContent(bundle));
-    if (currentChecksum !== meta.contentChecksum
-      && previousChecksum !== meta.contentChecksum
-      && legacyChecksum !== meta.contentChecksum) {
+    const rawBundle = value as BackupBundle;
+    const acceptedChecksums = await Promise.all([
+      checksum(canonicalBackupContent(rawBundle)),
+      checksum(previousCanonicalBackupContent(rawBundle)),
+      checksum(legacyCanonicalBackupContent(rawBundle)),
+      checksum(canonicalBackupContent(bundle)),
+      checksum(previousCanonicalBackupContent(bundle)),
+      checksum(legacyCanonicalBackupContent(bundle)),
+    ]);
+    if (!acceptedChecksums.includes(meta.contentChecksum)) {
       throw new Error("Chrome sync backup content checksum mismatch");
     }
   }
   return bundle;
 }
-async function restoreParsedSnapshot(parsed: ParsedMeta): Promise<void> {
+async function assertRemoteMetaUnchanged(parsed: ParsedMeta, message: string): Promise<void> {
+  if (!parsedMetaEqual(await readRemoteMeta(), parsed)) throw new Error(message);
+}
+async function readVerifiedRemoteBundle(parsed: ParsedMeta): Promise<BackupBundle> {
   const bundle = await readRemoteBundle(parsed);
-  const currentRemote = await readRemoteMeta();
-  if (!currentRemote || currentRemote.legacy !== parsed.legacy || !syncMetaEqual(currentRemote.meta, parsed.meta)) {
-    throw new Error("Chrome sync backup changed concurrently while it was being restored");
-  }
+  await assertRemoteMetaUnchanged(parsed, "Chrome sync backup changed concurrently while it was being verified");
+  return bundle;
+}
+async function restoreParsedSnapshot(parsed: ParsedMeta): Promise<void> {
+  const bundle = await readVerifiedRemoteBundle(parsed);
   await importBackup(bundle, { dataRevisionAt: parsed.meta.contentUpdatedAt });
   if (parsed.legacy) await writeRemoteSnapshot(await prepareSnapshot());
   else await writeLocalMeta(parsed.meta);
@@ -332,7 +343,7 @@ async function syncChromeSyncBackupInTransaction(): Promise<ChromeSyncResult> {
   if (!remote) { await uploadChromeSyncBackupInTransaction(); return "uploaded"; }
   const localSnapshot = await prepareSnapshot();
   if (remote.legacy) {
-    const remoteBundle = await readRemoteBundle(remote);
+    const remoteBundle = await readVerifiedRemoteBundle(remote);
     const remoteChecksum = await checksum(canonicalBackupContent(remoteBundle));
     if (remoteChecksum === localSnapshot.contentChecksum) { await writeRemoteSnapshot(localSnapshot); return "unchanged"; }
     if (isPristineBackup(localSnapshot.bundle) || remote.meta.contentUpdatedAt > localSnapshot.contentUpdatedAt) {
@@ -340,7 +351,25 @@ async function syncChromeSyncBackupInTransaction(): Promise<ChromeSyncResult> {
     }
     await writeRemoteSnapshot(localSnapshot); return "uploaded";
   }
-  if (localSnapshot.contentChecksum === remote.meta.contentChecksum) { await writeLocalMeta(remote.meta); return "unchanged"; }
+  if (localSnapshot.contentChecksum === remote.meta.contentChecksum) {
+    try {
+      await readVerifiedRemoteBundle(remote);
+    } catch (error) {
+      let currentRemote: ParsedMeta | null;
+      try {
+        currentRemote = await readRemoteMeta();
+      } catch (metadataError) {
+        throw new AggregateError([error, metadataError], "Matching Chrome sync backup verification and metadata refresh both failed");
+      }
+      if (!parsedMetaEqual(currentRemote, remote)) {
+        throw new AggregateError([error], "Chrome sync backup changed concurrently while matching content was being verified");
+      }
+      await writeRemoteSnapshot(localSnapshot);
+      return "uploaded";
+    }
+    await writeLocalMeta(remote.meta);
+    return "unchanged";
+  }
   const local = await readLocalMeta();
   if (!local || local.legacy) {
     if (isPristineBackup(localSnapshot.bundle) || remoteWins(remote.meta, localSnapshot)) { await restoreParsedSnapshot(remote); return "restored"; }
@@ -350,7 +379,7 @@ async function syncChromeSyncBackupInTransaction(): Promise<ChromeSyncResult> {
   const remoteChanged = remote.meta.contentChecksum !== local.meta.contentChecksum;
   if (!localChanged && remoteChanged) { await restoreParsedSnapshot(remote); return "restored"; }
   if (localChanged && !remoteChanged) { await writeRemoteSnapshot(localSnapshot); return "uploaded"; }
-  if (!localChanged && !remoteChanged) { await writeLocalMeta(remote.meta); return "unchanged"; }
+
   if (remoteWins(remote.meta, localSnapshot)) { await restoreParsedSnapshot(remote); return "restored"; }
   await writeRemoteSnapshot(localSnapshot);
   return "uploaded";
