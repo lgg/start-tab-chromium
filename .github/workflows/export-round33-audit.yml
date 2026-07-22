@@ -1,4 +1,4 @@
-name: Export Round 33 audit source
+name: Validate Round 33 audit
 
 on:
   pull_request:
@@ -10,33 +10,124 @@ on:
       - reopened
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export:
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
-      - name: Checkout exact PR head
+      - name: Checkout audit branch
         uses: actions/checkout@v6
         with:
+          ref: audit/round33-full-project-20260722
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Package tracked repository source
-        run: |
-          git ls-files -z | tar --null --files-from=- -czf round33-source.tar.gz
-          git ls-files > round33-file-list.txt
-          printf '{"head":"%s","tree":"%s"}\n' "$(git rev-parse HEAD)" "$(git rev-parse 'HEAD^{tree}')" > round33-base.json
-          cat round33-base.json
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
 
-      - name: Upload source package
+      - name: Apply exact audited source payload
+        run: |
+          base64 --decode scripts/round33-payload.b64 > "$RUNNER_TEMP/round33-payload.tar.gz"
+          tar -xzf "$RUNNER_TEMP/round33-payload.tar.gz" -C .
+          rm -f scripts/round33-payload.b64 .github/workflows/export-round33-audit.yml
+          git diff --check
+
+      - name: Install dependencies
+        run: npm ci --include=dev --bin-links=true --no-audit --no-fund --loglevel=error
+
+      - name: Run Round 33 failure-injection fixtures
+        run: node scripts/run-round33-fixtures.mjs
+
+      - name: Validate Round 33 contracts
+        run: node scripts/validate-round33-static.mjs
+
+      - name: Typecheck audited source
+        run: npm run typecheck
+
+      - name: Build full extension
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: should-be-ignored.apps.googleusercontent.com
+        run: npm run build
+
+      - name: Build blocker-only extension
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: should-be-ignored.apps.googleusercontent.com
+        run: npm run build:blocker-only
+
+      - name: Build Google-enabled extension
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: round33-ci.apps.googleusercontent.com
+        run: npm run build:google
+
+      - name: Export validated Git blob manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+        run: |
+          git add -N .
+          git diff --check
+          python - <<'PY'
+          import base64
+          import json
+          import os
+          import pathlib
+          import subprocess
+          import urllib.error
+          import urllib.request
+
+          repository = os.environ["GH_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          base_tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip()
+
+          def api(endpoint, payload):
+              request = urllib.request.Request(
+                  f"https://api.github.com/repos/{repository}{endpoint}",
+                  data=json.dumps(payload).encode(),
+                  method="POST",
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                      "Content-Type": "application/json",
+                  },
+              )
+              try:
+                  with urllib.request.urlopen(request) as response:
+                      return json.load(response)
+              except urllib.error.HTTPError as error:
+                  body = error.read().decode("utf-8", errors="replace")
+                  raise RuntimeError(f"POST {endpoint} failed with HTTP {error.code}: {body}") from error
+
+          status = subprocess.check_output(
+              ["git", "diff", "--name-status", "--no-renames", "HEAD"],
+              text=True,
+          ).splitlines()
+          entries = []
+          for line in status:
+              state, path = line.split("\t", 1)
+              if state == "D":
+                  entries.append({"path": path, "mode": "100644", "type": "blob", "sha": None})
+                  continue
+              content = base64.b64encode(pathlib.Path(path).read_bytes()).decode()
+              blob = api("/git/blobs", {"content": content, "encoding": "base64"})
+              mode = "100755" if os.access(path, os.X_OK) else "100644"
+              entries.append({"path": path, "mode": mode, "type": "blob", "sha": blob["sha"]})
+
+          manifest = {"head": head, "base_tree": base_tree, "entries": entries}
+          pathlib.Path("round33-publication-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+          print(json.dumps({"head": head, "base_tree": base_tree, "entries": len(entries)}))
+          PY
+
+      - name: Upload validated publication manifest
         uses: actions/upload-artifact@v4
         with:
-          name: round33-source
-          path: |
-            round33-source.tar.gz
-            round33-file-list.txt
-            round33-base.json
+          name: round33-publication-manifest
+          path: round33-publication-manifest.json
           if-no-files-found: error
           retention-days: 1
