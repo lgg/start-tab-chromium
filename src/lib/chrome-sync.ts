@@ -280,6 +280,7 @@ async function writeRemoteSnapshot(snapshot: Awaited<ReturnType<typeof prepareSn
   if (!committed || committed.legacy || !syncMetaEqual(committed.meta, meta)) {
     throw new Error("Chrome sync backup changed concurrently before the upload commit was confirmed");
   }
+  await readVerifiedRemoteBundle(committed);
   await writeLocalMeta(meta);
   return meta;
 }

@@ -475,10 +475,27 @@ export function settingsWithLayoutPreset(current: StartPageSettings, presetId: L
     };
   });
   const next = cloneSettings(current);
+  next.layout.mode = "grid";
   next.layout.columns = preset.columns;
   next.layout.profile = preset.id;
   next.layout.blocks = blocks;
   return next;
+}
+
+export function layoutMatchesPreset(settings: StartPageSettings, presetId: LayoutPresetId): boolean {
+  const preset = LAYOUT_PRESETS.find((item) => item.id === presetId);
+  if (!preset || settings.layout.mode !== "grid" || settings.layout.columns !== preset.columns) return false;
+  if (settings.layout.blocks.length !== preset.blocks.length) return false;
+  return preset.blocks.every((spec, order) => {
+    const block = settings.layout.blocks[order];
+    if (!block) return false;
+    return block.type === spec.type
+      && block.column === spec.column
+      && block.row === spec.row
+      && block.width === spec.width
+      && block.height === spec.height
+      && block.enabled === (spec.enabled ?? true);
+  });
 }
 
 export async function setLayoutMode(mode: LayoutMode): Promise<StartPageSettings> {

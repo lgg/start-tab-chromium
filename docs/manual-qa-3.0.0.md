@@ -250,3 +250,15 @@ For each failed item capture:
 - [ ] Seed local storage above the supported block/task/blocklist capacities, then export; confirm export succeeds with a bounded recoverable snapshot instead of becoming unavailable.
 - [ ] From the same oversized local state, import a valid backup and confirm the valid backup applies while the pre-import recovery snapshot is retained at supported limits.
 - [ ] Import an externally supplied backup above any supported capacity and confirm rejection still happens before storage, DNR, revision, or alarm changes.
+
+## Round 36 regression checks
+
+- [ ] Select a preset from free layout and confirm Options switches the visible mode to Grid, restores the preset column count, and the saved layout visibly matches the preset.
+- [ ] After applying a preset, manually change mode or columns and confirm the preset selector/profile becomes Custom rather than retaining stale preset metadata.
+- [ ] Use the ordinary Open Start Tab action from Options and confirm it does not show the Split View picker merely because an opener tab exists.
+- [ ] Set an explicit Russian locale, disable Start Tab or open a real Split View context, and confirm the early gate appears in Russian before the module UI initializes.
+- [ ] In onboarding and the disabled/Split View gate, confirm keyboard focus remains inside the active dialog, the page behind it is inert, and removing one overlay does not unlock the page while another modal remains.
+- [ ] Delay the early gate decision and confirm onboarding never stacks over the disabled or Split View overlay.
+- [ ] Confirm every direct restore/import action asks for confirmation before replacing local data; cancel and verify storage remains unchanged.
+- [ ] Simulate Browser Sync metadata/chunk interleaving after upload and confirm the upload fails without advancing local sync metadata.
+- [ ] Force statistics loading to fail and confirm all Options navigation links and non-statistics sections remain usable, with a localized statistics fallback.

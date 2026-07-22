@@ -4,5 +4,11 @@
   },
   "settingsSections": {
     "message": "Settings sections"
+  },
+  "statisticsUnavailable": {
+    "message": "Statistics and migration data are temporarily unavailable. Other settings remain usable."
+  },
+  "restoreDataConfirm": {
+    "message": "Restore this backup and replace the current local Start Tab data? A recovery snapshot will be created first."
   }
 }

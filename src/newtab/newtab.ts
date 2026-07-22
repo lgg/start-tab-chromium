@@ -28,6 +28,7 @@ import { planStartPageStorageChange, sameRuntimeContent } from "./storage-change
 import { applyTheme } from "./theme-runtime.js";
 
 const ONBOARDING_KEY = "startPageOnboarding";
+const GATE_CHANGE_EVENT = "start-tab-gate-change";
 
 function requireElement<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -53,6 +54,12 @@ function button(text: string, className = "button"): HTMLButtonElement {
 }
 
 const background = requireElement<HTMLElement>("background");
+declare global {
+  interface Window {
+    startTabGateReady?: Promise<void>;
+  }
+}
+
 const page = requireElement<HTMLElement>("startPage");
 const grid = requireElement<HTMLElement>("grid");
 const toolbarHost = requireElement<HTMLElement>("editorToolbar");
@@ -68,6 +75,7 @@ let editor: LayoutEditor;
 let renderCleanups: Array<() => void> = [];
 let disposed = false;
 let runtimeMutationJob: Promise<void> = Promise.resolve();
+let onboardingOpening = false;
 
 function clearRenderCleanups(): void {
   for (const cleanup of renderCleanups.splice(0)) cleanup();
@@ -88,6 +96,37 @@ function reportUiError(error: unknown): void {
 
 function runUiTask(action: () => Promise<unknown>): void {
   void action().catch(reportUiError);
+}
+
+function syncStartPageInert(): void {
+  const modalActive = Boolean(document.getElementById("startTabGateOverlay") || document.getElementById("onboarding"));
+  page.toggleAttribute("inert", modalActive);
+}
+
+function focusableElements(container: HTMLElement): HTMLElement[] {
+  return [...container.querySelectorAll<HTMLElement>(
+    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  )].filter((node) => !node.hidden && node.getAttribute("aria-hidden") !== "true");
+}
+
+function trapModalFocus(event: KeyboardEvent, container: HTMLElement): void {
+  if (event.key !== "Tab") return;
+  const focusable = focusableElements(container);
+  if (focusable.length === 0) {
+    event.preventDefault();
+    container.focus();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (!first || !last) return;
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 function blockTitle(block: BlockInstance): string {
@@ -294,32 +333,46 @@ async function finishOnboarding(presetId: LayoutPresetId | null): Promise<void> 
     );
   });
   document.getElementById("onboarding")?.remove();
+  syncStartPageInert();
   queueRender();
 }
 
 async function showOnboarding(): Promise<void> {
-  if (await onboardingState()) return;
-  const overlay = element("div", "onboarding");
-  overlay.id = "onboarding";
-  const panel = element("section", "onboarding__panel");
-  panel.setAttribute("role", "dialog");
-  panel.setAttribute("aria-modal", "true");
-  panel.setAttribute("aria-labelledby", "onboarding-title");
-  const title = element("h1", "onboarding__title", i18n.t("onboardingTitle"));
-  title.id = "onboarding-title";
-  const text = element("p", "onboarding__text", i18n.t("onboardingText"));
-  const presets = element("div", "onboarding__presets");
-  for (const preset of LAYOUT_PRESETS) {
-    const item = button(i18n.t(preset.titleKey), "button button--secondary");
-    item.addEventListener("click", () => runUiTask(() => finishOnboarding(preset.id)));
-    presets.append(item);
+  if (onboardingOpening) return;
+  onboardingOpening = true;
+  try {
+    await window.startTabGateReady;
+    if (!savedSettings.startTab.enabled
+      || document.getElementById("startTabGateOverlay")
+      || document.getElementById("onboarding")
+      || await onboardingState()) return;
+    const overlay = element("div", "onboarding");
+    overlay.id = "onboarding";
+    const panel = element("section", "onboarding__panel");
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    panel.setAttribute("aria-labelledby", "onboarding-title");
+    panel.tabIndex = -1;
+    panel.addEventListener("keydown", (event) => trapModalFocus(event, panel));
+    const title = element("h1", "onboarding__title", i18n.t("onboardingTitle"));
+    title.id = "onboarding-title";
+    const text = element("p", "onboarding__text", i18n.t("onboardingText"));
+    const presets = element("div", "onboarding__presets");
+    for (const preset of LAYOUT_PRESETS) {
+      const item = button(i18n.t(preset.titleKey), "button button--secondary");
+      item.addEventListener("click", () => runUiTask(() => finishOnboarding(preset.id)));
+      presets.append(item);
+    }
+    const skip = button(i18n.t("onboardingSkip"), "button button--ghost");
+    skip.addEventListener("click", () => runUiTask(() => finishOnboarding(null)));
+    panel.append(title, text, presets, skip);
+    overlay.append(panel);
+    document.body.append(overlay);
+    syncStartPageInert();
+    (presets.querySelector("button") as HTMLButtonElement | null)?.focus();
+  } finally {
+    onboardingOpening = false;
   }
-  const skip = button(i18n.t("onboardingSkip"), "button button--ghost");
-  skip.addEventListener("click", () => runUiTask(() => finishOnboarding(null)));
-  panel.append(title, text, presets, skip);
-  overlay.append(panel);
-  document.body.append(overlay);
-  (presets.querySelector("button") as HTMLButtonElement | null)?.focus();
 }
 
 function handleStorageChange(changes: Record<string, chrome.storage.StorageChange>, areaName: string): void {
@@ -348,6 +401,13 @@ function handleStorageChange(changes: Record<string, chrome.storage.StorageChang
   }
 }
 
+function handleGateChange(): void {
+  runUiTask(async () => {
+    if (!document.getElementById("startTabGateOverlay") && !editor.hasUnsavedChanges) await refreshState();
+    await showOnboarding();
+  });
+}
+
 function handleResize(): void {
   queueRender();
 }
@@ -364,6 +424,7 @@ function dispose(): void {
   clearRenderCleanups();
   renderScheduler.dispose();
   chrome.storage.onChanged.removeListener(handleStorageChange);
+  window.removeEventListener(GATE_CHANGE_EVENT, handleGateChange);
   window.removeEventListener("resize", handleResize);
   window.removeEventListener("beforeunload", handleBeforeUnload);
 }
@@ -395,6 +456,7 @@ async function init(): Promise<void> {
   });
   settingsButton.addEventListener("click", () => runUiTask(() => chrome.runtime.openOptionsPage()));
   chrome.storage.onChanged.addListener(handleStorageChange);
+  window.addEventListener(GATE_CHANGE_EVENT, handleGateChange);
   window.addEventListener("resize", handleResize);
   window.addEventListener("beforeunload", handleBeforeUnload);
   window.addEventListener("pagehide", dispose, { once: true });
