@@ -30,16 +30,19 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Apply exact audited source payload
+      - name: Apply exact audited patch
+        shell: bash
         run: |
-          echo "payload bytes: $(wc -c < scripts/round33-payload.b64)"
-          sha256sum scripts/round33-payload.b64
-          test "$(wc -c < scripts/round33-payload.b64)" = "60684"
-          echo "b361ed14dc38124ccb6b79f55869878402d642b8c1aefd7a1678f64a5461e261  scripts/round33-payload.b64" | sha256sum --check --strict
-          base64 --decode scripts/round33-payload.b64 > "$RUNNER_TEMP/round33-payload.tar.gz"
-          echo "13d6662349146e462225d79f4fee2286f1370bf9ad23986d637efcbe866d6e42  $RUNNER_TEMP/round33-payload.tar.gz" | sha256sum --check --strict
-          tar -xzf "$RUNNER_TEMP/round33-payload.tar.gz" -C .
-          rm -f scripts/round33-payload.b64 scripts/round33-payload-part-*.b64 .github/workflows/export-round33-audit.yml
+          set -euo pipefail
+          cat scripts/r33-patch-00.b64 scripts/r33-patch-01.b64 > "$RUNNER_TEMP/r33-patch.b64"
+          test "$(wc -c < "$RUNNER_TEMP/r33-patch.b64")" = "10768"
+          echo "4656bbc0ff7eb42f4a66b62ca81741a0196a6b62c9a0ba9605fd10a4f68171c1  $RUNNER_TEMP/r33-patch.b64" | sha256sum --check --strict
+          base64 --decode "$RUNNER_TEMP/r33-patch.b64" > "$RUNNER_TEMP/r33.patch.gz"
+          echo "f9232f4f0003b9b36da61f3ef9b3a058147564c74fb867dbdc60930fd058a726  $RUNNER_TEMP/r33.patch.gz" | sha256sum --check --strict
+          gzip -dc "$RUNNER_TEMP/r33.patch.gz" > "$RUNNER_TEMP/r33.patch"
+          patch --batch --forward -p1 < "$RUNNER_TEMP/r33.patch"
+          rm -f .github/workflows/export-round33-audit.yml
+          rm -f scripts/round33-payload*.b64 scripts/r33-clean-*.b64 scripts/r33-patch-*.b64
           git diff --check
 
       - name: Install dependencies
