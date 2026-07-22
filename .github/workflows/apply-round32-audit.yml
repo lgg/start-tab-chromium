@@ -45,7 +45,9 @@ jobs:
       - name: Run Round 32 corruption fixtures
         id: round32-fixtures
         continue-on-error: true
-        run: node scripts/run-round32-fixtures.mjs 2>&1 | tee round32-fixture-diagnostic.txt
+        run: |
+          set -o pipefail
+          node scripts/run-round32-fixtures.mjs 2>&1 | tee round32-fixture-diagnostic.txt
 
       - name: Upload Round 32 fixture diagnostic
         if: steps.round32-fixtures.outcome == 'failure'
@@ -64,7 +66,27 @@ jobs:
         run: rm -f round32-fixture-diagnostic.txt
 
       - name: Validate Round 32 contracts
-        run: node scripts/validate-round32-static.mjs
+        id: round32-contracts
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          node scripts/validate-round32-static.mjs 2>&1 | tee round32-contract-diagnostic.txt
+
+      - name: Upload Round 32 contract diagnostic
+        if: steps.round32-contracts.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: round32-contract-diagnostic
+          path: round32-contract-diagnostic.txt
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Enforce Round 32 contract result
+        if: steps.round32-contracts.outcome == 'failure'
+        run: exit 1
+
+      - name: Remove contract log
+        run: rm -f round32-contract-diagnostic.txt
 
       - name: Typecheck audited source
         run: npm run typecheck
