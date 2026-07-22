@@ -1,9 +1,6 @@
 name: Apply Round 32 audit
 
 on:
-  push:
-    branches:
-      - codex/post-round31-deep-audit-20260722
   pull_request:
     branches:
       - master
