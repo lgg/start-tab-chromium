@@ -10,7 +10,7 @@ on:
       - reopened
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   apply:
@@ -44,50 +44,10 @@ jobs:
         run: npm ci --include=dev --bin-links=true --no-audit --no-fund --loglevel=error
 
       - name: Run Round 32 corruption fixtures
-        id: round32-fixtures
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          node scripts/run-round32-fixtures.mjs 2>&1 | tee round32-fixture-diagnostic.txt
-
-      - name: Upload Round 32 fixture diagnostic
-        if: steps.round32-fixtures.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: round32-fixture-diagnostic
-          path: round32-fixture-diagnostic.txt
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Enforce Round 32 fixture result
-        if: steps.round32-fixtures.outcome == 'failure'
-        run: exit 1
-
-      - name: Remove fixture log
-        run: rm -f round32-fixture-diagnostic.txt
+        run: node scripts/run-round32-fixtures.mjs
 
       - name: Validate Round 32 contracts
-        id: round32-contracts
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          node scripts/validate-round32-static.mjs 2>&1 | tee round32-contract-diagnostic.txt
-
-      - name: Upload Round 32 contract diagnostic
-        if: steps.round32-contracts.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: round32-contract-diagnostic
-          path: round32-contract-diagnostic.txt
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Enforce Round 32 contract result
-        if: steps.round32-contracts.outcome == 'failure'
-        run: exit 1
-
-      - name: Remove contract log
-        run: rm -f round32-contract-diagnostic.txt
+        run: node scripts/validate-round32-static.mjs
 
       - name: Typecheck audited source
         run: npm run typecheck
@@ -103,22 +63,71 @@ jobs:
           GOOGLE_OAUTH_CLIENT_ID: round32-ci.apps.googleusercontent.com
         run: npm run build:google
 
-      - name: Package validated source files
+      - name: Create validated Git commit object
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
         run: |
-          tar -czf round32-validated-output.tar.gz \
-            src/lib/chrome-sync.ts \
-            package.json \
-            .github/workflows/ci.yml \
-            scripts/validate-self-hosted-ci.mjs \
-            scripts/round32-fixtures.ts \
-            scripts/run-round32-fixtures.mjs \
-            scripts/validate-round32-static.mjs \
-            docs/audit-2026-07-22-round-32.md
+          rm -f .github/workflows/apply-round32-audit.yml
+          git diff --check
+          python - <<'PY'
+          import base64
+          import json
+          import os
+          import pathlib
+          import subprocess
+          import urllib.request
 
-      - name: Upload validated source package
+          repository = os.environ["GH_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+
+          def api(method, endpoint, payload=None):
+              data = None if payload is None else json.dumps(payload).encode()
+              request = urllib.request.Request(
+                  f"https://api.github.com/repos/{repository}{endpoint}",
+                  data=data,
+                  method=method,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                      "Content-Type": "application/json",
+                  },
+              )
+              with urllib.request.urlopen(request) as response:
+                  return json.load(response)
+
+          base_tree = api("GET", f"/git/commits/{head}")["tree"]["sha"]
+          status = subprocess.check_output(
+              ["git", "diff", "--name-status", "--no-renames", "HEAD"],
+              text=True,
+          ).splitlines()
+          entries = []
+          for line in status:
+              state, path = line.split("\t", 1)
+              if state == "D":
+                  entries.append({"path": path, "mode": "100644", "type": "blob", "sha": None})
+                  continue
+              content = base64.b64encode(pathlib.Path(path).read_bytes()).decode()
+              blob = api("POST", "/git/blobs", {"content": content, "encoding": "base64"})
+              mode = "100755" if os.access(path, os.X_OK) else "100644"
+              entries.append({"path": path, "mode": mode, "type": "blob", "sha": blob["sha"]})
+
+          tree = api("POST", "/git/trees", {"base_tree": base_tree, "tree": entries})
+          commit = api("POST", "/git/commits", {
+              "message": "Repair Browser Sync snapshot integrity",
+              "tree": tree["sha"],
+              "parents": [head],
+          })
+          pathlib.Path("round32-validated-commit.txt").write_text(commit["sha"] + "\n")
+          print(json.dumps({"head": head, "tree": tree["sha"], "commit": commit["sha"], "entries": len(entries)}))
+          PY
+
+      - name: Upload validated commit reference
         uses: actions/upload-artifact@v4
         with:
-          name: round32-validated-output
-          path: round32-validated-output.tar.gz
+          name: round32-validated-commit
+          path: round32-validated-commit.txt
           if-no-files-found: error
           retention-days: 1
