@@ -36,7 +36,8 @@ jobs:
       - name: Apply audited patch
         run: |
           node scripts/apply-round32-audit.mjs
-          rm -f scripts/normalize-round32-applicator.mjs
+          node scripts/finalize-round32-generated.mjs
+          rm -f scripts/normalize-round32-applicator.mjs scripts/finalize-round32-generated.mjs
           git diff --check
 
       - name: Install dependencies
