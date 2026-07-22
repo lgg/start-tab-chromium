@@ -60,6 +60,7 @@ import {
   hasBlockUserData,
   importCustomTheme,
   isSingletonBlockType,
+  layoutMatchesPreset,
   layoutReplacementRemovesUserData,
   selectTheme,
   settingsWithLayoutPreset,
@@ -158,6 +159,10 @@ async function readJsonFile(file: File): Promise<unknown> {
 function readNumber(input: HTMLInputElement, fallback: number): number {
   const parsed = Number(input.value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function confirmDataRestore(): boolean {
+  return window.confirm(i18n.t("restoreDataConfirm"));
 }
 
 function blockName(block: BlockInstance, i18n: I18n): string {
@@ -284,10 +289,28 @@ function renderGeneral(): HTMLElement {
   const showTitles = checkbox(settings.layout.showBlockTitles);
   const defaultMinutes = numberInput(settings.focusStats.defaultMinutesPerAvoidedVisit, 0, 1440, 1);
   const dedupeSeconds = numberInput(settings.focusStats.avoidedVisitDedupeSeconds, 1, 604800, 1);
+  const activePreset = LAYOUT_PRESETS.find((candidate) =>
+    candidate.id === settings.layout.profile && layoutMatchesPreset(settings, candidate.id));
   const preset = select<LayoutPresetId | "custom">(
-    LAYOUT_PRESETS.some((candidate) => candidate.id === settings.layout.profile) ? settings.layout.profile as LayoutPresetId : "custom",
+    activePreset?.id ?? "custom",
     [["custom", i18n.t("layoutPresetCustom")], ...LAYOUT_PRESETS.map((candidate) => [candidate.id, i18n.t(candidate.titleKey)] as [LayoutPresetId, string])],
   );
+  preset.addEventListener("change", () => {
+    if (preset.value === "custom") return;
+    const selected = LAYOUT_PRESETS.find((candidate) => candidate.id === preset.value);
+    if (!selected) return;
+    mode.value = "grid";
+    columns.value = String(selected.columns);
+  });
+  const markPresetCustomIfGeometryChanged = (): void => {
+    if (preset.value === "custom") return;
+    const selected = LAYOUT_PRESETS.find((candidate) => candidate.id === preset.value);
+    if (!selected || mode.value !== "grid" || readNumber(columns, selected.columns) !== selected.columns) {
+      preset.value = "custom";
+    }
+  };
+  mode.addEventListener("change", markPresetCustomIfGeometryChanged);
+  columns.addEventListener("input", markPresetCustomIfGeometryChanged);
 
   form.append(
     settingField(i18n.t("locale"), locale),
@@ -312,7 +335,7 @@ function renderGeneral(): HTMLElement {
     event.preventDefault();
     if (!form.reportValidity()) return;
     let next = cloneSettings(settings);
-    if (preset.value !== "custom" && preset.value !== settings.layout.profile) {
+    if (preset.value !== "custom" && !layoutMatchesPreset(settings, preset.value as LayoutPresetId)) {
       next = settingsWithLayoutPreset(next, preset.value as LayoutPresetId);
     }
     next.startTab.enabled = startTabPageAvailable ? startTabEnabled.checked : settings.startTab.enabled;
@@ -326,6 +349,10 @@ function renderGeneral(): HTMLElement {
     next.layout.gap = readNumber(gap, next.layout.gap);
     next.layout.containedMaxWidth = readNumber(containedMaxWidth, next.layout.containedMaxWidth);
     next.layout.showBlockTitles = showTitles.checked;
+    next.layout.profile = preset.value !== "custom"
+      && layoutMatchesPreset(next, preset.value as LayoutPresetId)
+      ? preset.value
+      : "custom";
     next.focusStats.defaultMinutesPerAvoidedVisit = readNumber(defaultMinutes, next.focusStats.defaultMinutesPerAvoidedVisit);
     next.focusStats.avoidedVisitDedupeSeconds = readNumber(dedupeSeconds, next.focusStats.avoidedVisitDedupeSeconds);
 
@@ -514,7 +541,10 @@ function renderBackup(): HTMLElement {
   const importButton = button(i18n.t("importBackup"), "button button--secondary");
   importButton.addEventListener("click", () => backupImportInput.click());
   const recovery = button(i18n.t("restorePreImportBackup"), "button button--secondary");
-  recovery.addEventListener("click", () => void runAction(restorePreImportBackup, i18n.t("backupRestored")));
+  recovery.addEventListener("click", () => {
+    if (!confirmDataRestore()) return;
+    void runAction(restorePreImportBackup, i18n.t("backupRestored"));
+  });
   local.append(actionRow(exportButton, importButton, recovery));
 
   const browser = element("div", "option-card");
@@ -522,7 +552,10 @@ function renderBackup(): HTMLElement {
   const upload = button(i18n.t("syncUpload"), "button button--secondary");
   upload.addEventListener("click", () => void runAction(uploadChromeSyncBackup, i18n.t("syncUploaded")));
   const restore = button(i18n.t("syncRestore"), "button button--secondary");
-  restore.addEventListener("click", () => void runAction(restoreChromeSyncBackup, i18n.t("syncRestored")));
+  restore.addEventListener("click", () => {
+    if (!confirmDataRestore()) return;
+    void runAction(restoreChromeSyncBackup, i18n.t("syncRestored"));
+  });
   const smart = button(i18n.t("syncNow"), "button button--primary");
   smart.addEventListener("click", () => void runAction(syncChromeSyncBackup, (result) => i18n.t(
     result === "uploaded" ? "syncUploaded" : result === "restored" ? "syncRestored" : "syncUnchanged",
@@ -536,7 +569,10 @@ function renderBackup(): HTMLElement {
   driveUpload.disabled = !isGoogleIntegrationConfigured();
   driveRestore.disabled = !isGoogleIntegrationConfigured();
   driveUpload.addEventListener("click", () => void runAction(uploadDriveBackup, i18n.t("driveUploaded")));
-  driveRestore.addEventListener("click", () => void runAction(restoreDriveBackup, i18n.t("driveRestored")));
+  driveRestore.addEventListener("click", () => {
+    if (!confirmDataRestore()) return;
+    void runAction(restoreDriveBackup, i18n.t("driveRestored"));
+  });
   drive.append(actionRow(driveUpload, driveRestore));
   const cards = element("div", "option-card-grid");
   cards.append(local, browser, drive);
@@ -623,21 +659,26 @@ function render(): void {
   rendering = true;
   const generation = ++renderGeneration;
   renderHeader();
+  const navigationItems = [
+    { id: "general", label: i18n.t("sectionGeneral") },
+    { id: "blocks", label: i18n.t("sectionBlocks") },
+    { id: "themes", label: i18n.t("sectionThemes") },
+    { id: "backup", label: i18n.t("sectionBackup") },
+    { id: "blocker", label: i18n.t("sectionBlocker") },
+    { id: "statistics", label: i18n.t("sectionStatistics") },
+  ];
+  renderNavigation(navigationItems);
   const placeholders = [renderGeneral(), renderBlocks(), renderThemes(), renderBackup(), renderBlocker()];
   sections.replaceChildren(...placeholders);
   void renderStatistics().then((statistics) => {
     if (generation !== renderGeneration) return;
     sections.append(statistics);
-    renderNavigation([
-      { id: "general", label: i18n.t("sectionGeneral") },
-      { id: "blocks", label: i18n.t("sectionBlocks") },
-      { id: "themes", label: i18n.t("sectionThemes") },
-      { id: "backup", label: i18n.t("sectionBackup") },
-      { id: "blocker", label: i18n.t("sectionBlocker") },
-      { id: "statistics", label: i18n.t("sectionStatistics") },
-    ]);
   }).catch((error: unknown) => {
-    if (generation === renderGeneration) reportUiError(error);
+    if (generation !== renderGeneration) return;
+    const failed = section("statistics", i18n.t("sectionStatistics"), i18n.t("sectionStatisticsDescription"));
+    failed.body.append(element("p", "empty-state", i18n.t("statisticsUnavailable")));
+    sections.append(failed.root);
+    reportUiError(error);
   });
   rendering = false;
 }
@@ -645,7 +686,7 @@ function render(): void {
 backupImportInput.addEventListener("change", () => {
   const file = backupImportInput.files?.[0];
   backupImportInput.value = "";
-  if (!file) return;
+  if (!file || !confirmDataRestore()) return;
   void runAction(async () => { await importBackup(await readJsonFile(file)); }, i18n.t("backupImported"));
 });
 

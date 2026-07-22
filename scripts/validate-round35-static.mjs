@@ -80,7 +80,7 @@ assert.match(gate, /function webTab/);
 assert.match(gate, /parsed\.protocol !== "http:" && parsed\.protocol !== "https:"/);
 assert.match(gate, /\.map\(webTab\)[\s\S]*\.filter\(Boolean\)/,
   "Split View may offer only validated HTTP(S) targets");
-assert.match(gate, /setAttribute\("inert", ""\)/);
+assert.match(gate, /toggleAttribute\("inert",/);
 assert.match(gate, /role", "dialog"/);
 assert.match(gate, /aria-modal/);
 assert.match(gate, /\(firstAction \|\| native\)\.focus\(\)/,
