@@ -14,5 +14,9 @@ const correctedDeadBranchTarget = '  `  if (!localChanged && !remoteChanged) { a
 if (!source.includes(deadBranchTarget)) throw new Error("Round 32 dead-branch target changed unexpectedly");
 source = source.replace(deadBranchTarget, correctedDeadBranchTarget);
 
+const workflowCleanup = 'fs.rmSync(path.join(root, ".github/workflows/apply-round32-audit.yml"), { force: true });';
+if (!source.includes(workflowCleanup)) throw new Error("Round 32 workflow cleanup changed unexpectedly");
+source = source.replace(workflowCleanup, '// GitHub App removes the temporary workflow after the validated source push.');
+
 fs.writeFileSync(target, source);
-console.log("Round 32 applicator normalized for Windows checkout");
+console.log("Round 32 applicator normalized for checkout and GitHub App cleanup");
