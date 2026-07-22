@@ -53,6 +53,7 @@ function startCountdown(): void {
   if (!host || countdownActive) return;
   countdownActive = true;
   unblockEl.disabled = true;
+  cancelEl.disabled = false;
   actionsEl.hidden = true;
   countdownEl.hidden = false;
   let remaining = WAIT_SECONDS;
@@ -65,6 +66,7 @@ function startCountdown(): void {
     });
     if (remaining <= 0) {
       clearCountdownTimer();
+      cancelEl.disabled = true;
       void finishUnblock().catch(showUnblockFailed);
       return;
     }
@@ -79,6 +81,7 @@ function cancelCountdown(): void {
   clearCountdownTimer();
   countdownActive = false;
   unblockEl.disabled = false;
+  cancelEl.disabled = false;
   countdownEl.hidden = true;
   actionsEl.hidden = false;
 }
@@ -87,6 +90,7 @@ function showUnblockFailed(): void {
   countdownTextEl.textContent = i18n.t("failedToUnblock");
   countdownActive = false;
   unblockEl.disabled = false;
+  cancelEl.disabled = false;
   actionsEl.hidden = false;
   countdownEl.hidden = true;
 }

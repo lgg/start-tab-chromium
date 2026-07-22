@@ -16,8 +16,22 @@
 
   const openNative = () => workerCommand({ type: "open-native-new-tab" });
 
+  function webTab(tab) {
+    const value = typeof tab?.url === "string" ? tab.url.trim() : "";
+    if (!value) return null;
+    try {
+      const parsed = new URL(value);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+      const title = typeof tab.title === "string" ? tab.title.trim() : "";
+      return { url: value, title: title || value };
+    } catch {
+      return null;
+    }
+  }
+
   function removeOverlay() {
     document.getElementById(OVERLAY_ID)?.remove();
+    document.getElementById("startPage")?.removeAttribute("inert");
   }
 
   function showOverlay(title, description, tabs = []) {
@@ -25,13 +39,21 @@
     const overlay = document.createElement("div");
     overlay.id = OVERLAY_ID;
     overlay.style.cssText = "position:fixed;inset:0;z-index:30;display:grid;place-items:center;padding:24px;background:#020617e8;color:#f8fafc;font:16px system-ui";
+    document.getElementById("startPage")?.setAttribute("inert", "");
     const panel = document.createElement("section");
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    panel.setAttribute("aria-labelledby", `${OVERLAY_ID}-title`);
+    panel.setAttribute("aria-describedby", `${OVERLAY_ID}-description`);
     panel.style.cssText = "width:min(680px,100%);max-height:calc(100vh - 48px);overflow:auto;border:1px solid #ffffff24;border-radius:12px;background:#0f172af5;padding:24px";
     const heading = document.createElement("h1");
+    heading.id = `${OVERLAY_ID}-title`;
     heading.textContent = title;
     const body = document.createElement("p");
+    body.id = `${OVERLAY_ID}-description`;
     body.textContent = description;
     panel.append(heading, body);
+    let firstAction = null;
     for (const tab of tabs) {
       const button = document.createElement("button");
       button.type = "button";
@@ -42,6 +64,7 @@
         if (current?.id !== undefined && tab.url) await chrome.tabs.update(current.id, { url: tab.url });
       }));
       panel.append(button);
+      firstAction ??= button;
     }
     const native = document.createElement("button");
     native.type = "button";
@@ -54,6 +77,7 @@
     panel.append(native, settings);
     overlay.append(panel);
     document.body.append(overlay);
+    (firstAction || native).focus();
   }
 
   async function splitContext() {
@@ -71,7 +95,10 @@
   async function apply() {
     if (await splitContext()) {
       const current = await chrome.tabs.getCurrent().catch(() => null);
-      const tabs = (await chrome.tabs.query({ currentWindow: true })).filter((tab) => tab.id !== current?.id && tab.url && !tab.url.startsWith("chrome://") && !tab.url.startsWith("chrome-extension://"));
+      const tabs = (await chrome.tabs.query({ currentWindow: true }))
+        .filter((tab) => tab.id !== current?.id)
+        .map(webTab)
+        .filter(Boolean);
       showOverlay(text("splitViewTitle", "Choose a tab for Split View"), text("splitViewText", "Select an open tab below."), tabs);
       return;
     }

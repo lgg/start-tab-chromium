@@ -31,6 +31,7 @@ import {
   type I18n,
   type LocalePreference,
 } from "../lib/i18n.js";
+import { jsonContentEqual } from "../lib/json-content.js";
 import { editBlockInstance } from "../lib/block-settings-editor.js";
 import { sendMessage } from "../lib/messages.js";
 import { MAX_CUSTOM_THEMES, MAX_START_PAGE_BLOCKS } from "../lib/platform-limits.js";
@@ -42,9 +43,11 @@ import {
 } from "../lib/start-page-runtime.js";
 import {
   BLOCK_DESCRIPTORS,
+  blockTitleKey,
+  blockUsesDefaultTitle,
   BUILT_IN_THEMES,
   LAYOUT_PRESETS,
-  addBlockInstance,
+  createBlockInstanceDraft,
   canAddBlock,
   cloneSettings,
   createCustomTheme,
@@ -60,6 +63,7 @@ import {
   layoutReplacementRemovesUserData,
   selectTheme,
   settingsWithLayoutPreset,
+  saveNewBlockInstance,
   settingsWithRemovedBlock,
   updateBlockInstance,
   updateCustomTheme,
@@ -157,9 +161,7 @@ function readNumber(input: HTMLInputElement, fallback: number): number {
 }
 
 function blockName(block: BlockInstance, i18n: I18n): string {
-  return block.title && !block.title.startsWith("blockTitle")
-    ? block.title
-    : i18n.t(`blockTitle${block.type[0]?.toUpperCase() ?? ""}${block.type.slice(1)}`);
+  return blockUsesDefaultTitle(block) ? i18n.t(blockTitleKey(block.type)) : block.title;
 }
 
 const titleNode = requireElement<HTMLElement>("title");
@@ -246,6 +248,7 @@ function renderHeader(): void {
 }
 
 function renderNavigation(sectionItems: Array<{ id: string; label: string }>): void {
+  nav.setAttribute("aria-label", i18n.t("settingsSections"));
   nav.replaceChildren(...sectionItems.map(({ id, label }) => {
     const anchor = element("a", "options-nav__link", label);
     anchor.href = `#${id}`;
@@ -331,7 +334,7 @@ function renderGeneral(): HTMLElement {
 
     void runAction(async () => {
       const localeChanged = locale.value !== localePreference;
-      const settingsChanged = JSON.stringify(next) !== JSON.stringify(settings);
+      const settingsChanged = !jsonContentEqual(next, settings);
       let settingsPersisted = false;
       try {
         if (settingsChanged) {
@@ -422,11 +425,12 @@ function renderBlocks(): HTMLElement {
   if (settings.layout.blocks.length >= MAX_START_PAGE_BLOCKS) {
     add.title = i18n.t("blockCapacityReached", { count: MAX_START_PAGE_BLOCKS });
   }
-  add.addEventListener("click", () => void runAction(async () => {
-    const created = await addBlockInstance(addSelect.value as BlockType);
+  add.addEventListener("click", () => runUiTask(async () => {
+    const created = createBlockInstanceDraft(settings, addSelect.value as BlockType);
     const configured = await editBlockInstance(created, i18n);
-    if (configured) await updateBlockInstance(created.id, () => configured);
-  }, i18n.t("instanceAdded")));
+    if (!configured) return;
+    await runAction(() => saveNewBlockInstance(configured), i18n.t("instanceAdded"));
+  }));
   addRow.append(addSelect, add);
   const list = element("div", "instance-list");
   list.append(...[...settings.layout.blocks].sort((left, right) => left.order - right.order).map(blockActions));

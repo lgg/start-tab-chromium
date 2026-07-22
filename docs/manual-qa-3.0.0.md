@@ -41,6 +41,7 @@ This checklist is designed for a clean Chromium profile. Record browser version,
 
 For every repeatable type — Date & Time, IP, Links, Search, Timer, Stopwatch, Pomodoro, Note, Local Tasks, Google Calendar, Weather, and Start Tab Pinned:
 
+- [ ] Start adding a block, cancel its configuration dialog, and confirm no block or runtime data is created.
 - [ ] Add the block from the palette.
 - [ ] Open its settings.
 - [ ] Save valid settings.
@@ -207,6 +208,7 @@ With a real OAuth client and account:
 - [ ] `build-blocker-only/manifest.json` does not contain `chrome_url_overrides`.
 - [ ] New-tab entry files are absent from the package.
 - [ ] Browser native new tab remains unchanged.
+- [ ] In the Split View picker, confirm privileged/internal tabs (`chrome:`, `edge:`, extension pages, files, and script URLs) are not offered as navigation targets.
 - [ ] Popup, Options, blocker, backup, and statistics remain functional.
 
 ### Google-enabled full

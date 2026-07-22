@@ -25,6 +25,7 @@ const languageEnglishEl = document.getElementById("languageEnglish") as HTMLOpti
 const languageRussianEl = document.getElementById("languageRussian") as HTMLOptionElement;
 
 let i18n: I18n;
+let localePreference: LocalePreference = "auto";
 
 async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -147,13 +148,16 @@ async function clearBlocklist(): Promise<void> {
 }
 
 async function changeLanguage(): Promise<void> {
+  const requested = languageEl.value as LocalePreference;
   languageEl.disabled = true;
   try {
-    await setLocalePreference(languageEl.value as LocalePreference);
+    await setLocalePreference(requested);
+    localePreference = requested;
     i18n = await loadI18n();
     applyStaticText();
     await render();
   } catch (error) {
+    languageEl.value = localePreference;
     showError(error);
   } finally {
     languageEl.disabled = false;
@@ -161,6 +165,7 @@ async function changeLanguage(): Promise<void> {
 }
 
 clearEl.addEventListener("click", () => {
+  if (!window.confirm(i18n.t("clearBlocklistConfirm"))) return;
   void clearBlocklist();
 });
 
@@ -170,7 +175,8 @@ languageEl.addEventListener("change", () => {
 
 async function init(): Promise<void> {
   i18n = await loadI18n();
-  languageEl.value = await getLocalePreference();
+  localePreference = await getLocalePreference();
+  languageEl.value = localePreference;
   applyStaticText();
   await render();
 }

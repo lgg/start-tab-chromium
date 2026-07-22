@@ -78,6 +78,14 @@ export function blockDescriptor(type: BlockType): BlockDescriptor {
   return descriptor;
 }
 
+export function blockTitleKey(type: BlockType): string {
+  return blockDescriptor(type).titleKey;
+}
+
+export function blockUsesDefaultTitle(block: Pick<BlockInstance, "type" | "title">): boolean {
+  return !block.title || block.title === blockTitleKey(block.type);
+}
+
 export function isSingletonBlockType(type: BlockType): boolean {
   return (SINGLETON_BLOCK_TYPES as readonly BlockType[]).includes(type);
 }

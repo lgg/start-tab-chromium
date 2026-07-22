@@ -1,5 +1,6 @@
 import { commitStorageMutationWithRevision } from "./data-revision.js";
 import { ownValue } from "./dictionary.js";
+import { jsonContentEqual } from "./json-content.js";
 import { withStorageLock } from "./storage-lock.js";
 import { MAX_CUSTOM_THEMES, MAX_START_PAGE_BLOCKS } from "./platform-limits.js";
 import {
@@ -10,6 +11,8 @@ import {
   DEFAULT_SETTINGS,
   LAYOUT_PRESETS,
   blockDescriptor,
+  blockTitleKey,
+  blockUsesDefaultTitle,
   blocksFromPreset,
   cloneBlock,
   cloneBlocks,
@@ -82,6 +85,8 @@ export {
   LAYOUT_PRESETS,
   START_PAGE_SCHEMA_VERSION,
   blockDescriptor,
+  blockTitleKey,
+  blockUsesDefaultTitle,
   blocksFromPreset,
   cloneBlock,
   cloneBlocks as cloneLayoutBlocks,
@@ -137,12 +142,8 @@ export type {
   WeatherDisplayMode,
 };
 
-function jsonEqual(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
 function blockContentEqual(left: BlockInstance, right: BlockInstance): boolean {
-  return jsonEqual(
+  return jsonContentEqual(
     { ...left, createdAt: 0, updatedAt: 0 },
     { ...right, createdAt: 0, updatedAt: 0 },
   );
@@ -200,13 +201,13 @@ export async function getStartPageSettings(): Promise<StartPageSettings> {
   const raw = await readRawSettings();
   const initial = normalizeStartPageSettingsWithReport(raw);
   if (isFutureStartPageSchema(raw)) return initial.settings;
-  if (jsonEqual(raw, initial.settings)) return initial.settings;
+  if (jsonContentEqual(raw, initial.settings)) return initial.settings;
 
   return withStorageLock("data-write", async () => {
     const currentRaw = await readRawSettings();
     const { settings, report } = normalizeStartPageSettingsWithReport(currentRaw);
     if (isFutureStartPageSchema(currentRaw)) return settings;
-    if (jsonEqual(currentRaw, settings)) return settings;
+    if (jsonContentEqual(currentRaw, settings)) return settings;
     const stamped = withBlockTimestamps(null, settings, Date.now());
     await persistSettingsInTransaction(stamped, report);
     return stamped;
@@ -306,42 +307,72 @@ function nextGridPosition(settings: StartPageSettings): { column: number; row: n
   };
 }
 
-export async function addBlockInstance<T extends BlockType>(type: T): Promise<BlockInstanceFor<T>> {
-  const current = await getStartPageSettings();
+export function createBlockInstanceDraft<T extends BlockType>(
+  current: StartPageSettings,
+  type: T,
+): BlockInstanceFor<T> {
   if (current.layout.blocks.length >= MAX_START_PAGE_BLOCKS) {
     throw new Error(`Start Tab supports at most ${MAX_START_PAGE_BLOCKS} block instances`);
   }
   if (!canAddBlock(current, type)) throw new Error(`Singleton block already exists: ${type}`);
-  const block = createBlockInstance(type, {
+  return createBlockInstance(type, {
     ...nextGridPosition(current),
     zone: current.layout.zone,
     order: current.layout.blocks.length,
   });
-  await setStartPageSettings({
-    ...current,
-    layout: { ...current.layout, profile: "custom", blocks: [...current.layout.blocks, block] },
+}
+
+export async function saveNewBlockInstance<T extends BlockType>(
+  block: BlockInstanceFor<T>,
+): Promise<BlockInstanceFor<T>> {
+  const result = await updateStartPageSettings((current) => {
+    if (current.layout.blocks.length >= MAX_START_PAGE_BLOCKS) {
+      throw new Error(`Start Tab supports at most ${MAX_START_PAGE_BLOCKS} block instances`);
+    }
+    if (!canAddBlock(current, block.type)) throw new Error(`Singleton block already exists: ${block.type}`);
+    if (current.layout.blocks.some((candidate) => candidate.id === block.id)) {
+      throw new Error(`Block instance ID already exists: ${block.id}`);
+    }
+    const candidate = {
+      ...block,
+      ...nextGridPosition(current),
+      zone: current.layout.zone,
+      order: current.layout.blocks.length,
+    } as BlockInstanceFor<T>;
+    return {
+      ...current,
+      layout: { ...current.layout, profile: "custom", blocks: [...current.layout.blocks, candidate] },
+    };
   });
-  return block;
+  const saved = result.settings.layout.blocks.find((item) => item.id === block.id);
+  if (!saved || saved.type !== block.type) throw new Error(`Block instance disappeared after save: ${block.id}`);
+  return saved as BlockInstanceFor<T>;
+}
+
+export async function addBlockInstance<T extends BlockType>(type: T): Promise<BlockInstanceFor<T>> {
+  const block = createBlockInstanceDraft(await getStartPageSettings(), type);
+  return saveNewBlockInstance(block);
 }
 
 export async function updateBlockInstance(
   id: string,
   updater: (block: BlockInstance) => BlockInstance,
 ): Promise<BlockInstance> {
-  const current = await getStartPageSettings();
-  const existing = current.layout.blocks.find((block) => block.id === id);
-  if (!existing) throw new Error(`Block instance not found: ${id}`);
-  const candidate = updater(cloneBlock(existing));
-  if (candidate.id !== id || candidate.type !== existing.type) throw new Error("Block identity and type cannot be changed");
-  await setStartPageSettings({
-    ...current,
-    layout: {
-      ...current.layout,
-      profile: "custom",
-      blocks: current.layout.blocks.map((block) => block.id === id ? candidate : block),
-    },
+  const result = await updateStartPageSettings((current) => {
+    const existing = current.layout.blocks.find((block) => block.id === id);
+    if (!existing) throw new Error(`Block instance not found: ${id}`);
+    const candidate = updater(cloneBlock(existing));
+    if (candidate.id !== id || candidate.type !== existing.type) throw new Error("Block identity and type cannot be changed");
+    return {
+      ...current,
+      layout: {
+        ...current.layout,
+        profile: "custom",
+        blocks: current.layout.blocks.map((block) => block.id === id ? candidate : block),
+      },
+    };
   });
-  const saved = (await getStartPageSettings()).layout.blocks.find((block) => block.id === id);
+  const saved = result.settings.layout.blocks.find((block) => block.id === id);
   if (!saved) throw new Error(`Block instance disappeared after save: ${id}`);
   return saved;
 }
@@ -351,29 +382,34 @@ export async function setBlockEnabled(id: string, enabled: boolean): Promise<Blo
 }
 
 export async function duplicateBlockInstance(id: string, title?: string): Promise<BlockInstance> {
-  const current = await getStartPageSettings();
-  const source = current.layout.blocks.find((block) => block.id === id);
-  if (!source) throw new Error(`Block instance not found: ${id}`);
-  if (isSingletonBlockType(source.type)) throw new Error(`Singleton block cannot be duplicated: ${source.type}`);
-  if (current.layout.blocks.length >= MAX_START_PAGE_BLOCKS) {
-    throw new Error(`Start Tab supports at most ${MAX_START_PAGE_BLOCKS} block instances`);
-  }
-  const now = Date.now();
-  const duplicate: BlockInstance = {
-    ...cloneBlock(source),
-    id: createBlockId(source.type),
-    title: title?.trim() || source.title,
-    column: Math.min(current.layout.columns, source.column + 1),
-    row: source.row + 1,
-    order: current.layout.blocks.length,
-    free: { ...source.free, x: source.free.x + 24, y: source.free.y + 24 },
-    createdAt: now,
-    updatedAt: now,
-  };
-  await setStartPageSettings({
-    ...current,
-    layout: { ...current.layout, profile: "custom", blocks: [...current.layout.blocks, duplicate] },
+  let duplicateId = "";
+  const result = await updateStartPageSettings((current) => {
+    const source = current.layout.blocks.find((block) => block.id === id);
+    if (!source) throw new Error(`Block instance not found: ${id}`);
+    if (isSingletonBlockType(source.type)) throw new Error(`Singleton block cannot be duplicated: ${source.type}`);
+    if (current.layout.blocks.length >= MAX_START_PAGE_BLOCKS) {
+      throw new Error(`Start Tab supports at most ${MAX_START_PAGE_BLOCKS} block instances`);
+    }
+    const now = Date.now();
+    const duplicate: BlockInstance = {
+      ...cloneBlock(source),
+      id: createBlockId(source.type),
+      title: title?.trim() || source.title,
+      column: Math.min(current.layout.columns, source.column + 1),
+      row: source.row + 1,
+      order: current.layout.blocks.length,
+      free: { ...source.free, x: source.free.x + 24, y: source.free.y + 24 },
+      createdAt: now,
+      updatedAt: now,
+    };
+    duplicateId = duplicate.id;
+    return {
+      ...current,
+      layout: { ...current.layout, profile: "custom", blocks: [...current.layout.blocks, duplicate] },
+    };
   });
+  const duplicate = result.settings.layout.blocks.find((block) => block.id === duplicateId);
+  if (!duplicate) throw new Error(`Duplicated block disappeared after save: ${duplicateId}`);
   return duplicate;
 }
 
@@ -393,7 +429,7 @@ export function layoutReplacementRemovesUserData(
     const defaultBlock = DEFAULT_LAYOUT_BLOCKS.find((candidate) => candidate.type === block.type);
     return !defaultBlock
       || block.title !== defaultBlock.title
-      || !jsonEqual(block.config, defaultBlock.config);
+      || !jsonContentEqual(block.config, defaultBlock.config);
   });
 }
 
@@ -446,14 +482,14 @@ export function settingsWithLayoutPreset(current: StartPageSettings, presetId: L
 }
 
 export async function setLayoutMode(mode: LayoutMode): Promise<StartPageSettings> {
-  const current = await getStartPageSettings();
-  await setStartPageSettings({ ...current, layout: { ...current.layout, mode, profile: "custom" } });
-  return getStartPageSettings();
+  return (await updateStartPageSettings((current) => ({
+    ...current,
+    layout: { ...current.layout, mode, profile: "custom" },
+  }))).settings;
 }
 
 export async function setLayoutZone(zone: LayoutZone): Promise<StartPageSettings> {
-  const current = await getStartPageSettings();
-  await setStartPageSettings({
+  return (await updateStartPageSettings((current) => ({
     ...current,
     layout: {
       ...current.layout,
@@ -461,8 +497,7 @@ export async function setLayoutZone(zone: LayoutZone): Promise<StartPageSettings
       profile: "custom",
       blocks: current.layout.blocks.map((block) => ({ ...block, zone })),
     },
-  });
-  return getStartPageSettings();
+  }))).settings;
 }
 
 export function createCustomThemeDraft(
@@ -483,23 +518,28 @@ export function createCustomThemeDraft(
 }
 
 export async function saveNewCustomTheme(theme: StartPageTheme): Promise<StartPageTheme> {
-  const current = await getStartPageSettings();
-  const now = Date.now();
-  const fallback = cloneTheme(getTheme(current));
-  fallback.id = theme.id;
-  fallback.builtIn = false;
-  const normalized = normalizeTheme({ ...theme, builtIn: false, updatedAt: now }, fallback);
-  normalized.id = getBuiltInTheme(normalized.id) || current.themes.customThemes.some((item) => item.id === normalized.id)
-    ? createThemeId()
-    : normalized.id;
-  normalized.builtIn = false;
-  normalized.createdAt = now;
-  normalized.updatedAt = now;
-  await setStartPageSettings({
-    ...current,
-    themes: { selectedThemeId: normalized.id, customThemes: [...current.themes.customThemes, normalized] },
+  let savedId = "";
+  const result = await updateStartPageSettings((current) => {
+    const now = Date.now();
+    const fallback = cloneTheme(getTheme(current));
+    fallback.id = theme.id;
+    fallback.builtIn = false;
+    const normalized = normalizeTheme({ ...theme, builtIn: false, updatedAt: now }, fallback);
+    normalized.id = getBuiltInTheme(normalized.id) || current.themes.customThemes.some((item) => item.id === normalized.id)
+      ? createThemeId()
+      : normalized.id;
+    normalized.builtIn = false;
+    normalized.createdAt = now;
+    normalized.updatedAt = now;
+    savedId = normalized.id;
+    return {
+      ...current,
+      themes: { selectedThemeId: normalized.id, customThemes: [...current.themes.customThemes, normalized] },
+    };
   });
-  return normalized;
+  const saved = result.settings.themes.customThemes.find((theme) => theme.id === savedId);
+  if (!saved) throw new Error(`Custom theme disappeared after save: ${savedId}`);
+  return saved;
 }
 
 export async function createCustomTheme(name: string, sourceThemeId?: string): Promise<StartPageTheme> {
@@ -508,84 +548,115 @@ export async function createCustomTheme(name: string, sourceThemeId?: string): P
 }
 
 export async function updateCustomTheme(theme: StartPageTheme): Promise<StartPageTheme> {
-  const current = await getStartPageSettings();
-  if (getBuiltInTheme(theme.id)) throw new Error("Built-in themes cannot be edited");
-  const existing = current.themes.customThemes.find((item) => item.id === theme.id);
-  if (!existing) return saveNewCustomTheme(theme);
-  const normalized = normalizeTheme({
-    ...theme,
-    builtIn: false,
-    createdAt: existing.createdAt,
-    updatedAt: Date.now(),
-  }, existing);
-  normalized.builtIn = false;
-  await setStartPageSettings({
-    ...current,
-    themes: {
-      ...current.themes,
-      customThemes: current.themes.customThemes.map((item) => item.id === theme.id ? normalized : item),
-    },
+  let savedId = theme.id;
+  const result = await updateStartPageSettings((current) => {
+    if (getBuiltInTheme(theme.id)) throw new Error("Built-in themes cannot be edited");
+    const existing = current.themes.customThemes.find((item) => item.id === theme.id);
+    if (!existing) {
+      const now = Date.now();
+      const fallback = cloneTheme(getTheme(current));
+      fallback.id = theme.id;
+      fallback.builtIn = false;
+      const normalized = normalizeTheme({ ...theme, builtIn: false, updatedAt: now }, fallback);
+      normalized.id = current.themes.customThemes.some((item) => item.id === normalized.id) ? createThemeId() : normalized.id;
+      normalized.builtIn = false;
+      normalized.createdAt = now;
+      normalized.updatedAt = now;
+      savedId = normalized.id;
+      return {
+        ...current,
+        themes: { selectedThemeId: normalized.id, customThemes: [...current.themes.customThemes, normalized] },
+      };
+    }
+    const normalized = normalizeTheme({
+      ...theme,
+      builtIn: false,
+      createdAt: existing.createdAt,
+      updatedAt: Date.now(),
+    }, existing);
+    normalized.builtIn = false;
+    return {
+      ...current,
+      themes: {
+        ...current.themes,
+        customThemes: current.themes.customThemes.map((item) => item.id === theme.id ? normalized : item),
+      },
+    };
   });
-  return normalized;
+  const saved = result.settings.themes.customThemes.find((item) => item.id === savedId);
+  if (!saved) throw new Error(`Custom theme disappeared after save: ${savedId}`);
+  return saved;
 }
 
 export async function duplicateTheme(themeId: string, name?: string): Promise<StartPageTheme> {
-  const current = await getStartPageSettings();
-  const source = getTheme(current, themeId);
-  const now = Date.now();
-  const duplicate: StartPageTheme = {
-    ...cloneTheme(source),
-    id: createThemeId(),
-    name: name?.trim() || source.name,
-    builtIn: false,
-    createdAt: now,
-    updatedAt: now,
-  };
-  await setStartPageSettings({
-    ...current,
-    themes: { selectedThemeId: duplicate.id, customThemes: [...current.themes.customThemes, duplicate] },
+  let duplicateId = "";
+  const result = await updateStartPageSettings((current) => {
+    const source = getTheme(current, themeId);
+    const now = Date.now();
+    const duplicate: StartPageTheme = {
+      ...cloneTheme(source),
+      id: createThemeId(),
+      name: name?.trim() || source.name,
+      builtIn: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    duplicateId = duplicate.id;
+    return {
+      ...current,
+      themes: { selectedThemeId: duplicate.id, customThemes: [...current.themes.customThemes, duplicate] },
+    };
   });
+  const duplicate = result.settings.themes.customThemes.find((theme) => theme.id === duplicateId);
+  if (!duplicate) throw new Error(`Duplicated theme disappeared after save: ${duplicateId}`);
   return duplicate;
 }
 
 export async function deleteCustomTheme(themeId: string): Promise<void> {
-  const current = await getStartPageSettings();
-  if (getBuiltInTheme(themeId)) throw new Error("Built-in themes cannot be deleted");
-  if (!current.themes.customThemes.some((theme) => theme.id === themeId)) return;
-  const customThemes = current.themes.customThemes.filter((theme) => theme.id !== themeId);
-  const selectedThemeId = current.themes.selectedThemeId === themeId
-    ? DEFAULT_SETTINGS.themes.selectedThemeId
-    : current.themes.selectedThemeId;
-  await setStartPageSettings({ ...current, themes: { selectedThemeId, customThemes } });
+  await updateStartPageSettings((current) => {
+    if (getBuiltInTheme(themeId)) throw new Error("Built-in themes cannot be deleted");
+    if (!current.themes.customThemes.some((theme) => theme.id === themeId)) return current;
+    const customThemes = current.themes.customThemes.filter((theme) => theme.id !== themeId);
+    const selectedThemeId = current.themes.selectedThemeId === themeId
+      ? DEFAULT_SETTINGS.themes.selectedThemeId
+      : current.themes.selectedThemeId;
+    return { ...current, themes: { selectedThemeId, customThemes } };
+  });
 }
 
 export async function selectTheme(themeId: string): Promise<void> {
-  const current = await getStartPageSettings();
-  if (!getBuiltInTheme(themeId) && !current.themes.customThemes.some((theme) => theme.id === themeId)) {
-    throw new Error(`Theme not found: ${themeId}`);
-  }
-  await setStartPageSettings({ ...current, themes: { ...current.themes, selectedThemeId: themeId } });
+  await updateStartPageSettings((current) => {
+    if (!getBuiltInTheme(themeId) && !current.themes.customThemes.some((theme) => theme.id === themeId)) {
+      throw new Error(`Theme not found: ${themeId}`);
+    }
+    return { ...current, themes: { ...current.themes, selectedThemeId: themeId } };
+  });
 }
 
 export async function importCustomTheme(value: unknown): Promise<{ theme: StartPageTheme; issues: ValidationIssue[] }> {
-  const result = normalizeThemeBundle(value);
-  if (result.issues.some((issue) => issue.messageKey === "validationInvalidThemeFile")) {
+  const normalizedBundle = normalizeThemeBundle(value);
+  if (normalizedBundle.issues.some((issue) => issue.messageKey === "validationInvalidThemeFile")) {
     throw new Error("Invalid Start Tab theme file");
   }
-  const current = await getStartPageSettings();
-  const now = Date.now();
-  const theme: StartPageTheme = {
-    ...result.value.theme,
-    id: createThemeId(),
-    builtIn: false,
-    createdAt: now,
-    updatedAt: now,
-  };
-  await setStartPageSettings({
-    ...current,
-    themes: { selectedThemeId: theme.id, customThemes: [...current.themes.customThemes, theme] },
+  let importedId = "";
+  const result = await updateStartPageSettings((current) => {
+    const now = Date.now();
+    const theme: StartPageTheme = {
+      ...normalizedBundle.value.theme,
+      id: createThemeId(),
+      builtIn: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    importedId = theme.id;
+    return {
+      ...current,
+      themes: { selectedThemeId: theme.id, customThemes: [...current.themes.customThemes, theme] },
+    };
   });
-  return { theme, issues: result.issues };
+  const theme = result.settings.themes.customThemes.find((candidate) => candidate.id === importedId);
+  if (!theme) throw new Error(`Imported theme disappeared after save: ${importedId}`);
+  return { theme, issues: normalizedBundle.issues };
 }
 
 export function exportCustomTheme(theme: StartPageTheme): ThemeBundle {

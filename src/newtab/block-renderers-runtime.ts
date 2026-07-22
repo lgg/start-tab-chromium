@@ -7,7 +7,7 @@ import {
   getStartPageRuntimeState,
   remainingClockMs,
 } from "../lib/start-page-runtime.js";
-import type { BlockInstance, LocalTask } from "../lib/start-page-settings.js";
+import { blockTitleKey, blockUsesDefaultTitle, type BlockInstance, type LocalTask } from "../lib/start-page-settings.js";
 import { actionButton, element, formatDuration } from "./block-renderer-common.js";
 import type { BlockRenderContext } from "./block-renderer-types.js";
 
@@ -95,7 +95,7 @@ export function renderNote(
   textarea.value = persistedValue;
   textarea.maxLength = MAX_NOTE_LENGTH;
   textarea.placeholder = block.config.placeholder || context.i18n.t("notePlaceholder");
-  textarea.setAttribute("aria-label", block.title);
+  textarea.setAttribute("aria-label", blockUsesDefaultTitle(block) ? context.i18n.t(blockTitleKey(block.type)) : block.title);
   let saveTimer = 0;
   let saveJob: Promise<void> = Promise.resolve();
 

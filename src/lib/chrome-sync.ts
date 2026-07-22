@@ -64,6 +64,10 @@ function pathMatches(path: CanonicalPath, expected: readonly string[]): boolean 
 }
 
 /** Remove generated timestamps only from known schema entities, never from user-keyed dictionaries. */
+function compareJsonKeys(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function isVolatileTimestampField(path: CanonicalPath, key: string): boolean {
   if (!VOLATILE_CONTENT_KEYS.has(key)) return false;
   if (pathMatches(path, ["storage", "startPageSettings"])) return key === "updatedAt";
@@ -78,7 +82,7 @@ function canonicalValue(value: unknown, path: CanonicalPath = []): unknown {
   if (!isRecord(value)) return value;
   return Object.fromEntries(Object.keys(value)
     .filter((key) => !isVolatileTimestampField(path, key))
-    .sort((left, right) => left.localeCompare(right))
+    .sort(compareJsonKeys)
     .map((key) => [key, canonicalValue(value[key], [...path, key])]));
 }
 
@@ -88,7 +92,7 @@ function previousCanonicalValue(value: unknown): unknown {
   if (!isRecord(value)) return value;
   return Object.fromEntries(Object.keys(value)
     .filter((key) => !VOLATILE_CONTENT_KEYS.has(key))
-    .sort((left, right) => left.localeCompare(right))
+    .sort(compareJsonKeys)
     .map((key) => [key, previousCanonicalValue(value[key])]));
 }
 
@@ -96,7 +100,7 @@ function sortedValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortedValue);
   if (!isRecord(value)) return value;
   return Object.fromEntries(Object.keys(value)
-    .sort((left, right) => left.localeCompare(right))
+    .sort(compareJsonKeys)
     .map((key) => [key, sortedValue(value[key])]));
 }
 
@@ -131,7 +135,7 @@ function isPristineBackup(bundle: BackupBundle): boolean {
 }
 function remoteWins(remote: SyncMeta, local: Awaited<ReturnType<typeof prepareSnapshot>>): boolean {
   if (remote.contentUpdatedAt !== local.contentUpdatedAt) return remote.contentUpdatedAt > local.contentUpdatedAt;
-  return remote.contentChecksum.localeCompare(local.contentChecksum) > 0;
+  return compareJsonKeys(remote.contentChecksum, local.contentChecksum) > 0;
 }
 const utf8 = new TextEncoder();
 function syncItemQuotaBytes(): number {
