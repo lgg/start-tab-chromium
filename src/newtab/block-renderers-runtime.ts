@@ -1,6 +1,6 @@
 import { ownValue } from "../lib/dictionary.js";
 import { sendMessage, type ClockAction } from "../lib/messages.js";
-import { MAX_LOCAL_TASKS_PER_INSTANCE, MAX_LOCAL_TASK_TITLE_LENGTH } from "../lib/platform-limits.js";
+import { MAX_LOCAL_TASKS_PER_INSTANCE, MAX_LOCAL_TASK_TITLE_LENGTH, MAX_NOTE_LENGTH } from "../lib/platform-limits.js";
 import {
   defaultClockForBlock,
   elapsedClockMs,
@@ -93,13 +93,14 @@ export function renderNote(
   const textarea = element("textarea", "note");
   let persistedValue = ownValue(context.runtime.notes, block.id) ?? "";
   textarea.value = persistedValue;
+  textarea.maxLength = MAX_NOTE_LENGTH;
   textarea.placeholder = block.config.placeholder || context.i18n.t("notePlaceholder");
   textarea.setAttribute("aria-label", block.title);
   let saveTimer = 0;
   let saveJob: Promise<void> = Promise.resolve();
 
   const queueSave = (value: string): Promise<void> => {
-    const nextValue = value.slice(0, 200_000);
+    const nextValue = value.slice(0, MAX_NOTE_LENGTH);
     saveJob = saveJob.catch(() => undefined).then(async () => {
       await context.setRuntime({
         kind: "note",

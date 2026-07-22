@@ -141,10 +141,24 @@ function linksEditor(i18n: I18n, initial: readonly StartLink[]): { root: HTMLEle
   };
 }
 
-function providersEditor(i18n: I18n, initial: readonly SearchProvider[]): { root: HTMLElement; read: () => SearchProvider[] } {
+function providersEditor(
+  i18n: I18n,
+  initial: readonly SearchProvider[],
+  onChange: (providers: SearchProvider[]) => void,
+): { root: HTMLElement; read: () => SearchProvider[] } {
   const root = element("div", "collection-editor");
   const list = element("div", "collection-editor__list");
   const add = button(i18n.t("addSearchProvider"), "button button--secondary");
+
+  const read = (): SearchProvider[] => Array.from(list.querySelectorAll<HTMLElement>(".collection-row")).map((row) => {
+    const inputs = row.querySelectorAll<HTMLInputElement>("input");
+    return {
+      id: inputs[0]?.value ?? "",
+      title: inputs[1]?.value ?? "",
+      urlTemplate: inputs[2]?.value ?? "",
+    };
+  });
+  const notify = (): void => onChange(read());
 
   const appendRow = (provider: SearchProvider): void => {
     const row = element("div", "collection-row collection-row--provider");
@@ -160,26 +174,17 @@ function providersEditor(i18n: I18n, initial: readonly SearchProvider[]): { root
     const remove = button("×", "icon-button");
     remove.title = i18n.t("removeSearchProvider");
     remove.setAttribute("aria-label", i18n.t("removeSearchProvider"));
-    remove.addEventListener("click", () => row.remove());
+    for (const input of [id, title, url]) input.addEventListener("input", notify);
+    remove.addEventListener("click", () => { row.remove(); notify(); });
     row.append(id, title, url, remove);
     list.append(row);
   };
 
   initial.forEach(appendRow);
-  add.addEventListener("click", () => appendRow({ id: "", title: "", urlTemplate: "" }));
+  add.addEventListener("click", () => { appendRow({ id: "", title: "", urlTemplate: "" }); notify(); });
   root.append(list, add);
 
-  return {
-    root,
-    read: () => Array.from(list.querySelectorAll<HTMLElement>(".collection-row")).map((row) => {
-      const inputs = row.querySelectorAll<HTMLInputElement>("input");
-      return {
-        id: inputs[0]?.value ?? "",
-        title: inputs[1]?.value ?? "",
-        urlTemplate: inputs[2]?.value ?? "",
-      };
-    }),
-  };
+  return { root, read };
 }
 
 function configFields(
@@ -228,8 +233,17 @@ function configFields(
       };
     }
     case "search": {
-      const providers = providersEditor(i18n, block.config.providers);
       const provider = selectInput(block.config.provider, block.config.providers.map((item) => [item.id, item.title]));
+      const syncProviderOptions = (items: SearchProvider[]): void => {
+        const selected = provider.value;
+        provider.replaceChildren(...items.map((item) => {
+          const option = element("option", "", item.title || item.id);
+          option.value = item.id;
+          return option;
+        }));
+        provider.value = items.some((item) => item.id === selected) ? selected : (items[0]?.id ?? "");
+      };
+      const providers = providersEditor(i18n, block.config.providers, syncProviderOptions);
       const placeholder = textInput(block.config.placeholder);
       return {
         fields: [field(i18n.t("searchProvider"), provider), field(i18n.t("searchPlaceholderLabel"), placeholder), field(i18n.t("searchProviders"), providers.root, { wide: true })],

@@ -330,7 +330,8 @@ function renderGeneral(): HTMLElement {
     if (removesUserData && !window.confirm(i18n.t("applyPresetWithDataConfirm"))) return;
 
     void runAction(async () => {
-      if (locale.value !== localePreference) {
+      const localeChanged = locale.value !== localePreference;
+      if (localeChanged) {
         await setLocalePreference(locale.value as LocalePreference);
         localePreference = locale.value as LocalePreference;
       }
@@ -340,7 +341,7 @@ function renderGeneral(): HTMLElement {
         expectedSettingsUpdatedAt: settings.updatedAt,
         expectedRuntimeUpdatedAt: runtime.updatedAt,
       });
-      if (locale.value !== i18n.locale && locale.value !== "auto") location.reload();
+      if (localeChanged) location.reload();
     }, i18n.t("settingsSaved"));
   });
   item.body.append(form);

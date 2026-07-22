@@ -31,7 +31,7 @@ Start Tab is a Manifest V3 extension for Chromium-based browsers. It combines a 
 - Settings button visibility and hover-area controls.
 - Link grid rows, columns, icon size, font size, and horizontal or vertical paged navigation.
 - Independent Timer, Stopwatch, and Pomodoro state persistence across new tabs and service-worker restarts, with durable alarms, deadline-capped focus accounting, atomic clock/statistics updates, and optional completion notifications.
-- Tabbed options page with General, Start Tab, Blocklist, Backup, and About sections.
+- Sectioned Options page with persistent navigation for General, Start Tab, Blocklist, Backup, and About settings.
 - Centralized validation for numeric settings, URLs, coordinates, provider endpoints, search templates, clocks, themes, and imported data.
 - Versioned JSON export/import with legacy migration, pre-import recovery, rollback, and corrupted-element isolation. Strict external capacity rejection is separated from bounded local recovery, so a valid backup can still repair already-corrupted oversized local state.
 - Browser backup through chunked `chrome.storage.sync`, checksum validation, device metadata, deterministic conflict handling, and latest-wins smart sync.

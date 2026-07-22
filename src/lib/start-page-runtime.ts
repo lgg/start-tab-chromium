@@ -2,7 +2,7 @@ import { commitStorageMutationWithRevision, DATA_REVISION_KEY, markStartTabDataC
 import { cloneDictionary, createDictionary, ownValue } from "./dictionary.js";
 import { runIndependentEffects } from "./independent-effects.js";
 import { withStorageLock } from "./storage-lock.js";
-import { MAX_LOCAL_TASKS_PER_INSTANCE } from "./platform-limits.js";
+import { MAX_LOCAL_TASKS_PER_INSTANCE, MAX_NOTE_LENGTH } from "./platform-limits.js";
 import { sendMessage } from "./messages.js";
 import {
   FOCUS_STATS_KEY,
@@ -208,7 +208,7 @@ export function normalizeRuntimeState(value: unknown, settings: StartPageSetting
     }
     if (block.type === "note") {
       const candidate = ownValue(sourceNotes, block.id) ?? ownValue(sourceNotes, block.type);
-      if (typeof candidate === "string") notes[block.id] = candidate.slice(0, 200_000);
+      if (typeof candidate === "string") notes[block.id] = candidate.slice(0, MAX_NOTE_LENGTH);
     }
     if (block.type === "localTasks") {
       const oldSharedTasks = Array.isArray(source.localTasks) && firstBlockOfType(settings, "localTasks")?.id === block.id ? source.localTasks : undefined;
