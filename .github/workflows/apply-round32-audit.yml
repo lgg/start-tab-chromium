@@ -63,16 +63,14 @@ jobs:
           GOOGLE_OAUTH_CLIENT_ID: round32-ci.apps.googleusercontent.com
         run: npm run build:google
 
-      - name: Create validated Git commit object
-        id: publish-commit
-        continue-on-error: true
+      - name: Export validated Git tree manifest
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.repository }}
         run: |
           rm -f .github/workflows/apply-round32-audit.yml
           git diff --check
-          cat > /tmp/publish-round32.py <<'PY'
+          cat > /tmp/export-round32.py <<'PY'
           import base64
           import json
           import os
@@ -121,35 +119,23 @@ jobs:
               mode = "100755" if os.access(path, os.X_OK) else "100644"
               entries.append({"path": path, "mode": mode, "type": "blob", "sha": blob["sha"]})
 
-          tree = api("POST", "/git/trees", {"base_tree": base_tree, "tree": entries})
-          commit = api("POST", "/git/commits", {
+          manifest = {
+              "head": head,
+              "base_tree": base_tree,
               "message": "Repair Browser Sync snapshot integrity",
-              "tree": tree["sha"],
-              "parents": [head],
-          })
-          pathlib.Path("round32-validated-commit.txt").write_text(commit["sha"] + "\n")
-          print(json.dumps({"head": head, "tree": tree["sha"], "commit": commit["sha"], "entries": len(entries)}))
+              "entries": entries,
+          }
+          pathlib.Path("round32-publication-manifest.json").write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps({"head": head, "base_tree": base_tree, "entries": len(entries)}))
           PY
-          set -o pipefail
-          python /tmp/publish-round32.py 2>&1 | tee round32-publication-diagnostic.txt
+          python /tmp/export-round32.py
 
-      - name: Upload publication diagnostic
-        if: steps.publish-commit.outcome == 'failure'
+      - name: Upload validated publication manifest
         uses: actions/upload-artifact@v4
         with:
-          name: round32-publication-diagnostic
-          path: round32-publication-diagnostic.txt
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Enforce publication result
-        if: steps.publish-commit.outcome == 'failure'
-        run: exit 1
-
-      - name: Upload validated commit reference
-        uses: actions/upload-artifact@v4
-        with:
-          name: round32-validated-commit
-          path: round32-validated-commit.txt
+          name: round32-publication-manifest
+          path: round32-publication-manifest.json
           if-no-files-found: error
           retention-days: 1
