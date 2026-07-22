@@ -1,0 +1,39 @@
+name: Export Round 33 audit source
+
+on:
+  pull_request:
+    branches:
+      - master
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Package tracked repository source
+        run: |
+          git ls-files -z | tar --null --files-from=- -czf round33-source.tar.gz
+          git ls-files > round33-file-list.txt
+
+      - name: Upload source package
+        uses: actions/upload-artifact@v4
+        with:
+          name: round33-source
+          path: |
+            round33-source.tar.gz
+            round33-file-list.txt
+          if-no-files-found: error
+          retention-days: 1
