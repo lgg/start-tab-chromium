@@ -22,6 +22,7 @@ import {
   resetFocusStats,
 } from "./lib/focus-stats.js";
 import { ownValue } from "./lib/dictionary.js";
+import { jsonContentEqual } from "./lib/json-content.js";
 import { MAX_NOTE_LENGTH } from "./lib/platform-limits.js";
 import { runIndependentEffects } from "./lib/independent-effects.js";
 import { isMessage, type Ack, type ClockAction, type Message } from "./lib/messages.js";
@@ -44,6 +45,8 @@ import {
   updateStartPageRuntimeState,
 } from "./lib/start-page-runtime.js";
 import {
+  blockTitleKey,
+  blockUsesDefaultTitle,
   getStartPageSettings,
   type BlockInstance,
   type ClockRuntimeState,
@@ -189,8 +192,8 @@ async function handle(message: Message): Promise<HandlerResult | void> {
   }
 }
 
-function sameTasks(left: readonly LocalTask[], right: readonly LocalTask[]): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+export function sameTasks(left: readonly LocalTask[], right: readonly LocalTask[]): boolean {
+  return jsonContentEqual(left, right);
 }
 
 async function updateRuntimeNote(instanceId: string, value: string, expectedValue: string): Promise<void> {
@@ -286,7 +289,7 @@ async function finishClockCompletion(instanceId: string, token: string): Promise
       await chrome.notifications.create(`start-tab-clock-${instanceId}-${token}`, {
         type: "basic",
         iconUrl: "icons/icon.128.png",
-        title: block.title,
+        title: blockUsesDefaultTitle(block) ? await workerMessage(blockTitleKey(block.type)) : block.title,
         message: await workerMessage(messageKey),
       });
     });

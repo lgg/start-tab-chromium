@@ -1,5 +1,7 @@
 import type { I18n } from "./i18n.js";
 import {
+  blockTitleKey,
+  blockUsesDefaultTitle,
   cloneBlock,
   normalizeBlockConfig,
   type BlockConfig,
@@ -334,9 +336,13 @@ export async function editBlockInstance(block: BlockInstance, i18n: I18n): Promi
     form.method = "dialog";
     const header = element("header", "settings-dialog__header");
     const heading = element("div", "settings-dialog__heading");
-    const title = element("h2", "settings-dialog__title", i18n.t("instanceSettingsTitle", { title: block.title }));
+    const defaultTitleKey = blockTitleKey(block.type);
+    const localizedDefaultTitle = i18n.t(defaultTitleKey);
+    const usesDefaultTitle = blockUsesDefaultTitle(block);
+    const displayedTitle = usesDefaultTitle ? localizedDefaultTitle : block.title;
+    const title = element("h2", "settings-dialog__title", i18n.t("instanceSettingsTitle", { title: displayedTitle }));
     title.id = "block-settings-title";
-    heading.append(title, element("p", "settings-dialog__subtitle", i18n.t("instanceSettingsSubtitle", { type: i18n.t(`blockTitle${block.type[0]?.toUpperCase() ?? ""}${block.type.slice(1)}`), id: block.id })));
+    heading.append(title, element("p", "settings-dialog__subtitle", i18n.t("instanceSettingsSubtitle", { type: localizedDefaultTitle, id: block.id })));
     const close = button("×", "icon-button settings-dialog__close");
     close.title = i18n.t("close");
     close.setAttribute("aria-label", i18n.t("close"));
@@ -344,7 +350,7 @@ export async function editBlockInstance(block: BlockInstance, i18n: I18n): Promi
 
     const body = element("div", "settings-dialog__body");
     const grid = element("div", "settings-grid");
-    const titleInput = textInput(block.title);
+    const titleInput = textInput(displayedTitle);
     const enabled = checkboxInput(block.enabled);
     const configured = configFields(block, i18n);
     grid.append(field(i18n.t("instanceName"), titleInput, { wide: true }), field(i18n.t("blockEnabled"), enabled), ...configured.fields);
@@ -388,7 +394,10 @@ export async function editBlockInstance(block: BlockInstance, i18n: I18n): Promi
         return;
       }
       const next = cloneBlock(block);
-      next.title = titleInput.value.trim() || i18n.t(`blockTitle${block.type[0]?.toUpperCase() ?? ""}${block.type.slice(1)}`);
+      const requestedTitle = titleInput.value.trim();
+      next.title = usesDefaultTitle && requestedTitle === localizedDefaultTitle
+        ? (block.title || defaultTitleKey)
+        : (requestedTitle || defaultTitleKey);
       next.enabled = enabled.checked;
       next.config = config as never;
       result.block = next;

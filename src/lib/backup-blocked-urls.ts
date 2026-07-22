@@ -15,7 +15,7 @@ export function normalizeBackupLastBlockedUrls(
   mode: BackupCollectionMode,
 ): Record<string, string> {
   const normalized = normalizeLastBlockedUrls(value);
-  const entries = Object.entries(normalized).sort(([left], [right]) => left.localeCompare(right));
+  const entries = Object.entries(normalized).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
   if (mode === "strict-import" && entries.length > MAX_BLOCKED_SITES) {
     throw new Error(`Start Tab backup contains more than ${MAX_BLOCKED_SITES} last blocked URLs`);
   }

@@ -7,6 +7,8 @@ import { instanceRuntimeHasUserData } from "../lib/start-page-runtime.js";
 import {
   BLOCK_DESCRIPTORS,
   blockDescriptor,
+  blockTitleKey,
+  blockUsesDefaultTitle,
   canAddBlock,
   cloneBlock,
   cloneSettings,
@@ -71,10 +73,6 @@ function maxGridRow(blocks: readonly BlockInstance[]): number {
   return blocks.reduce((maximum, block) => Math.max(maximum, block.row + block.height), 1);
 }
 
-function titleKey(type: BlockType): string {
-  return `blockTitle${type[0]?.toUpperCase() ?? ""}${type.slice(1)}`;
-}
-
 export class LayoutEditor {
   private saved: StartPageSettings;
   private draft: StartPageSettings;
@@ -101,6 +99,10 @@ export class LayoutEditor {
 
   get hasUnsavedChanges(): boolean {
     return this.active && this.dirty;
+  }
+
+  private displayTitle(block: BlockInstance): string {
+    return blockUsesDefaultTitle(block) ? this.options.i18n.t(blockTitleKey(block.type)) : block.title;
   }
 
   replaceSavedSettings(settings: StartPageSettings): void {
@@ -154,7 +156,7 @@ export class LayoutEditor {
     if (!this.active) return;
     card.classList.add("card--editing");
     card.tabIndex = 0;
-    card.setAttribute("aria-label", this.options.i18n.t("editableBlockLabel", { title: block.title }));
+    card.setAttribute("aria-label", this.options.i18n.t("editableBlockLabel", { title: this.displayTitle(block) }));
     card.addEventListener("keydown", (event) => this.handleCardKeydown(event, block.id));
 
     const controls = element("div", "card-editor-controls");
@@ -251,7 +253,7 @@ export class LayoutEditor {
     const copy = createBlockInstance(source.type, {
       ...cloneBlock(source),
       id: undefined,
-      title: `${source.title} ${this.options.i18n.t("copySuffix")}`,
+      title: `${this.displayTitle(source)} ${this.options.i18n.t("copySuffix")}`,
       column: source.column + 1,
       row: source.row + 1,
       order: this.draft.layout.blocks.length,
@@ -269,8 +271,8 @@ export class LayoutEditor {
     if (!block) return;
     const runtime = this.options.getRuntime();
     const needsConfirm = hasBlockUserData(block, runtime) || instanceRuntimeHasUserData(id, runtime);
-    if (needsConfirm && !window.confirm(this.options.i18n.t("deleteBlockWithDataConfirm", { title: block.title }))) return;
-    if (!needsConfirm && !window.confirm(this.options.i18n.t("deleteBlockConfirm", { title: block.title }))) return;
+    if (needsConfirm && !window.confirm(this.options.i18n.t("deleteBlockWithDataConfirm", { title: this.displayTitle(block) }))) return;
+    if (!needsConfirm && !window.confirm(this.options.i18n.t("deleteBlockConfirm", { title: this.displayTitle(block) }))) return;
     if (this.destructiveRuntimeUpdatedAt === null
       && this.saved.layout.blocks.some((candidate) => candidate.id === id)) {
       this.destructiveRuntimeUpdatedAt = runtime.updatedAt;
@@ -289,7 +291,7 @@ export class LayoutEditor {
     const descriptor = blockDescriptor(type);
     const row = maxGridRow(this.draft.layout.blocks) + 1;
     let block = createBlockInstance(type, {
-      title: this.options.i18n.t(titleKey(type)),
+      title: blockTitleKey(type),
       zone: this.draft.layout.zone,
       row,
       width: descriptor.defaultGridWidth,

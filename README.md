@@ -31,7 +31,7 @@ Start Tab is a Manifest V3 extension for Chromium-based browsers. It combines a 
 - Settings button visibility and hover-area controls.
 - Link grid rows, columns, icon size, font size, and horizontal or vertical paged navigation.
 - Independent Timer, Stopwatch, and Pomodoro state persistence across new tabs and service-worker restarts, with durable alarms, deadline-capped focus accounting, atomic clock/statistics updates, and optional completion notifications.
-- Sectioned Options page with persistent navigation for General, Start Tab, Blocklist, Backup, and About settings.
+- Sectioned Options page with persistent navigation for General, Blocks, Themes, Backup and sync, Website blocker, and Statistics and migration.
 - Centralized validation for numeric settings, URLs, coordinates, provider endpoints, search templates, clocks, themes, and imported data.
 - Versioned JSON export/import with legacy migration, pre-import recovery, rollback, and corrupted-element isolation. Strict external capacity rejection is separated from bounded local recovery, so a valid backup can still repair already-corrupted oversized local state.
 - Browser backup through chunked `chrome.storage.sync`, checksum validation, device metadata, deterministic conflict handling, and latest-wins smart sync.
@@ -94,8 +94,8 @@ The shown placeholder is intentionally rejected. The Google-enabled artifact is 
 }
 ```
 
-5. Open extension Options -> About -> Open Start Tab. If this opens the Start Tab page, the extension page itself is working.
-6. Open Options -> Start Tab and keep Enable Start Tab page content checked.
+5. Open extension Options and use the **Open Start Tab** action in the page header. If this opens the Start Tab page, the extension page itself is working.
+6. Open Options -> General and keep **Enable Start Tab page content** checked.
 7. Open a new tab. In Chrome, the manifest override should own it directly. In browsers such as Comet, the service worker also tries a fallback redirect when the browser exposes an internal new-tab URL such as `chrome://newtab`, `chrome://new-tab-page`, `chrome-search://local-ntp`, or a Comet-specific new-tab URL.
 8. If the diagnostic page works but Ctrl+T still opens the browser default page, the browser is not exposing a redirectable tab URL to extensions. Verify the same build in Chrome or Edge to separate a Start Tab defect from a browser-level limitation.
 

@@ -15,8 +15,8 @@ const packageJson = JSON.parse(read("package.json"));
 const workflow = read(".github/workflows/ci.yml");
 const selfHosted = read("scripts/validate-self-hosted-ci.mjs");
 
-assert.match(storagePlan, /function sortedEntries/,
-  "Runtime content comparison must ignore dictionary insertion order");
+assert.match(storagePlan, /jsonContentEqual/,
+  "Runtime content comparison must ignore dictionary insertion order at every nesting level");
 assert.match(storagePlan, /export function sameRuntimeContent/,
   "Runtime storage echoes need a semantic content comparator");
 assert.match(newtab,
@@ -47,7 +47,7 @@ assert.match(editor,
   /const selectedId = provider\.value;[\s\S]*const selectedIndex = provider\.selectedIndex;[\s\S]*provider\.selectedIndex = providerSelectionIndexAfterEdit/,
   "Provider edits must preserve the selected row across ID changes and removals");
 
-assert.match(options, /const settingsChanged = JSON\.stringify\(next\) !== JSON\.stringify\(settings\)/,
+assert.match(options, /const settingsChanged = !jsonContentEqual\(next, settings\)/,
   "Locale-only saves must not rewrite settings and runtime revisions");
 assert.match(options,
   /if \(settingsChanged\) \{[\s\S]*await sendMessage\(\{[\s\S]*type: "replace-start-page-settings"[\s\S]*settingsPersisted = true;[\s\S]*if \(localeChanged\) \{[\s\S]*await setLocalePreference[\s\S]*location\.reload\(\)/,

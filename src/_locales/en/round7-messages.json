@@ -1,5 +1,8 @@
 {
   "runtimeMutationConflict": {
     "message": "Runtime data changed in another tab or during restore. The latest saved state was reloaded."
+  },
+  "settingsSections": {
+    "message": "Settings sections"
   }
 }

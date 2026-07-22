@@ -10,6 +10,8 @@ import {
 } from "../lib/start-page-runtime.js";
 import {
   LAYOUT_PRESETS,
+  blockTitleKey,
+  blockUsesDefaultTitle,
   getStartPageSettings,
   getTheme,
   layoutReplacementRemovesUserData,
@@ -89,11 +91,7 @@ function runUiTask(action: () => Promise<unknown>): void {
 }
 
 function blockTitle(block: BlockInstance): string {
-  if (!block.title || block.title.startsWith("blockTitle")) {
-    const key = `blockTitle${block.type[0]?.toUpperCase() ?? ""}${block.type.slice(1)}`;
-    return i18n.t(key);
-  }
-  return block.title;
+  return blockUsesDefaultTitle(block) ? i18n.t(blockTitleKey(block.type)) : block.title;
 }
 
 function cardFor(block: BlockInstance, context: BlockRenderContext): HTMLElement {

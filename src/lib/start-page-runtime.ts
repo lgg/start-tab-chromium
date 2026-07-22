@@ -1,6 +1,7 @@
 import { commitStorageMutationWithRevision, DATA_REVISION_KEY, markStartTabDataChanged } from "./data-revision.js";
 import { cloneDictionary, createDictionary, ownValue } from "./dictionary.js";
 import { runIndependentEffects } from "./independent-effects.js";
+import { jsonContentEqual } from "./json-content.js";
 import { withStorageLock } from "./storage-lock.js";
 import { MAX_LOCAL_TASKS_PER_INSTANCE, MAX_NOTE_LENGTH } from "./platform-limits.js";
 import { sendMessage } from "./messages.js";
@@ -226,10 +227,6 @@ export function normalizeRuntimeState(value: unknown, settings: StartPageSetting
   return { version: RUNTIME_SCHEMA_VERSION, updatedAt: finiteInteger(source.updatedAt, 0, 0, Number.MAX_SAFE_INTEGER), clocks, notes, tasks, linkPages };
 }
 
-function jsonEqual(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
 async function readRuntimeSettingsSnapshot(requireCompatible: boolean): Promise<{ settings: StartPageSettings; future: boolean }> {
   const items = await chrome.storage.local.get(START_PAGE_SETTINGS_KEY);
   const raw = items[START_PAGE_SETTINGS_KEY];
@@ -279,14 +276,14 @@ export async function getStartPageRuntimeState(inputSettings?: StartPageSettings
   const items = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
   const raw = items[START_PAGE_RUNTIME_KEY];
   const normalized = normalizeRuntimeState(raw, settings, items[LEGACY_INSTANCE_RUNTIME_KEY]);
-  if (settingsSnapshot.future || isFutureRuntimeSchema(raw) || jsonEqual(raw, normalized)) return normalized;
+  if (settingsSnapshot.future || isFutureRuntimeSchema(raw) || jsonContentEqual(raw, normalized)) return normalized;
 
   return withStorageLock("data-write", async () => {
     const freshSettingsSnapshot = await readRuntimeSettingsSnapshot(false);
     const freshItems = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
     const freshRaw = freshItems[START_PAGE_RUNTIME_KEY];
     const freshNormalized = normalizeRuntimeState(freshRaw, freshSettingsSnapshot.settings, freshItems[LEGACY_INSTANCE_RUNTIME_KEY]);
-    if (freshSettingsSnapshot.future || isFutureRuntimeSchema(freshRaw) || jsonEqual(freshRaw, freshNormalized)) return freshNormalized;
+    if (freshSettingsSnapshot.future || isFutureRuntimeSchema(freshRaw) || jsonContentEqual(freshRaw, freshNormalized)) return freshNormalized;
     return persistRuntimeInTransaction(
       freshNormalized,
       freshSettingsSnapshot.settings,

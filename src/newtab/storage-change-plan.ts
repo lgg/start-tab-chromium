@@ -1,3 +1,4 @@
+import { jsonContentEqual } from "../lib/json-content.js";
 import type { StartPageRuntimeState } from "../lib/start-page-runtime.js";
 
 export interface StartPageStorageChangeFlags {
@@ -26,23 +27,10 @@ export function planStartPageStorageChange(
   };
 }
 
-function sortedEntries<T>(record: Readonly<Record<string, T>>): Array<[string, T]> {
-  return Object.keys(record)
-    .sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
-    .map((key) => [key, record[key] as T]);
-}
-
-/** Compare runtime user-visible content while ignoring the monotonic revision timestamp and dictionary insertion order. */
+/** Compare runtime user-visible content while ignoring the monotonic revision timestamp and all object key insertion order. */
 export function sameRuntimeContent(left: StartPageRuntimeState, right: StartPageRuntimeState): boolean {
-  return JSON.stringify([
-    sortedEntries(left.clocks),
-    sortedEntries(left.notes),
-    sortedEntries(left.tasks),
-    sortedEntries(left.linkPages),
-  ]) === JSON.stringify([
-    sortedEntries(right.clocks),
-    sortedEntries(right.notes),
-    sortedEntries(right.tasks),
-    sortedEntries(right.linkPages),
-  ]);
+  return jsonContentEqual(
+    { clocks: left.clocks, notes: left.notes, tasks: left.tasks, linkPages: left.linkPages },
+    { clocks: right.clocks, notes: right.notes, tasks: right.tasks, linkPages: right.linkPages },
+  );
 }
