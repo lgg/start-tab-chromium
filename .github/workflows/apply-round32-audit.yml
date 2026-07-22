@@ -38,6 +38,7 @@ jobs:
           node scripts/apply-round32-audit.mjs
           node scripts/finalize-round32-generated.mjs
           rm -f scripts/normalize-round32-applicator.mjs scripts/finalize-round32-generated.mjs
+          git add -N docs/audit-2026-07-22-round-32.md scripts/round32-fixtures.ts scripts/run-round32-fixtures.mjs scripts/validate-round32-static.mjs
           git diff --check
 
       - name: Install dependencies
