@@ -33,13 +33,13 @@ assert.match(integrations,
 assert.doesNotMatch(integrations, /geocodeCity\([^\n]+\)\.catch\(\(\) => null\)/,
   "Geocoding failures must reach the weather unavailable state");
 
-assert.match(integrations, /function webUrlItem[\s\S]*safeWebUrl\(value\)/,
+assert.match(integrations, /export function visibleWebUrlItems[\s\S]*safeWebUrl\(item\.url\)/,
   "History and browser-pinned entries must cross the shared HTTP(S) URL boundary");
-assert.match(integrations, /recentHistory[\s\S]*webUrlItem\(item\.title, item\.url\)/);
-assert.match(integrations, /browserPinnedTabs[\s\S]*webUrlItem\(tab\.title, tab\.url\)/);
+assert.match(integrations, /recentHistory[\s\S]*visibleWebUrlItems\(items, maxResults\)/);
+assert.match(integrations, /browserPinnedTabs[\s\S]*visibleWebUrlItems\(tabs\)/);
 
 assert.match(options, /const localeChanged = locale\.value !== localePreference/);
-assert.match(options, /if \(localeChanged\) location\.reload\(\)/,
+assert.match(options, /if \(localeChanged\) \{[\s\S]*await setLocalePreference[\s\S]*location\.reload\(\)/,
   "Switching back to automatic locale detection must apply immediately");
 assert.doesNotMatch(options, /locale\.value !== "auto"\) location\.reload/);
 
@@ -47,7 +47,7 @@ assert.match(editor, /function providersEditor\([\s\S]*onChange: \(providers: Se
   "The search provider collection must publish live changes");
 assert.match(editor, /for \(const input of \[id, title, url\]\) input\.addEventListener\("input", notify\)/);
 assert.match(editor, /remove\.addEventListener\("click", \(\) => \{ row\.remove\(\); notify\(\); \}\)/);
-assert.match(editor, /provider\.replaceChildren\([\s\S]*provider\.value = items\.some/,
+assert.match(editor, /provider\.replaceChildren\([\s\S]*provider\.selectedIndex = providerSelectionIndexAfterEdit/,
   "The default-provider select must remain valid while providers are edited");
 
 assert.ok(readme.includes("Sectioned Options page with persistent navigation"),
