@@ -46,12 +46,13 @@ jobs:
       - name: Run Round 32 corruption fixtures
         id: round32-fixtures
         continue-on-error: true
-        run: node scripts/run-round32-fixtures.mjs 2>&1 | tee round32-diagnostic.txt
+        run: node scripts/run-round32-fixtures.mjs 2>&1 | tee /tmp/round32-fixtures.log
 
       - name: Publish Round 32 fixture diagnostic
         if: steps.round32-fixtures.outcome == 'failure'
         run: |
           git restore .
+          cp /tmp/round32-fixtures.log round32-diagnostic.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add round32-diagnostic.txt
@@ -60,7 +61,21 @@ jobs:
           exit 1
 
       - name: Validate Round 32 contracts
-        run: node scripts/validate-round32-static.mjs
+        id: round32-contracts
+        continue-on-error: true
+        run: node scripts/validate-round32-static.mjs 2>&1 | tee /tmp/round32-contracts.log
+
+      - name: Publish Round 32 contract diagnostic
+        if: steps.round32-contracts.outcome == 'failure'
+        run: |
+          git restore .
+          cp /tmp/round32-contracts.log round32-diagnostic.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add round32-diagnostic.txt
+          git commit -m "Record Round 32 contract diagnostic"
+          git push origin HEAD:codex/post-round31-deep-audit-20260722
+          exit 1
 
       - name: Typecheck audited source
         run: npm run typecheck
