@@ -14,11 +14,11 @@ GitHub normally assigns default labels such as `self-hosted`, `windows`, and `x6
 
 Do not assign `start-tab-chromium-ci` to runners used by other repositories, and do not assign it to more than one online runner if strict single-build execution is required.
 
-## Why builds run sequentially
+## Why duplicate builds do not queue
 
-The workflow intentionally has one job and no `concurrency` group. A single online runner matching `start-tab-chromium-ci` can execute only one job at a time. Additional jobs requiring that label stay in GitHub's runner queue until the runner is idle, so older waiting runs are not replaced by newer runs.
+The workflow has one project job and a per-PR/ref `concurrency` group with `cancel-in-progress: true`. A duplicate run for the same pull request or manually selected ref cancels the older queued or running copy instead of occupying the dedicated runner multiple times.
 
-If a second runner receives the same label, GitHub may execute two jobs in parallel. Keep the label exclusive to one runner.
+A single online runner matching `start-tab-chromium-ci` still provides the final serial execution boundary across different pull requests and manual refs. If a second runner receives the same label, GitHub may execute jobs from different concurrency groups in parallel. Keep the label exclusive to one runner when strict repository-wide serial execution is required.
 
 ## Windows host requirements
 
@@ -89,11 +89,15 @@ Unrelated untracked files are intentionally outside this repository cleanup cont
 
 ## Events and fork security
 
-CI runs only for pull requests targeting `master` and manual `workflow_dispatch` runs. Pull-request activity is limited to `opened`, `synchronize`, and `reopened`.
+CI runs only for pull requests targeting `master` and manual `workflow_dispatch` runs. Pull-request activity is limited to `opened`, `reopened`, and `ready_for_review`.
 
-The workflow deliberately has no `push` trigger for `master`: the complete validation has already passed on the exact PR head before merge, and this repository has no CI-managed production deployment that would justify an immediate duplicate full build after merge. Release packaging and browser-store deployment remain separate explicit processes.
+The workflow does not subscribe to `synchronize` or `push`. Additional commits in an already open pull request therefore do not automatically launch the heavy validation, and ordinary branch pushes or the merge commit do not start a duplicate build. Use an intentional manual run when a changed PR needs another complete pass.
 
-Pull requests from forks do not execute on the self-hosted runner. The workflow does not use `pull_request_target`, and its token permission is limited to `contents: read`.
+An `opened` or `reopened` draft pull request may create a skipped workflow record, but the job-level draft guard means a draft pull request does not allocate the self-hosted runner. Moving it to **Ready for review** emits `ready_for_review` and starts the complete CI once. Reopening a ready, same-repository pull request also starts the complete CI.
+
+Pull requests from forks do not execute on the self-hosted runner. The workflow uses `pull_request`, never `pull_request_target`, checks that the PR head repository equals this repository before allocating the job, and limits token permission to `contents: read`.
+
+To rerun CI deliberately, open **Actions -> CI -> Run workflow**, select the trusted repository branch/ref, and choose **Run workflow**. `workflow_dispatch` uses the same commands, cache handling, cleanup, fork boundary, and concurrency policy as the automatic run.
 
 This is a public repository, so treat write access to repository branches and approval of workflow changes as permission to execute code on the Windows runner. Never approve or manually dispatch a fork-authored workflow on this runner. Keep GitHub's outside-collaborator workflow approval enabled, review every workflow diff before approval, and reserve same-repository branches for trusted contributors.
 
