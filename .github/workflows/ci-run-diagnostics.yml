@@ -1,0 +1,97 @@
+name: CI run diagnostics
+
+on:
+  pull_request:
+    branches:
+      - master
+    types:
+      - opened
+      - synchronize
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Inspect workflow inventory and recent run events
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          CURRENT_EVENT: ${{ github.event_name }}
+          CURRENT_ACTION: ${{ github.event.action }}
+          CURRENT_PR: ${{ github.event.pull_request.number }}
+          CURRENT_DRAFT: ${{ github.event.pull_request.draft }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          repository = os.environ["GH_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+
+          def get(path):
+              request = urllib.request.Request(
+                  f"https://api.github.com/repos/{repository}{path}",
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(request) as response:
+                  return json.load(response)
+
+          repo = get("")
+          master = get(f"/git/trees/{repo['default_branch']}?recursive=1")
+          workflows = sorted(
+              item["path"]
+              for item in master.get("tree", [])
+              if item.get("type") == "blob"
+              and item["path"].startswith(".github/workflows/")
+              and item["path"].endswith((".yml", ".yaml"))
+          )
+          runs = get("/actions/runs?per_page=50").get("workflow_runs", [])
+          summary = {
+              "diagnostic_event": {
+                  "event": os.environ["CURRENT_EVENT"],
+                  "action": os.environ["CURRENT_ACTION"],
+                  "pull_request": int(os.environ["CURRENT_PR"]),
+                  "draft": os.environ["CURRENT_DRAFT"].lower() == "true",
+              },
+              "master_workflows": workflows,
+              "recent_runs": [
+                  {
+                      "id": run["id"],
+                      "name": run["name"],
+                      "event": run["event"],
+                      "status": run["status"],
+                      "conclusion": run["conclusion"],
+                      "head_branch": run["head_branch"],
+                      "head_sha": run["head_sha"],
+                      "run_number": run["run_number"],
+                      "created_at": run["created_at"],
+                      "pull_requests": [pr["number"] for pr in run.get("pull_requests", [])],
+                  }
+                  for run in runs
+              ],
+          }
+          with open("ci-run-diagnostics.json", "w", encoding="utf-8") as file:
+              json.dump(summary, file, indent=2)
+              file.write("\n")
+          print(json.dumps(summary, indent=2))
+          PY
+
+      - name: Upload diagnostic snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-run-diagnostics-${{ github.event.pull_request.number }}-${{ github.event.action }}
+          path: ci-run-diagnostics.json
+          if-no-files-found: error
+          retention-days: 1
