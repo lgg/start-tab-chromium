@@ -9,13 +9,16 @@ const cleanCiScript = await readFile("scripts/clean-ci.mjs", "utf8");
 const pathSafety = await readFile("scripts/path-safety.mjs", "utf8");
 
 assert.match(workflow, /pull_request:[\s\S]*branches:[\s\S]*- master/);
-for (const activityType of ["opened", "synchronize", "reopened"]) {
+for (const activityType of ["opened", "reopened", "ready_for_review"]) {
   assert.match(workflow, new RegExp(`\\s+- ${activityType}`), `Missing pull_request activity type: ${activityType}`);
 }
-assert.doesNotMatch(workflow, /^\s{2}push:/m, "PR CI must not run a duplicate full build after merge");
+assert.doesNotMatch(workflow, /\s+- synchronize/, "New commits in an open PR must not start the heavy CI");
+assert.doesNotMatch(workflow, /^\s{2}push:/m, "PR CI must not run on branch pushes or after merge");
 assert.match(workflow, /workflow_dispatch:/);
 assert.doesNotMatch(workflow, /pull_request_target/);
 assert.match(workflow, /permissions:\s*\n\s*contents: read/);
+assert.match(workflow, /github\.event_name == 'workflow_dispatch'/);
+assert.match(workflow, /github\.event\.pull_request\.draft == false/);
 assert.match(workflow, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
 
 assert.equal((workflow.match(/^[ \t]+jobs:/gm) ?? []).length, 0, "jobs must be a top-level key");
@@ -24,8 +27,9 @@ assert.equal((workflow.match(/^[ \t]{4}runs-on:/gm) ?? []).length, 1, "CI must r
 assert.match(workflow, /^[ \t]{4}runs-on: start-tab-chromium-ci$/m);
 assert.doesNotMatch(workflow, /^[ \t]{6}- (?:self-hosted|windows|x64)$/m);
 assert.doesNotMatch(workflow, /ubuntu-latest|macos-latest/);
-assert.doesNotMatch(workflow, /^concurrency:/m);
-assert.doesNotMatch(workflow, /cancel-in-progress/);
+assert.match(workflow, /^concurrency:\s*$/m);
+assert.match(workflow, /^\s{2}group: ci-\$\{\{ github\.event\.pull_request\.number \|\| github\.ref \}\}$/m);
+assert.match(workflow, /^\s{2}cancel-in-progress: true$/m);
 assert.match(workflow, /^[ \t]{8}shell: pwsh$/m);
 assert.doesNotMatch(workflow, /^[ \t]+shell: powershell$/m);
 
@@ -210,6 +214,11 @@ assert.match(runnerGuide, /No repository secret or Actions variable is required/
 assert.match(runnerGuide, /cache retention at \*\*1 day\*\*/);
 assert.match(runnerGuide, /Never approve or manually dispatch a fork-authored workflow/);
 assert.match(runnerGuide, /pull requests targeting `master` and manual `workflow_dispatch` runs/);
+assert.match(runnerGuide, /`opened`, `reopened`, and `ready_for_review`/);
+assert.match(runnerGuide, /does not subscribe to `synchronize` or `push`/);
+assert.match(runnerGuide, /draft pull request does not allocate the self-hosted runner/);
+assert.match(runnerGuide, /Actions -> CI -> Run workflow/);
+assert.match(runnerGuide, /cancel-in-progress: true/);
 assert.match(runnerGuide, /project-specific cache directory inside `RUNNER_TEMP`/);
 assert.match(runnerGuide, /checkout's built-in recursive clean is disabled/,
   "Runner documentation must explain why checkout delegates deletion to bounded cleanup");
