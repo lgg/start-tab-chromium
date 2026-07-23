@@ -1,3 +1,4 @@
+# Control commit used to record the pre-fix pull_request synchronize behavior.
 name: CI run diagnostics
 
 on:
