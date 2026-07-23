@@ -6,20 +6,26 @@ on:
       - master
     types:
       - opened
-      - synchronize
       - reopened
+      - ready_for_review
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Intentionally no concurrency group: the dedicated single runner preserves every
-# queued job instead of replacing older pending runs.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.draft == false &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      )
     runs-on: start-tab-chromium-ci
     timeout-minutes: 30
     defaults:
