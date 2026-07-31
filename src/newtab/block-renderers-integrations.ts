@@ -54,15 +54,16 @@ function calendarDate(value: string): Date | null {
 }
 
 export function calendarEventLabel(event: GoogleCalendarEvent, i18n: I18n): string {
-  if (!event.start) return event.title;
+  const title = event.title.trim() || i18n.t("calendarUntitledEvent");
+  if (!event.start) return title;
   const start = calendarDate(event.start);
   if (event.allDay) {
-    if (!start) return `${event.title} · ${i18n.t("calendarAllDay")}`;
+    if (!start) return `${title} · ${i18n.t("calendarAllDay")}`;
     const date = new Intl.DateTimeFormat(i18n.locale, { dateStyle: "short" }).format(start);
-    return `${event.title} · ${date} · ${i18n.t("calendarAllDay")}`;
+    return `${title} · ${date} · ${i18n.t("calendarAllDay")}`;
   }
-  if (!start) return `${event.title} · ${i18n.t("calendarAllDay")}`;
-  return `${event.title} · ${new Intl.DateTimeFormat(i18n.locale, { dateStyle: "short", timeStyle: "short" }).format(start)}`;
+  if (!start) return title;
+  return `${title} · ${new Intl.DateTimeFormat(i18n.locale, { dateStyle: "short", timeStyle: "short" }).format(start)}`;
 }
 
 export function renderGoogleCalendar(
@@ -158,6 +159,11 @@ async function fetchWeather(block: Extract<BlockInstance, { type: "weather" }>):
   };
 }
 
+export function weatherDaysForDisplay(weather: Pick<WeatherResult, "days">, displayMode: "day" | "week"): WeatherDay[] {
+  const count = displayMode === "day" ? 1 : 7;
+  return weather.days.slice(0, count);
+}
+
 function weatherSummary(code: number | null, i18n: I18n): string {
   if (code === null) return i18n.t("weatherUnknown");
   if (code === 0) return i18n.t("weatherClear");
@@ -187,8 +193,9 @@ export function renderWeather(
       if (weather.currentTemperature === null) throw new Error("Missing current weather");
       content.append(element("p", "weather__current", context.i18n.t("weatherCurrent", { temp: Math.round(weather.currentTemperature), unit: weather.unit, summary: weatherSummary(weather.currentCode, context.i18n) })));
     } else {
-      const count = block.config.displayMode === "day" ? 1 : 7;
-      content.append(...weather.days.slice(0, count).map((day) => element("p", "weather__day", context.i18n.t("weatherDay", {
+      const days = weatherDaysForDisplay(weather, block.config.displayMode);
+      if (days.length === 0) throw new Error("Missing daily weather");
+      content.append(...days.map((day) => element("p", "weather__day", context.i18n.t("weatherDay", {
         day: new Intl.DateTimeFormat(context.i18n.locale, { weekday: "short", month: "short", day: "numeric" }).format(new Date(`${day.date}T12:00:00`)),
         min: Math.round(day.min),
         max: Math.round(day.max),
@@ -282,11 +289,13 @@ export function renderCommands(container: HTMLElement, context: BlockRenderConte
     actionButton(context.i18n.t("openSettings"), () => chrome.runtime.openOptionsPage(), "button", context.reportError),
     actionButton(context.i18n.t("exportBackup"), async () => downloadJson(backupFileName(), await exportBackup()), "button", context.reportError),
     actionButton(context.i18n.t("commandResetClocks"), async () => {
+      if (!window.confirm(context.i18n.t("resetAllClocksConfirm"))) return;
       await sendMessage({ type: "reset-clocks" });
       context.runtime = await getStartPageRuntimeState(context.settings);
       context.requestRender();
     }, "button", context.reportError),
     actionButton(context.i18n.t("commandResetStats"), async () => {
+      if (!window.confirm(context.i18n.t("resetStatisticsConfirm"))) return;
       await sendMessage({ type: "reset-stats" });
       context.requestRender();
     }, "button", context.reportError),

@@ -10,5 +10,11 @@
   },
   "restoreDataConfirm": {
     "message": "Restore this backup and replace the current local Start Tab data? A recovery snapshot will be created first."
+  },
+  "calendarUntitledEvent": {
+    "message": "Untitled event"
+  },
+  "resetAllClocksConfirm": {
+    "message": "Reset every timer, stopwatch, and Pomodoro instance?"
   }
 }

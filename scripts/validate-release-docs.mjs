@@ -14,6 +14,7 @@ const [
   packageSource,
   readme,
   releaseNotes,
+  legacyReleaseNotes,
   deployment,
   manualQa,
   ci,
@@ -26,6 +27,7 @@ const [
   read("package.json"),
   read("README.md"),
   read("docs/release.md"),
+  read("docs/release-3.0.0.md"),
   read("docs/deployment-3.0.0.md"),
   read("docs/manual-qa-3.0.0.md"),
   read(".github/workflows/ci.yml"),
@@ -99,6 +101,12 @@ if (selected("documentation")) {
   assert.match(releaseNotes, /Start Page settings schema: version 4|Start Page schema 4/, "Release notes must document the current settings schema");
   assert.match(releaseNotes, /explicit Google profile/, "Release notes must describe deterministic build-profile selection");
   assert.match(manualQa, /npm run build:google/, "Manual QA must include the Google-enabled profile");
+  assert.match(legacyReleaseNotes, /npm run build:google/,
+    "The 3.0.0 release guide must use the explicit Google build profile");
+  assert.match(legacyReleaseNotes, /build-google\//,
+    "The 3.0.0 release guide must name the Google-enabled output directory");
+  assert.doesNotMatch(legacyReleaseNotes, /GOOGLE_OAUTH_CLIENT_ID=[^\n]+ npm run build\s*$/m,
+    "The 3.0.0 release guide must not claim the ordinary build consumes OAuth configuration");
 }
 
 if (selected("ci")) {

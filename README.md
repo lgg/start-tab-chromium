@@ -58,9 +58,9 @@ npm run build:blocker-only
 
 ### Self-hosted Windows CI
 
-Repository CI runs on one dedicated Windows self-hosted runner selected only by the project-specific label `start-tab-chromium-ci`. The single matching runner serializes builds without canceling older queued runs. CI caches only npm download data, does not upload build artifacts, and removes project-local dependencies, build outputs, and cache files with an `always()` cleanup step.
+Repository CI runs on one dedicated Windows self-hosted runner selected only by the project-specific label `start-tab-chromium-ci`. A per-PR/ref concurrency group cancels accidental duplicate runs, while the single matching runner serializes different trusted PRs and manual refs. CI caches only npm download data, does not upload build artifacts, and removes project-local dependencies, build outputs, and cache files with an `always()` cleanup step.
 
-See [`docs/self-hosted-runner.md`](docs/self-hosted-runner.md) for single-label registration, queue behavior, cache isolation, cleanup boundaries, fork security, and host-level maintenance.
+See [`docs/self-hosted-runner.md`](docs/self-hosted-runner.md) for single-label registration, event gating, duplicate cancellation, cache isolation, cleanup boundaries, fork security, and host-level maintenance.
 
 The full production extension is built into `build/` and can be loaded as an unpacked Chromium extension. The blocker-only variant is built into `build-blocker-only/` and omits `chrome_url_overrides.newtab`, new-tab assets, and the unused `history` permission.
 

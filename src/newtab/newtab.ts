@@ -29,6 +29,7 @@ import { applyTheme } from "./theme-runtime.js";
 
 const ONBOARDING_KEY = "startPageOnboarding";
 const GATE_CHANGE_EVENT = "start-tab-gate-change";
+const DISMISS_ONBOARDING_EVENT = "start-tab-dismiss-onboarding";
 
 function requireElement<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -76,6 +77,8 @@ let renderCleanups: Array<() => void> = [];
 let disposed = false;
 let runtimeMutationJob: Promise<void> = Promise.resolve();
 let onboardingOpening = false;
+let onboardingFinishing = false;
+let onboardingPreviousFocus: HTMLElement | null = null;
 
 function clearRenderCleanups(): void {
   for (const cleanup of renderCleanups.splice(0)) cleanup();
@@ -311,30 +314,51 @@ async function onboardingState(): Promise<boolean> {
   return typeof value === "object" && value !== null && (value as { onboarded?: unknown }).onboarded === true;
 }
 
-async function finishOnboarding(presetId: LayoutPresetId | null): Promise<void> {
-  if (presetId) {
-    const next = settingsWithLayoutPreset(savedSettings, presetId);
-    const removesUserData = layoutReplacementRemovesUserData(savedSettings, next, runtime);
-    if (removesUserData && !window.confirm(i18n.t("applyPresetWithDataConfirm"))) return;
-    await sendMessage({
-      type: "replace-start-page-settings",
-      settings: next,
-      expectedSettingsUpdatedAt: savedSettings.updatedAt,
-      expectedRuntimeUpdatedAt: runtime.updatedAt,
-    });
-    savedSettings = await getStartPageSettings();
-    editor.replaceSavedSettings(savedSettings);
-    runtime = await getStartPageRuntimeState(savedSettings);
-  }
-  await withStorageLock("data-write", async () => {
-    await commitStorageMutationWithRevision(
-      [ONBOARDING_KEY],
-      () => chrome.storage.local.set({ [ONBOARDING_KEY]: { onboarded: true } }),
-    );
-  });
-  document.getElementById("onboarding")?.remove();
+function dismissOnboarding(restoreFocus = true): void {
+  const overlay = document.getElementById("onboarding");
+  if (overlay) overlay.remove();
   syncStartPageInert();
-  queueRender();
+  if (restoreFocus && onboardingPreviousFocus?.isConnected) onboardingPreviousFocus.focus();
+  onboardingPreviousFocus = null;
+}
+
+function setOnboardingActionsDisabled(disabled: boolean): void {
+  document.querySelectorAll<HTMLButtonElement>("#onboarding button").forEach((action) => {
+    action.disabled = disabled;
+  });
+}
+
+async function finishOnboarding(presetId: LayoutPresetId | null): Promise<void> {
+  if (onboardingFinishing) return;
+  onboardingFinishing = true;
+  setOnboardingActionsDisabled(true);
+  try {
+    if (presetId) {
+      const next = settingsWithLayoutPreset(savedSettings, presetId);
+      const removesUserData = layoutReplacementRemovesUserData(savedSettings, next, runtime);
+      if (removesUserData && !window.confirm(i18n.t("applyPresetWithDataConfirm"))) return;
+      await sendMessage({
+        type: "replace-start-page-settings",
+        settings: next,
+        expectedSettingsUpdatedAt: savedSettings.updatedAt,
+        expectedRuntimeUpdatedAt: runtime.updatedAt,
+      });
+      savedSettings = await getStartPageSettings();
+      editor.replaceSavedSettings(savedSettings);
+      runtime = await getStartPageRuntimeState(savedSettings);
+    }
+    await withStorageLock("data-write", async () => {
+      await commitStorageMutationWithRevision(
+        [ONBOARDING_KEY],
+        () => chrome.storage.local.set({ [ONBOARDING_KEY]: { onboarded: true } }),
+      );
+    });
+    dismissOnboarding();
+    queueRender();
+  } finally {
+    onboardingFinishing = false;
+    if (document.getElementById("onboarding")) setOnboardingActionsDisabled(false);
+  }
 }
 
 async function showOnboarding(): Promise<void> {
@@ -346,17 +370,20 @@ async function showOnboarding(): Promise<void> {
       || document.getElementById("startTabGateOverlay")
       || document.getElementById("onboarding")
       || await onboardingState()) return;
+    onboardingPreviousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const overlay = element("div", "onboarding");
     overlay.id = "onboarding";
     const panel = element("section", "onboarding__panel");
     panel.setAttribute("role", "dialog");
     panel.setAttribute("aria-modal", "true");
     panel.setAttribute("aria-labelledby", "onboarding-title");
+    panel.setAttribute("aria-describedby", "onboarding-description");
     panel.tabIndex = -1;
     panel.addEventListener("keydown", (event) => trapModalFocus(event, panel));
     const title = element("h1", "onboarding__title", i18n.t("onboardingTitle"));
     title.id = "onboarding-title";
     const text = element("p", "onboarding__text", i18n.t("onboardingText"));
+    text.id = "onboarding-description";
     const presets = element("div", "onboarding__presets");
     for (const preset of LAYOUT_PRESETS) {
       const item = button(i18n.t(preset.titleKey), "button button--secondary");
@@ -401,6 +428,10 @@ function handleStorageChange(changes: Record<string, chrome.storage.StorageChang
   }
 }
 
+function dismissOnboardingFromGate(): void {
+  dismissOnboarding();
+}
+
 function handleGateChange(): void {
   runUiTask(async () => {
     if (!document.getElementById("startTabGateOverlay") && !editor.hasUnsavedChanges) await refreshState();
@@ -425,6 +456,7 @@ function dispose(): void {
   renderScheduler.dispose();
   chrome.storage.onChanged.removeListener(handleStorageChange);
   window.removeEventListener(GATE_CHANGE_EVENT, handleGateChange);
+  window.removeEventListener(DISMISS_ONBOARDING_EVENT, dismissOnboardingFromGate);
   window.removeEventListener("resize", handleResize);
   window.removeEventListener("beforeunload", handleBeforeUnload);
 }
@@ -457,6 +489,7 @@ async function init(): Promise<void> {
   settingsButton.addEventListener("click", () => runUiTask(() => chrome.runtime.openOptionsPage()));
   chrome.storage.onChanged.addListener(handleStorageChange);
   window.addEventListener(GATE_CHANGE_EVENT, handleGateChange);
+  window.addEventListener(DISMISS_ONBOARDING_EVENT, dismissOnboardingFromGate);
   window.addEventListener("resize", handleResize);
   window.addEventListener("beforeunload", handleBeforeUnload);
   window.addEventListener("pagehide", dispose, { once: true });

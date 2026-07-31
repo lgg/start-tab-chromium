@@ -3,7 +3,6 @@ import { placeGridBlock, placeGridBlocks } from "../lib/grid-layout.js";
 import type { I18n } from "../lib/i18n.js";
 import { sendMessage } from "../lib/messages.js";
 import { MAX_START_PAGE_BLOCKS } from "../lib/platform-limits.js";
-import { instanceRuntimeHasUserData } from "../lib/start-page-runtime.js";
 import {
   BLOCK_DESCRIPTORS,
   blockDescriptor,
@@ -14,7 +13,7 @@ import {
   cloneSettings,
   createBlockInstance,
   getStartPageSettings,
-  hasBlockUserData,
+  blockDeletionRequiresDataConfirmation,
   isSingletonBlockType,
   type BlockInstance,
   type BlockType,
@@ -270,7 +269,7 @@ export class LayoutEditor {
     const block = this.draft.layout.blocks.find((candidate) => candidate.id === id);
     if (!block) return;
     const runtime = this.options.getRuntime();
-    const needsConfirm = hasBlockUserData(block, runtime) || instanceRuntimeHasUserData(id, runtime);
+    const needsConfirm = blockDeletionRequiresDataConfirmation(block, runtime);
     if (needsConfirm && !window.confirm(this.options.i18n.t("deleteBlockWithDataConfirm", { title: this.displayTitle(block) }))) return;
     if (!needsConfirm && !window.confirm(this.options.i18n.t("deleteBlockConfirm", { title: this.displayTitle(block) }))) return;
     if (this.destructiveRuntimeUpdatedAt === null

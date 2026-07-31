@@ -10,5 +10,11 @@
   },
   "restoreDataConfirm": {
     "message": "Восстановить эту резервную копию и заменить текущие локальные данные Start Tab? Перед заменой будет создан снимок для восстановления."
+  },
+  "calendarUntitledEvent": {
+    "message": "Событие без названия"
+  },
+  "resetAllClocksConfirm": {
+    "message": "Сбросить все таймеры, секундомеры и экземпляры Pomodoro?"
   }
 }

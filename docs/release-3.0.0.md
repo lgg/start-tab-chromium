@@ -92,6 +92,7 @@ npm run typecheck
 npm test
 npm run build
 npm run build:blocker-only
+GOOGLE_OAUTH_CLIENT_ID=ci-validation.apps.googleusercontent.com npm run build:google
 ```
 
 `npm test` additionally executes schema/runtime fixtures and static checks for MV3, localization parity, remote-script exclusion, typed instance architecture, backup versioning, Browser Sync chunk/checksum behavior, and manifest generation.
@@ -117,17 +118,17 @@ The default build is deployable without Google integration: the builder removes 
 To create a Google-enabled build, pass a real Chrome-extension OAuth client ID at build time:
 
 ```bash
-GOOGLE_OAUTH_CLIENT_ID=your-client.apps.googleusercontent.com npm run build
+GOOGLE_OAUTH_CLIENT_ID=your-client.apps.googleusercontent.com npm run build:google
 ```
 
 On PowerShell:
 
 ```powershell
 $env:GOOGLE_OAUTH_CLIENT_ID = "your-client.apps.googleusercontent.com"
-npm run build
+npm run build:google
 ```
 
-The build fails for a malformed non-empty ID. Do not edit the generated manifest by hand.
+The Google-enabled artifact is written to `build-google/`. The build rejects missing, placeholder, or malformed IDs. Do not edit the generated manifest by hand.
 
 ## Known external constraints
 
