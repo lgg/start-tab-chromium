@@ -26,6 +26,7 @@ import { jsonContentEqual } from "./lib/json-content.js";
 import { MAX_NOTE_LENGTH } from "./lib/platform-limits.js";
 import { runIndependentEffects } from "./lib/independent-effects.js";
 import { containsSplitViewMarker } from "./lib/split-view-markers.js";
+import { assertRuntimeMutationTarget } from "./lib/runtime-mutation-target.js";
 import { isMessage, type Ack, type ClockAction, type Message } from "./lib/messages.js";
 import { consumeNativeNewTabBypass, openNativeNewTab } from "./lib/native-new-tab.js";
 import {
@@ -179,7 +180,8 @@ export function sameTasks(left: readonly LocalTask[], right: readonly LocalTask[
 }
 
 async function updateRuntimeNote(instanceId: string, value: string, expectedValue: string): Promise<void> {
-  await updateStartPageRuntimeState((runtime) => {
+  await updateStartPageRuntimeState((runtime, settings) => {
+    assertRuntimeMutationTarget(settings, instanceId, "note");
     const current = ownValue(runtime.notes, instanceId) ?? "";
     if (current !== expectedValue) {
       throw new Error("Start Tab note changed in another extension context; latest data was kept");
@@ -190,7 +192,8 @@ async function updateRuntimeNote(instanceId: string, value: string, expectedValu
 }
 
 async function updateRuntimeTasks(instanceId: string, tasks: LocalTask[], expectedTasks: LocalTask[]): Promise<void> {
-  await updateStartPageRuntimeState((runtime) => {
+  await updateStartPageRuntimeState((runtime, settings) => {
+    assertRuntimeMutationTarget(settings, instanceId, "tasks");
     const current = ownValue(runtime.tasks, instanceId) ?? [];
     if (!sameTasks(current, expectedTasks)) {
       throw new Error("Start Tab tasks changed in another extension context; latest data was kept");
@@ -201,7 +204,8 @@ async function updateRuntimeTasks(instanceId: string, tasks: LocalTask[], expect
 }
 
 async function updateRuntimeLinkPage(instanceId: string, page: number, expectedPage: number): Promise<void> {
-  await updateStartPageRuntimeState((runtime) => {
+  await updateStartPageRuntimeState((runtime, settings) => {
+    assertRuntimeMutationTarget(settings, instanceId, "linkPage");
     const current = ownValue(runtime.linkPages, instanceId) ?? 0;
     if (current !== expectedPage) {
       throw new Error("Start Tab link page changed in another extension context; latest data was kept");

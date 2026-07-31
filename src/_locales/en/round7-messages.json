@@ -16,5 +16,20 @@
   },
   "resetAllClocksConfirm": {
     "message": "Reset every timer, stopwatch, and Pomodoro instance?"
+  },
+  "splitViewTitle": {
+    "message": "Choose a tab for Split View"
+  },
+  "splitViewText": {
+    "message": "Select an open tab below."
+  },
+  "startTabDisabledTitle": {
+    "message": "Start Tab is disabled"
+  },
+  "startTabDisabledText": {
+    "message": "Re-enable Start Tab in extension settings."
+  },
+  "gateUntitledTab": {
+    "message": "Untitled tab"
   }
 }

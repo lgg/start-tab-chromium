@@ -1,4 +1,5 @@
 import type { I18n } from "./i18n.js";
+import { focusExistingSettingsDialog, nextSettingsDialogTitleId } from "./settings-dialog-guard.js";
 import {
 cloneTheme,
 normalizeTheme,
@@ -188,16 +189,19 @@ draw();
 return { root, read: () => readDynamic() };
 }
 export async function editTheme(theme: StartPageTheme, i18n: I18n): Promise<StartPageTheme | null> {
+if (focusExistingSettingsDialog()) return null;
 return new Promise<StartPageTheme | null>((resolve) => {
 const working = cloneTheme(theme);
 const dialog = element("dialog", "settings-dialog");
-dialog.setAttribute("aria-labelledby", "theme-editor-title");
+dialog.tabIndex = -1;
+const titleId = nextSettingsDialogTitleId("theme-editor-title");
+dialog.setAttribute("aria-labelledby", titleId);
 const form = element("form", "settings-dialog__form");
 form.method = "dialog";
 const header = element("header", "settings-dialog__header");
 const heading = element("div", "settings-dialog__heading");
 const title = element("h2", "settings-dialog__title", i18n.t("themeEditorTitle", { name: working.name }));
-title.id = "theme-editor-title";
+title.id = titleId;
 heading.append(title, element("p", "settings-dialog__subtitle", i18n.t("themeEditorSubtitle")));
 const close = button("×", "icon-button settings-dialog__close");
 close.setAttribute("aria-label", i18n.t("close"));

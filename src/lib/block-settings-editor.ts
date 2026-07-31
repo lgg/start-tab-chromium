@@ -1,4 +1,5 @@
 import type { I18n } from "./i18n.js";
+import { focusExistingSettingsDialog, nextSettingsDialogTitleId } from "./settings-dialog-guard.js";
 import {
   blockTitleKey,
   blockUsesDefaultTitle,
@@ -328,10 +329,13 @@ function configFields(
 }
 
 export async function editBlockInstance(block: BlockInstance, i18n: I18n): Promise<BlockInstance | null> {
+  if (focusExistingSettingsDialog()) return null;
   return new Promise<BlockInstance | null>((resolve) => {
     const result: DialogResult = { block: null };
     const dialog = element("dialog", "settings-dialog");
-    dialog.setAttribute("aria-labelledby", "block-settings-title");
+    dialog.tabIndex = -1;
+    const titleId = nextSettingsDialogTitleId("block-settings-title");
+    dialog.setAttribute("aria-labelledby", titleId);
     const form = element("form", "settings-dialog__form");
     form.method = "dialog";
     const header = element("header", "settings-dialog__header");
@@ -341,7 +345,7 @@ export async function editBlockInstance(block: BlockInstance, i18n: I18n): Promi
     const usesDefaultTitle = blockUsesDefaultTitle(block);
     const displayedTitle = usesDefaultTitle ? localizedDefaultTitle : block.title;
     const title = element("h2", "settings-dialog__title", i18n.t("instanceSettingsTitle", { title: displayedTitle }));
-    title.id = "block-settings-title";
+    title.id = titleId;
     heading.append(title, element("p", "settings-dialog__subtitle", i18n.t("instanceSettingsSubtitle", { type: localizedDefaultTitle, id: block.id })));
     const close = button("×", "icon-button settings-dialog__close");
     close.title = i18n.t("close");

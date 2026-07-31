@@ -16,5 +16,20 @@
   },
   "resetAllClocksConfirm": {
     "message": "Сбросить все таймеры, секундомеры и экземпляры Pomodoro?"
+  },
+  "splitViewTitle": {
+    "message": "Выберите вкладку для разделённого просмотра"
+  },
+  "splitViewText": {
+    "message": "Выберите открытую вкладку ниже."
+  },
+  "startTabDisabledTitle": {
+    "message": "Start Tab отключён"
+  },
+  "startTabDisabledText": {
+    "message": "Снова включите Start Tab в настройках расширения."
+  },
+  "gateUntitledTab": {
+    "message": "Вкладка без названия"
   }
 }

@@ -6,6 +6,7 @@
   const DIAGNOSTICS_KEY = "startTabLastNativeNewTabContext";
   const GATE_CHANGE_EVENT = "start-tab-gate-change";
   const DISMISS_ONBOARDING_EVENT = "start-tab-dismiss-onboarding";
+  const catalogFiles = ["messages.json", "roadmap-messages.json", "round7-messages.json"];
   const splitMarkers = ["split-view", "split_view", "splitview", "side-by-side", "sidebyside", "side_panel", "side-panel", "tab-picker", "tab_picker", "tabpicker", "select-tab", "select_tab", "selecttab"];
   const ignore = () => undefined;
   let catalog = null;
@@ -18,13 +19,19 @@
   async function loadGateCatalog() {
     const items = await chrome.storage.local.get(LOCALE_OVERRIDE_KEY).catch(() => ({}));
     const locale = items[LOCALE_OVERRIDE_KEY];
-    if (locale !== "en" && locale !== "ru") return;
-    try {
-      const response = await fetch(chrome.runtime.getURL(`_locales/${locale}/messages.json`));
-      if (response.ok) catalog = await response.json();
-    } catch {
+    if (locale !== "en" && locale !== "ru") {
       catalog = null;
+      return;
     }
+    const catalogs = await Promise.all(catalogFiles.map(async (file) => {
+      try {
+        const response = await fetch(chrome.runtime.getURL(`_locales/${locale}/${file}`));
+        return response.ok ? await response.json() : {};
+      } catch {
+        return {};
+      }
+    }));
+    catalog = Object.assign({}, ...catalogs);
   }
 
   const text = (key, fallback) => catalog?.[key]?.message || chrome.i18n.getMessage(key) || fallback;
@@ -119,7 +126,7 @@
     for (const tab of tabs) {
       const button = document.createElement("button");
       button.type = "button";
-      button.textContent = tab.title || tab.url || "Untitled";
+      button.textContent = tab.title || tab.url || text("gateUntitledTab", "Untitled tab");
       button.style.cssText = "display:block;width:100%;margin:8px 0;padding:10px;text-align:left";
       button.addEventListener("click", () => run(async () => {
         const current = await chrome.tabs.getCurrent();
@@ -169,7 +176,7 @@
     try {
       if (await splitContext()) {
         const current = await chrome.tabs.getCurrent().catch(() => null);
-        const tabs = (await chrome.tabs.query({ currentWindow: true }))
+        const tabs = (await chrome.tabs.query({ currentWindow: true }).catch(() => []))
           .filter((tab) => tab.id !== current?.id)
           .map(webTab)
           .filter(Boolean);
@@ -189,7 +196,12 @@
     const nativeButton = document.getElementById("nativeNewTab");
     if (nativeButton) nativeButton.addEventListener("click", () => run(openNative));
     chrome.storage.onChanged.addListener((changes, area) => {
-      if (area === "local" && changes[SETTINGS_KEY]) void apply().catch(ignore);
+      if (area !== "local") return;
+      if (changes[LOCALE_OVERRIDE_KEY]) {
+        void loadGateCatalog().then(apply).catch(ignore);
+      } else if (changes[SETTINGS_KEY]) {
+        void apply().catch(ignore);
+      }
     });
     await apply();
   }

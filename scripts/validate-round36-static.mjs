@@ -43,8 +43,10 @@ assert.match(options, /renderStatistics\(\)[\s\S]*catch[\s\S]*statisticsUnavaila
   "Statistics failure must leave a visible localized section instead of removing navigation");
 
 assert.match(gate, /LOCALE_OVERRIDE_KEY/);
-assert.match(gate, /_locales\/\$\{locale\}\/messages\.json/,
+assert.match(gate, /_locales\/\$\{locale\}\/\$\{file\}/,
   "The early gate must honor the explicit locale override before the module UI loads");
+assert.match(gate, /catalogFiles[\s\S]*messages\.json[\s\S]*round7-messages\.json/,
+  "The early gate must load every catalog that can contain gate strings");
 assert.doesNotMatch(gate, /openerNewTab/,
   "A generic opener relationship must not be treated as proof of Split View");
 assert.match(gate, /opener\?\.url[\s\S]*opener\?\.pendingUrl[\s\S]*opener\?\.title/,

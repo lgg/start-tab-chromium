@@ -76,6 +76,7 @@ import {
   type StartPageTheme,
 } from "../lib/start-page-settings.js";
 import { editTheme } from "../lib/theme-editor.js";
+import { restoreDeferredSectionAnchor } from "./deferred-section.js";
 
 function requireElement<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -672,11 +673,13 @@ function render(): void {
   void renderStatistics().then((statistics) => {
     if (generation !== renderGeneration) return;
     sections.append(statistics);
+    restoreDeferredSectionAnchor(statistics);
   }).catch((error: unknown) => {
     if (generation !== renderGeneration) return;
     const failed = section("statistics", i18n.t("sectionStatistics"), i18n.t("sectionStatisticsDescription"));
     failed.body.append(element("p", "empty-state", i18n.t("statisticsUnavailable")));
     sections.append(failed.root);
+    restoreDeferredSectionAnchor(failed.root);
     reportUiError(error);
   });
   rendering = false;
