@@ -262,3 +262,16 @@ For each failed item capture:
 - [ ] Confirm every direct restore/import action asks for confirmation before replacing local data; cancel and verify storage remains unchanged.
 - [ ] Simulate Browser Sync metadata/chunk interleaving after upload and confirm the upload fails without advancing local sync metadata.
 - [ ] Force statistics loading to fail and confirm all Options navigation links and non-statistics sections remain usable, with a localized statistics fallback.
+
+## Round 37 completion checks
+
+- [ ] Open and close onboarding with keyboard focus on a visible page control; confirm focus returns to that control and rapid double-clicks cannot submit the onboarding transaction twice.
+- [ ] Activate the disabled/Split View gate while onboarding is open; confirm onboarding is dismissed cleanly, the page remains inert under the gate, and only one modal is present.
+- [ ] Verify real Split View markers (`side-by-side`, `side_panel`, `tabpicker`, `selecttab`) are recognized, while unrelated internal URLs containing only `split`, `picker`, or `pane` are not.
+- [ ] Configure Weather for day/week mode and simulate a valid provider response with no complete daily entries; confirm the card shows the localized unavailable state instead of a blank card.
+- [ ] Simulate a Calendar event with an empty title and an invalid timed start; confirm a localized untitled label appears and the event is not mislabeled as all-day.
+- [ ] In the Commands block, cancel Reset all clocks and Reset focus statistics; confirm no mutation occurs. Then confirm each action and verify the intended global reset.
+- [ ] Create non-empty Note and Local Tasks blocks. With “confirm deletion with content” enabled, confirm the stronger saved-data warning appears; with it disabled, confirm deletion still asks the generic block confirmation.
+- [ ] Start or advance a Timer/Stopwatch/Pomodoro and delete its block; confirm the saved-data warning appears.
+- [ ] Build all profiles and confirm `blocked.html` resolves `icons/icon.large.png`; build validation must fail if that asset is removed.
+- [ ] Follow the legacy 3.0.0 release guide and confirm its Google instructions produce `build-google/` via `npm run build:google`.

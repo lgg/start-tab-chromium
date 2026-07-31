@@ -5,7 +5,8 @@
   const ONBOARDING_ID = "onboarding";
   const DIAGNOSTICS_KEY = "startTabLastNativeNewTabContext";
   const GATE_CHANGE_EVENT = "start-tab-gate-change";
-  const splitMarkers = ["split-view", "split_view", "splitview", "tab-picker", "tab_picker", "select-tab", "select_tab"];
+  const DISMISS_ONBOARDING_EVENT = "start-tab-dismiss-onboarding";
+  const splitMarkers = ["split-view", "split_view", "splitview", "side-by-side", "sidebyside", "side_panel", "side-panel", "tab-picker", "tab_picker", "tabpicker", "select-tab", "select_tab", "selecttab"];
   const ignore = () => undefined;
   let catalog = null;
   let previousFocus = null;
@@ -92,7 +93,9 @@
 
   function showOverlay(title, description, tabs = []) {
     removeOverlay();
+    window.dispatchEvent(new Event(DISMISS_ONBOARDING_EVENT));
     document.getElementById(ONBOARDING_ID)?.remove();
+    syncPageInert();
     previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const overlay = document.createElement("div");
     overlay.id = OVERLAY_ID;

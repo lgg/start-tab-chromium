@@ -98,7 +98,7 @@ function normalizedCalendarMaxResults(maxResults: number): number {
 function calendarEvent(payload: CalendarEventPayload): GoogleCalendarEvent {
   return {
     id: payload.id ?? crypto.randomUUID(),
-    title: payload.summary ?? "Untitled event",
+    title: payload.summary?.trim() ?? "",
     start: payload.start?.dateTime ?? payload.start?.date ?? "",
     end: payload.end?.dateTime ?? payload.end?.date ?? "",
     allDay: Boolean(payload.start?.date && !payload.start.dateTime),

@@ -55,6 +55,7 @@ for (const file of [
   "icons/icon.16.png",
   "icons/icon.48.png",
   "icons/icon.128.png",
+  "icons/icon.large.png",
 ]) {
   assert.equal(await exists(file), true, `${variant} build is missing ${file}`);
 }

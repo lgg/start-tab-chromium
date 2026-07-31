@@ -38,7 +38,6 @@ import { MAX_CUSTOM_THEMES, MAX_START_PAGE_BLOCKS } from "../lib/platform-limits
 import {
   deleteInstanceRuntime,
   getStartPageRuntimeState,
-  instanceRuntimeHasUserData,
   type StartPageRuntimeState,
 } from "../lib/start-page-runtime.js";
 import {
@@ -57,7 +56,7 @@ import {
   exportCustomTheme,
   getStartPageMigrationReport,
   getStartPageSettings,
-  hasBlockUserData,
+  blockDeletionRequiresDataConfirmation,
   importCustomTheme,
   isSingletonBlockType,
   layoutMatchesPreset,
@@ -425,7 +424,7 @@ function blockActions(block: BlockInstance): HTMLElement {
   });
   const remove = button(i18n.t("delete"), "button button--danger");
   remove.addEventListener("click", () => {
-    const withData = hasBlockUserData(block, runtime) || instanceRuntimeHasUserData(block.id, runtime);
+    const withData = blockDeletionRequiresDataConfirmation(block, runtime);
     const key = withData ? "deleteBlockWithDataConfirm" : "deleteBlockConfirm";
     if (!window.confirm(i18n.t(key, { title: blockName(block, i18n) }))) return;
     void runAction(async () => {

@@ -25,6 +25,7 @@ import { ownValue } from "./lib/dictionary.js";
 import { jsonContentEqual } from "./lib/json-content.js";
 import { MAX_NOTE_LENGTH } from "./lib/platform-limits.js";
 import { runIndependentEffects } from "./lib/independent-effects.js";
+import { containsSplitViewMarker } from "./lib/split-view-markers.js";
 import { isMessage, type Ack, type ClockAction, type Message } from "./lib/messages.js";
 import { consumeNativeNewTabBypass, openNativeNewTab } from "./lib/native-new-tab.js";
 import {
@@ -66,25 +67,6 @@ const NEW_TAB_INTERNAL_SCHEMES = new Set([
   "comet:",
   "perplexity:",
 ]);
-const SPLIT_VIEW_MARKERS = [
-  "split-view",
-  "split_view",
-  "splitview",
-  "split",
-  "side-by-side",
-  "sidebyside",
-  "side_panel",
-  "side-panel",
-  "tab-picker",
-  "tab_picker",
-  "tabpicker",
-  "select-tab",
-  "select_tab",
-  "selecttab",
-  "picker",
-  "pane",
-];
-
 interface LocaleCatalog {
   [key: string]: { message?: string };
 }
@@ -361,7 +343,7 @@ function isNativeSplitViewPickerUrl(url: string): boolean {
     const parsed = new URL(url);
     if (!NEW_TAB_INTERNAL_SCHEMES.has(parsed.protocol.toLowerCase())) return false;
     const haystack = `${parsed.protocol}//${parsed.hostname}${parsed.pathname}${parsed.search}${parsed.hash}`.toLowerCase();
-    return SPLIT_VIEW_MARKERS.some((marker) => haystack.includes(marker));
+    return containsSplitViewMarker(haystack);
   } catch {
     return false;
   }

@@ -413,6 +413,24 @@ export async function duplicateBlockInstance(id: string, title?: string): Promis
   return duplicate;
 }
 
+export function blockDeletionRequiresDataConfirmation(
+  block: BlockInstance,
+  runtime: StartPageRuntimeState,
+): boolean {
+  if (block.type === "note") {
+    return block.config.confirmDeleteWithContent && Boolean(ownValue(runtime.notes, block.id)?.trim());
+  }
+  if (block.type === "localTasks") {
+    return block.config.confirmDeleteWithContent && (ownValue(runtime.tasks, block.id)?.length ?? 0) > 0;
+  }
+  if (block.type === "links" || block.type === "startPinned") return block.config.items.length > 0;
+  if (block.type === "timer" || block.type === "stopwatch" || block.type === "pomodoro") {
+    const clock = ownValue(runtime.clocks, block.id);
+    return Boolean(clock && (clock.running || clock.accumulatedMs > 0));
+  }
+  return false;
+}
+
 export function layoutReplacementRemovesUserData(
   current: StartPageSettings,
   next: StartPageSettings,
