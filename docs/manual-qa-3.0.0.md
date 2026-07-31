@@ -275,3 +275,11 @@ For each failed item capture:
 - [ ] Start or advance a Timer/Stopwatch/Pomodoro and delete its block; confirm the saved-data warning appears.
 - [ ] Build all profiles and confirm `blocked.html` resolves `icons/icon.large.png`; build validation must fail if that asset is removed.
 - [ ] Follow the legacy 3.0.0 release guide and confirm its Google instructions produce `build-google/` via `npm run build:google`.
+
+## Round 38 asynchronous and stale-context checks
+
+- [ ] Change the explicit locale while the early gate is visible; confirm title, description, native-new-tab action, settings action, and untitled-tab fallback refresh without reloading the tab.
+- [ ] In a confirmed Split View context, simulate a `chrome.tabs.query failure`; confirm the safety overlay still appears with native-new-tab and settings actions instead of exposing the normal Start Tab page.
+- [ ] Begin editing a Note, Local Tasks, Links, or Start Pinned runtime value, then remove the block or change it to another type in another context before saving; confirm the stale mutation is rejected and the latest state is reloaded.
+- [ ] Rapidly activate two block or theme editors by double-clicking or keyboard repeat; confirm only one modal exists, focus moves to it, and all ARIA references remain unique.
+- [ ] Open Options directly with #statistics on a fresh load and with statistics storage forced to fail; confirm the asynchronously inserted Statistics section is scrolled into view in both cases.
