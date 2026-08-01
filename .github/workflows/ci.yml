@@ -305,6 +305,12 @@ jobs:
       - name: Validate round 40
         run: node scripts/validate-round40-static.mjs
 
+      - name: Run round 41 fixtures
+        run: node scripts/run-round41-fixtures.mjs
+
+      - name: Validate round 41
+        run: node scripts/validate-round41-static.mjs
+
       - name: Validate self-hosted CI contract
         run: node scripts/validate-self-hosted-ci.mjs
 
