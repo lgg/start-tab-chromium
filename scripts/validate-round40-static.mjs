@@ -38,6 +38,8 @@ for (const marker of [
 assert.match(settings, /assertEntityRevision\(existing\.updatedAt, expectedUpdatedAt, "block"\)/);
 assert.match(settings, /assertEntityRevision\(existing\.updatedAt, expectedUpdatedAt, "theme"\)/);
 assert.match(settings, /theme changed or was removed in another extension context/);
+assert.match(settings, /getBuiltInTheme\(themeId\)[\s\S]*current\.themes\.customThemes\.find[\s\S]*if \(!source\)/,
+  "Theme duplication must resolve the exact requested source and reject deleted custom themes");
 
 assert.match(messages, /delete-instance-runtime"; instanceId: string; expectedBlockUpdatedAt: number; expectedRuntimeUpdatedAt: number/);
 assert.match(messages, /case "delete-instance-runtime":[\s\S]*expectedBlockUpdatedAt[\s\S]*expectedRuntimeUpdatedAt/);
