@@ -12,7 +12,7 @@ const layoutEditor = read("src/newtab/layout-editor.ts");
 const packageJson = JSON.parse(read("package.json"));
 const workflow = read(".github/workflows/ci.yml");
 const selfHosted = read("scripts/validate-self-hosted-ci.mjs");
-const manualQa = read("docs/manual-qa-3.0.0.md");
+const manualQa = read("docs/manual-qa-round39.md");
 const audit = read("docs/audit-2026-08-01-round-39.md");
 
 assert.match(runtimeTarget, /RuntimeMutationTargetKind = "clock" \| "note" \| "tasks" \| "linkPage"/);
