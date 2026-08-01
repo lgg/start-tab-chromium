@@ -1,0 +1,45 @@
+name: Round 40 apply audited patch
+
+on:
+  pull_request:
+    types:
+      - synchronize
+    paths:
+      - .audit/round40-remaining.patch
+      - .github/workflows/round40-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Apply audited Round 40 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --check .audit/round40-remaining.patch
+          git apply .audit/round40-remaining.patch
+          rm -f \
+            .audit/round40-remaining.patch \
+            .audit/round40-export-trigger
+          git diff --check
+
+      - name: Commit exact audited result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Round 40: harden Options concurrency"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
