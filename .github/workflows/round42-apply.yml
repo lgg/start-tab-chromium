@@ -15,7 +15,7 @@ jobs:
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.head.ref == 'audit/round42-full-project-20260801' &&
-      contains(github.event.pull_request.body, 'APPLY_ROUND42_PATCH')
+      contains(github.event.pull_request.body, 'APPLY_ROUND42_REPLACEMENTS')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -26,13 +26,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Apply and verify audited patch
+      - name: Apply deterministic audited replacements
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse 9d086cbfe5f96a1dc512eabce3ff5b3baf1fd984)" = "9d086cbfe5f96a1dc512eabce3ff5b3baf1fd984"
-          git apply --check .round42/round42.patch
-          git apply .round42/round42.patch
+          python .round42/apply.py
           rm -rf .round42
           rm -f .github/workflows/round42-source-export.yml .github/workflows/round42-apply.yml
           git diff --check
