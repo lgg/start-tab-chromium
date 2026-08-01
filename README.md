@@ -58,7 +58,7 @@ npm run build:blocker-only
 
 ### Self-hosted Windows CI
 
-Repository CI runs on one dedicated Windows self-hosted runner selected only by the project-specific label `start-tab-chromium-ci`. A per-PR/ref concurrency group cancels accidental duplicate runs, while the single matching runner serializes different trusted PRs and manual refs. CI caches only npm download data, does not upload build artifacts, and removes project-local dependencies, build outputs, and cache files with an `always()` cleanup step.
+Repository CI runs on one dedicated Windows self-hosted runner selected only by the project-specific label `start-tab-chromium-ci`. A per-PR/ref concurrency group cancels accidental duplicate runs, while the single matching runner serializes different trusted PRs and manual refs. CI uses an isolated temporary npm download cache but does not use the GitHub Actions cache service, does not upload build artifacts, and removes project-local dependencies, build outputs, and cache files with an `always()` cleanup step.
 
 See [`docs/self-hosted-runner.md`](docs/self-hosted-runner.md) for single-label registration, event gating, duplicate cancellation, cache isolation, cleanup boundaries, fork security, and host-level maintenance.
 

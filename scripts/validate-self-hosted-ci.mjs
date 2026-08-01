@@ -229,4 +229,7 @@ assert.match(runnerGuide, /project-specific npm cache directory inside `RUNNER_T
 assert.match(runnerGuide, /checkout's built-in recursive clean is disabled/,
   "Runner documentation must explain why checkout delegates deletion to bounded cleanup");
 
+await import("./run-round42-fixtures.mjs");
+await import("./validate-round42-static.mjs");
+
 console.log("Self-hosted Windows CI validation passed");
