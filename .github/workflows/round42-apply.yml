@@ -15,7 +15,7 @@ jobs:
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.head.ref == 'audit/round42-full-project-20260801' &&
-      contains(github.event.pull_request.body, 'APPLY_ROUND42_NON_WORKFLOW')
+      contains(github.event.pull_request.body, 'APPLY_ROUND42_CI_ADJUSTMENT')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -26,26 +26,23 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Apply deterministic audited replacements
+      - name: Apply final workflow-safe CI adjustment
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse 9d086cbfe5f96a1dc512eabce3ff5b3baf1fd984)" = "9d086cbfe5f96a1dc512eabce3ff5b3baf1fd984"
-          python .round42/apply.py
-          git checkout -- .github/workflows/ci.yml
+          python .round42/adjust.py
           rm -rf .round42
           git diff --check
           test ! -e .round42
-          git diff --name-only | grep -v '^\.github/workflows/' > /tmp/round42-non-workflow-files.txt
-          test "$(wc -l < /tmp/round42-non-workflow-files.txt)" -gt 0
           test -z "$(git diff --name-only | grep '^\.github/workflows/' || true)"
 
-      - name: Commit non-workflow Round 42 changes
+      - name: Commit final non-workflow adjustment
         shell: bash
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A -- ':!.github/workflows'
-          git commit -m 'Round 42: synchronize onboarding across contexts'
+          git commit -m 'Round 42: wire mandatory regression validation'
           git push origin HEAD:audit/round42-full-project-20260801
