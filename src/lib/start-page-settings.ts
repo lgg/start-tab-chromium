@@ -639,7 +639,13 @@ export async function updateCustomTheme(theme: StartPageTheme, expectedUpdatedAt
 export async function duplicateTheme(themeId: string, name?: string, expectedUpdatedAt?: number): Promise<StartPageTheme> {
   let duplicateId = "";
   const result = await updateStartPageSettings((current) => {
-    const source = getTheme(current, themeId);
+    const source = getBuiltInTheme(themeId)
+      ?? current.themes.customThemes.find((theme) => theme.id === themeId);
+    if (!source) {
+      throw new Error(expectedUpdatedAt !== undefined
+        ? "Start Tab theme changed or was removed in another extension context; reload before saving"
+        : `Theme not found: ${themeId}`);
+    }
     assertEntityRevision(source.updatedAt, expectedUpdatedAt, "theme");
     const now = Date.now();
     const duplicate: StartPageTheme = {
