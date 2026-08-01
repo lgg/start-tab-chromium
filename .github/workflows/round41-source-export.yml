@@ -1,0 +1,62 @@
+name: Round 41 source export
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+    paths:
+      - .audit/round41-export-trigger
+      - .github/workflows/round41-source-export.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact audited master
+        uses: actions/checkout@v6
+        with:
+          ref: 796fe09e367f5e6df9b28f3f712ed3673c46a7b7
+          fetch-depth: 1
+
+      - name: Create tracked source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "796fe09e367f5e6df9b28f3f712ed3673c46a7b7"
+          git ls-files -z > "$RUNNER_TEMP/tracked-files.zlist"
+          python - <<'PY'
+          import hashlib
+          import os
+          import pathlib
+          import tarfile
+
+          root = pathlib.Path.cwd()
+          names = [p.decode() for p in pathlib.Path(os.environ['RUNNER_TEMP'], 'tracked-files.zlist').read_bytes().split(b'\0') if p]
+          archive = pathlib.Path(os.environ['RUNNER_TEMP'], 'start-tab-round41-source.tar.gz')
+          with tarfile.open(archive, 'w:gz', format=tarfile.PAX_FORMAT) as tf:
+              for name in names:
+                  tf.add(root / name, arcname=name, recursive=False)
+          digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'source-sha256.txt').write_text(f'{digest}  {archive.name}\n', encoding='utf-8')
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'source-metadata.txt').write_text(
+              f'commit=796fe09e367f5e6df9b28f3f712ed3673c46a7b7\ntracked_files={len(names)}\nsha256={digest}\n',
+              encoding='utf-8',
+          )
+          print(f'Exported {len(names)} tracked files: {digest}')
+          PY
+
+      - name: Upload exact source
+        uses: actions/upload-artifact@v4
+        with:
+          name: round41-exact-source
+          path: |
+            ${{ runner.temp }}/start-tab-round41-source.tar.gz
+            ${{ runner.temp }}/source-sha256.txt
+            ${{ runner.temp }}/source-metadata.txt
+          retention-days: 1
+          if-no-files-found: error
