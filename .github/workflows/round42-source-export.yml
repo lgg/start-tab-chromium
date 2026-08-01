@@ -1,0 +1,42 @@
+name: Round 42 source export
+
+on:
+  push:
+    branches:
+      - audit/round42-full-project-20260801
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact audited master
+        uses: actions/checkout@v4
+        with:
+          ref: 9d086cbfe5f96a1dc512eabce3ff5b3baf1fd984
+          fetch-depth: 1
+
+      - name: Build content-addressed source export
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "9d086cbfe5f96a1dc512eabce3ff5b3baf1fd984"
+          git ls-tree -r --name-only HEAD > round42-tracked-files.txt
+          git archive --format=zip --output=round42-source.zip HEAD
+          sha256sum round42-source.zip > round42-source.sha256
+          printf '%s\n' "commit=9d086cbfe5f96a1dc512eabce3ff5b3baf1fd984" "tracked_files=$(wc -l < round42-tracked-files.txt)" > round42-source-metadata.txt
+
+      - name: Upload exact source
+        uses: actions/upload-artifact@v4
+        with:
+          name: round42-exact-source
+          path: |
+            round42-source.zip
+            round42-source.sha256
+            round42-source-metadata.txt
+            round42-tracked-files.txt
+          if-no-files-found: error
+          retention-days: 1
