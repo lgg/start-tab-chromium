@@ -169,7 +169,11 @@ async function handle(message: Message): Promise<HandlerResult | void> {
     case "runtime-note": await runRuntimeJob(() => updateRuntimeNote(message.instanceId, message.value, message.expectedValue)); break;
     case "runtime-tasks": await runRuntimeJob(() => updateRuntimeTasks(message.instanceId, message.tasks, message.expectedTasks)); break;
     case "runtime-link-page": await runRuntimeJob(() => updateRuntimeLinkPage(message.instanceId, message.page, message.expectedPage)); break;
-    case "delete-instance-runtime": await runRuntimeJob(() => deleteInstanceRuntime(message.instanceId)); break;
+    case "delete-instance-runtime": await runRuntimeJob(() => deleteInstanceRuntime(
+      message.instanceId,
+      message.expectedBlockUpdatedAt,
+      message.expectedRuntimeUpdatedAt,
+    )); break;
     case "record-unblock": await runStatsJob(() => recordUnblockAfterCountdown(message.host)); break;
     case "reset-stats": await runStatsJob(resetFocusStats); break;
   }

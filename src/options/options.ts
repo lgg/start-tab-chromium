@@ -64,6 +64,7 @@ import {
   selectTheme,
   settingsWithLayoutPreset,
   saveNewBlockInstance,
+  setBlockEnabled,
   settingsWithRemovedBlock,
   updateBlockInstance,
   updateCustomTheme,
@@ -76,6 +77,7 @@ import {
   type StartPageTheme,
 } from "../lib/start-page-settings.js";
 import { editTheme } from "../lib/theme-editor.js";
+import { OptionsActionGuard } from "./action-guard.js";
 import { restoreDeferredSectionAnchor } from "./deferred-section.js";
 
 function requireElement<T extends HTMLElement>(id: string): T {
@@ -186,6 +188,7 @@ let localePreference: LocalePreference;
 let blockedSites: string[];
 let rendering = false;
 let renderGeneration = 0;
+const actionGuard = new OptionsActionGuard();
 
 function setStatus(message: string, error = false): void {
   status.textContent = message;
@@ -200,10 +203,26 @@ function runUiTask(action: () => Promise<unknown>): void {
   void action().catch(reportUiError);
 }
 
+function setActionBusy(busy: boolean): void {
+  document.body.setAttribute("aria-busy", String(busy));
+  headerActions.inert = busy;
+  nav.inert = busy;
+  sections.inert = busy;
+}
+
+function actionFailureText(error: unknown): string {
+  if (error instanceof AggregateError) {
+    return error.errors.map((item) => item instanceof Error ? item.message : String(item)).join(" · ");
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function runAction<T>(
   action: () => Promise<T>,
   successMessage: string | ((result: T) => string),
 ): Promise<void> {
+  if (!actionGuard.tryStart()) return;
+  setActionBusy(true);
   setStatus(i18n.t("working"));
   try {
     const result = await action();
@@ -211,7 +230,17 @@ async function runAction<T>(
     render();
     setStatus(typeof successMessage === "function" ? successMessage(result) : successMessage);
   } catch (error) {
-    setStatus(error instanceof Error ? error.message : String(error), true);
+    let failure: unknown = error;
+    try {
+      await reloadState();
+      render();
+    } catch (refreshError) {
+      failure = new AggregateError([error, refreshError], "The action failed and Options could not reload the latest state");
+    }
+    setStatus(actionFailureText(failure), true);
+  } finally {
+    actionGuard.finish();
+    setActionBusy(false);
   }
 }
 
@@ -404,24 +433,30 @@ function blockActions(block: BlockInstance): HTMLElement {
   edit.addEventListener("click", () => runUiTask(async () => {
     const edited = await editBlockInstance(block, i18n);
     if (!edited) return;
-    await runAction(async () => { await updateBlockInstance(block.id, () => edited); }, i18n.t("instanceUpdated"));
+    await runAction(async () => {
+      await updateBlockInstance(block.id, () => edited, block.updatedAt);
+    }, i18n.t("instanceUpdated"));
   }));
   const toggle = button(i18n.t(block.enabled ? "disable" : "enable"), "button button--secondary");
   toggle.addEventListener("click", () => void runAction(async () => {
-    await updateBlockInstance(block.id, (current) => ({ ...current, enabled: !current.enabled }));
+    await setBlockEnabled(block.id, !block.enabled, block.updatedAt);
   }, i18n.t("instanceUpdated")));
   actions.append(edit, toggle);
   if (!isSingletonBlockType(block.type)) {
     const duplicate = button(i18n.t("duplicate"), "button button--secondary");
     duplicate.disabled = settings.layout.blocks.length >= MAX_START_PAGE_BLOCKS;
     if (duplicate.disabled) duplicate.title = i18n.t("blockCapacityReached", { count: MAX_START_PAGE_BLOCKS });
-    duplicate.addEventListener("click", () => void runAction(async () => { await duplicateBlockInstance(block.id); }, i18n.t("instanceDuplicated")));
+    duplicate.addEventListener("click", () => void runAction(async () => {
+      await duplicateBlockInstance(block.id, undefined, block.updatedAt);
+    }, i18n.t("instanceDuplicated")));
     actions.append(duplicate);
   }
   const clear = button(i18n.t("clearInstanceData"), "button button--secondary");
   clear.addEventListener("click", () => {
     if (!window.confirm(i18n.t("clearInstanceDataConfirm", { title: blockName(block, i18n) }))) return;
-    void runAction(async () => { await deleteInstanceRuntime(block.id); }, i18n.t("instanceDataCleared"));
+    void runAction(async () => {
+      await deleteInstanceRuntime(block.id, block.updatedAt, runtime.updatedAt);
+    }, i18n.t("instanceDataCleared"));
   });
   const remove = button(i18n.t("delete"), "button button--danger");
   remove.addEventListener("click", () => {
@@ -486,21 +521,27 @@ function themeCard(theme: StartPageTheme): HTMLElement {
   choose.addEventListener("click", () => void runAction(async () => { await selectTheme(theme.id); }, i18n.t("themeSelected")));
   const duplicate = button(i18n.t("duplicate"), "button button--secondary");
   duplicate.disabled = themeCapacityReached;
-  duplicate.addEventListener("click", () => void runAction(async () => { await duplicateTheme(theme.id); }, i18n.t("themeDuplicated")));
+  duplicate.addEventListener("click", () => void runAction(async () => {
+    await duplicateTheme(theme.id, undefined, theme.updatedAt);
+  }, i18n.t("themeDuplicated")));
   actions.append(choose, duplicate);
   if (!theme.builtIn) {
     const edit = button(i18n.t("edit"), "button button--secondary");
     edit.addEventListener("click", () => runUiTask(async () => {
       const edited = await editTheme(theme, i18n);
       if (!edited) return;
-      await runAction(async () => { await updateCustomTheme(edited); }, i18n.t("themeUpdated"));
+      await runAction(async () => {
+        await updateCustomTheme(edited, theme.updatedAt);
+      }, i18n.t("themeUpdated"));
     }));
     const exportButton = button(i18n.t("exportTheme"), "button button--secondary");
     exportButton.addEventListener("click", () => downloadJson(`start-tab-theme-${theme.id}.json`, exportCustomTheme(theme)));
     const remove = button(i18n.t("delete"), "button button--danger");
     remove.addEventListener("click", () => {
       if (!window.confirm(i18n.t("deleteThemeConfirm", { name: theme.name }))) return;
-      void runAction(async () => { await deleteCustomTheme(theme.id); }, i18n.t("themeDeleted"));
+      void runAction(async () => {
+        await deleteCustomTheme(theme.id, theme.updatedAt);
+      }, i18n.t("themeDeleted"));
     });
     actions.append(edit, exportButton, remove);
   }
@@ -516,9 +557,8 @@ function renderThemes(): HTMLElement {
   create.addEventListener("click", () => runUiTask(async () => {
     const created = await createCustomTheme(i18n.t("newCustomTheme"), settings.themes.selectedThemeId);
     const edited = await editTheme(created, i18n);
-    if (edited) await updateCustomTheme(edited);
-    await reloadState();
-    render();
+    if (!edited) return;
+    await runAction(async () => { await updateCustomTheme(edited); }, i18n.t("themeUpdated"));
   }));
   const importButton = button(i18n.t("importTheme"), "button button--secondary");
   importButton.disabled = themeCapacityReached;

@@ -14,22 +14,24 @@ Base: `master`
 - Background presets exist, but text/card/accent/typography tokens are not represented as versioned theme records.
 - Backup and browser sync are versioned and chunked, but require a schema upgrade for block instances, themes, tombstones, and atomic restore.
 
-## Required implementation checklist
+## Completed implementation checklist
 
-- [ ] Typed discriminated-union block instance schema
-- [ ] Repeatable and singleton registry
-- [ ] Sequential idempotent migration from legacy settings/runtime data
-- [ ] Independent runtime state for clocks, notes, tasks, and link pages
-- [ ] Instance-aware new tab rendering
-- [ ] Full block palette and instance CRUD
-- [ ] Free/grid editing and contained/full layout zones
-- [ ] Shared per-instance settings editor for new tab and options
-- [ ] Versioned theme system and custom theme import/export
-- [ ] Centralized validation and localized errors
-- [ ] Backup v4, browser sync, and Drive restore migration coverage
-- [ ] EN/RU localization parity
-- [ ] Static and domain validation tests
-- [ ] Full and blocker-only builds
-- [ ] Documentation and reproducible manual QA
-- [ ] First audit, fixes, rerun validation
-- [ ] Second independent audit, fixes, rerun validation
+Status: completed in 3.0.0 and reverified through the Round 40 full-project audit.
+
+- [x] Typed discriminated-union block instance schema
+- [x] Repeatable and singleton registry
+- [x] Sequential idempotent migration from legacy settings/runtime data
+- [x] Independent runtime state for clocks, notes, tasks, and link pages
+- [x] Instance-aware new tab rendering
+- [x] Full block palette and instance CRUD
+- [x] Free/grid editing and contained/full layout zones
+- [x] Shared per-instance settings editor for new tab and options
+- [x] Versioned theme system and custom theme import/export
+- [x] Centralized validation and localized errors
+- [x] Backup v4, browser sync, and Drive restore migration coverage
+- [x] EN/RU localization parity
+- [x] Static and domain validation tests
+- [x] Full and blocker-only builds
+- [x] Documentation and reproducible manual QA
+- [x] First audit, fixes, rerun validation
+- [x] Second independent audit, fixes, rerun validation

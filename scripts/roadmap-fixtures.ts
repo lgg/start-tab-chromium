@@ -235,7 +235,13 @@ assert.equal(isMessage({ type: "reset-clocks" }), true);
 assert.equal(isMessage({ type: "reset-stats" }), true);
 assert.equal(isMessage({ type: "runtime-note", instanceId: "note-main", value: "draft", expectedValue: "" }), true);
 assert.equal(isMessage({ type: "runtime-link-page", instanceId: "links-main", page: 2, expectedPage: 0 }), true);
-assert.equal(isMessage({ type: "delete-instance-runtime", instanceId: "note-main" }), true);
+assert.equal(isMessage({ type: "delete-instance-runtime", instanceId: "note-main" }), false);
+assert.equal(isMessage({
+  type: "delete-instance-runtime",
+  instanceId: "note-main",
+  expectedBlockUpdatedAt: 1,
+  expectedRuntimeUpdatedAt: 1,
+}), true);
 assert.equal(isMessage({
   type: "replace-start-page-settings",
   settings: { layout: { blocks: [] }, themes: { customThemes: [] } },
