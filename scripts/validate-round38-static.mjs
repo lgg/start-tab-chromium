@@ -25,14 +25,15 @@ const audit = read("docs/audit-2026-07-31-round-38.md");
 for (const file of ["messages.json", "roadmap-messages.json", "round7-messages.json"]) {
   assert.ok(gate.includes(`"${file}"`), `Early gate must merge locale catalog ${file}`);
 }
-assert.match(gate, /catalog = Object\.assign\(\{\}, \.\.\.catalogs\)/);
+assert.match(gate, /nextCatalog = Object\.assign\(\{\}, \.\.\.catalogs\)[\s\S]*generation !== catalogLoadGeneration[\s\S]*catalog = nextCatalog/,
+  "The early gate must merge every locale fragment and publish it only if the load is still current");
 assert.match(gate, /chrome\.tabs\.query\(\{ currentWindow: true \}\)\.catch\(\(\) => \[\]\)/,
   "A Split View query failure must fail closed with the overlay still rendered");
-assert.match(gate, /if \(locale !== "en" && locale !== "ru"\) \{\s*catalog = null;/,
-  "Returning to automatic locale selection must clear the previous explicit catalog");
+assert.match(gate, /let nextCatalog = null[\s\S]*if \(locale === "en" \|\| locale === "ru"\)[\s\S]*catalog = nextCatalog/,
+  "Returning to automatic locale selection must publish a null catalog through the same latest-only path");
 assert.match(gate, /changes\[LOCALE_OVERRIDE_KEY\]/);
-assert.match(gate, /loadGateCatalog\(\)\.then\(apply\)/,
-  "An open gate must refresh when the explicit locale changes");
+assert.match(gate, /loadGateCatalog\(\)\.then\(\(current\) => current \? apply\(\) : undefined\)/,
+  "An open gate must refresh only after the latest explicit-locale catalog load commits");
 assert.match(gate, /text\("gateUntitledTab", "Untitled tab"\)/);
 for (const catalog of [en, ru]) {
   for (const key of ["splitViewTitle", "splitViewText", "startTabDisabledTitle", "startTabDisabledText", "gateUntitledTab"]) {
