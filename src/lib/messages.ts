@@ -26,7 +26,7 @@ export type Message =
   | { type: "runtime-note"; instanceId: string; value: string; expectedValue: string }
   | { type: "runtime-tasks"; instanceId: string; tasks: LocalTask[]; expectedTasks: LocalTask[] }
   | { type: "runtime-link-page"; instanceId: string; page: number; expectedPage: number }
-  | { type: "delete-instance-runtime"; instanceId: string }
+  | { type: "delete-instance-runtime"; instanceId: string; expectedBlockUpdatedAt: number; expectedRuntimeUpdatedAt: number }
   | { type: "record-unblock"; host: string }
   | { type: "reset-stats" };
 
@@ -103,7 +103,15 @@ export function isMessage(value: unknown): value is Message {
         && typeof value.expectedPage === "number" && Number.isInteger(value.expectedPage)
         && value.expectedPage >= 0 && value.expectedPage <= 10_000;
     case "delete-instance-runtime":
-      return isSafeIdentifier(value.instanceId);
+      return isSafeIdentifier(value.instanceId)
+        && typeof value.expectedBlockUpdatedAt === "number"
+        && Number.isInteger(value.expectedBlockUpdatedAt)
+        && value.expectedBlockUpdatedAt >= 0
+        && value.expectedBlockUpdatedAt <= Number.MAX_SAFE_INTEGER
+        && typeof value.expectedRuntimeUpdatedAt === "number"
+        && Number.isInteger(value.expectedRuntimeUpdatedAt)
+        && value.expectedRuntimeUpdatedAt >= 0
+        && value.expectedRuntimeUpdatedAt <= Number.MAX_SAFE_INTEGER;
     default:
       return false;
   }
