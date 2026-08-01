@@ -12,6 +12,7 @@ import {
   type LocalePreference,
 } from "../lib/i18n.js";
 import { sendMessage, type Message } from "../lib/messages.js";
+import { samePopupTarget, type PopupTarget } from "./popup-target.js";
 
 const titleEl = document.getElementById("title") as HTMLHeadingElement;
 const siteEl = document.getElementById("site") as HTMLParagraphElement;
@@ -26,10 +27,20 @@ const languageRussianEl = document.getElementById("languageRussian") as HTMLOpti
 
 let i18n: I18n;
 let localePreference: LocalePreference = "auto";
+let actionPending = true;
+let renderGeneration = 0;
 
 async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab;
+}
+
+async function getActiveTarget(): Promise<PopupTarget | null> {
+  const tab = await getActiveTab();
+  const url = tab?.url;
+  const host = url ? hostFromUrl(url) : null;
+  if (typeof tab?.id !== "number" || !url || !host) return null;
+  return { tabId: tab.id, url, host, blockedHost: await blockedSiteForUrl(url) };
 }
 
 function show(el: HTMLElement, text?: string): void {
@@ -50,8 +61,15 @@ function showError(error?: unknown): void {
   show(noteEl, errorText(error));
 }
 
-async function reloadTabIfPossible(tabId: number | undefined): Promise<void> {
-  if (tabId === undefined) return;
+function setActionPending(pending: boolean): void {
+  actionPending = pending;
+  primaryEl.disabled = pending;
+  clearEl.disabled = pending;
+  languageEl.disabled = pending;
+  document.body.setAttribute("aria-busy", String(pending));
+}
+
+async function reloadTabIfPossible(tabId: number): Promise<void> {
   try {
     await chrome.tabs.reload(tabId);
   } catch {
@@ -68,7 +86,6 @@ async function sendAction(message: Message): Promise<boolean> {
     // The service worker can restart while the popup is open.
     showError();
   }
-
   return false;
 }
 
@@ -83,15 +100,14 @@ function applyStaticText(): void {
 }
 
 async function render(): Promise<void> {
+  const generation = ++renderGeneration;
   hide(noteEl);
   hide(primaryEl);
   hide(siteEl);
-  primaryEl.disabled = false;
 
-  const tab = await getActiveTab();
-  const host = tab?.url ? hostFromUrl(tab.url) : null;
-
-  if (!tab || !host || !tab.url) {
+  const target = await getActiveTarget();
+  if (generation !== renderGeneration) return;
+  if (!target) {
     show(noteEl, i18n.t("unsupportedPage"));
     return;
   }
@@ -99,57 +115,52 @@ async function render(): Promise<void> {
   siteEl.textContent = "";
   siteEl.append(`${i18n.t("currentSiteLabel")} `);
   const strong = document.createElement("strong");
-  strong.textContent = host;
+  strong.textContent = target.host;
   siteEl.append(strong);
   siteEl.hidden = false;
 
-  const blockedHost = await blockedSiteForUrl(tab.url);
-
-  if (blockedHost) {
-    show(primaryEl, i18n.t("removeFromBlocklist"));
-    primaryEl.onclick = () => void unblock(blockedHost, tab.id).catch(showError);
-  } else {
-    show(primaryEl, i18n.t("blockThisSite"));
-    primaryEl.onclick = () => void block(host, tab.id).catch(showError);
-  }
+  show(primaryEl, i18n.t(target.blockedHost ? "removeFromBlocklist" : "blockThisSite"));
+  primaryEl.disabled = actionPending;
+  primaryEl.onclick = () => void mutateDisplayedTarget(target).catch(showError);
 }
 
-async function block(host: string, tabId: number | undefined): Promise<void> {
-  primaryEl.disabled = true;
-  if (!(await sendAction({ type: "block", host }))) {
-    primaryEl.disabled = false;
-    return;
+async function mutateDisplayedTarget(expected: PopupTarget): Promise<void> {
+  if (actionPending) return;
+  setActionPending(true);
+  try {
+    const current = await getActiveTarget();
+    if (!samePopupTarget(expected, current)) {
+      await render();
+      show(noteEl, i18n.t("currentSiteChanged"));
+      return;
+    }
+    const message: Message = current.blockedHost
+      ? { type: "unblock", host: current.blockedHost }
+      : { type: "block", host: current.host };
+    if (!(await sendAction(message))) return;
+    await reloadTabIfPossible(current.tabId);
+    window.close();
+  } finally {
+    setActionPending(false);
   }
-  await reloadTabIfPossible(tabId);
-  window.close();
-}
-
-async function unblock(host: string, tabId: number | undefined): Promise<void> {
-  primaryEl.disabled = true;
-  if (!(await sendAction({ type: "unblock", host }))) {
-    primaryEl.disabled = false;
-    return;
-  }
-  await reloadTabIfPossible(tabId);
-  window.close();
 }
 
 async function clearBlocklist(): Promise<void> {
-  clearEl.disabled = true;
+  if (actionPending) return;
+  setActionPending(true);
   try {
-    if (await sendAction({ type: "clear" })) {
-      await render();
-    }
+    if (await sendAction({ type: "clear" })) await render();
   } catch (error) {
     showError(error);
   } finally {
-    clearEl.disabled = false;
+    setActionPending(false);
   }
 }
 
 async function changeLanguage(): Promise<void> {
+  if (actionPending) return;
   const requested = languageEl.value as LocalePreference;
-  languageEl.disabled = true;
+  setActionPending(true);
   try {
     await setLocalePreference(requested);
     localePreference = requested;
@@ -160,12 +171,12 @@ async function changeLanguage(): Promise<void> {
     languageEl.value = localePreference;
     showError(error);
   } finally {
-    languageEl.disabled = false;
+    setActionPending(false);
   }
 }
 
 clearEl.addEventListener("click", () => {
-  if (!window.confirm(i18n.t("clearBlocklistConfirm"))) return;
+  if (actionPending || !window.confirm(i18n.t("clearBlocklistConfirm"))) return;
   void clearBlocklist();
 });
 
@@ -174,11 +185,16 @@ languageEl.addEventListener("change", () => {
 });
 
 async function init(): Promise<void> {
+  setActionPending(true);
   i18n = await loadI18n();
   localePreference = await getLocalePreference();
   languageEl.value = localePreference;
   applyStaticText();
   await render();
+  setActionPending(false);
 }
 
-void init().catch(showError);
+void init().catch((error: unknown) => {
+  setActionPending(false);
+  showError(error);
+});

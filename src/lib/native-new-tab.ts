@@ -3,6 +3,7 @@ export const NATIVE_NEW_TAB_BYPASS_KEY = "startTabNativeNewTabBypass";
 interface NativeNewTabBypass {
   tabId?: number;
   expiresAt?: number;
+  consumedAt?: number;
 }
 
 export interface NativeNewTabOpenOptions {
@@ -25,7 +26,7 @@ async function waitForNativeBypassConsumption(
   while (Date.now() < deadline) {
     const items = await chrome.storage.local.get(NATIVE_NEW_TAB_BYPASS_KEY);
     const value = items[NATIVE_NEW_TAB_BYPASS_KEY] as NativeNewTabBypass | undefined;
-    if (value?.tabId !== tabId) return true;
+    if (value?.tabId !== tabId || typeof value.consumedAt === "number") return true;
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
   return false;
@@ -92,6 +93,10 @@ export async function consumeNativeNewTabBypass(tabId: number): Promise<boolean>
     return false;
   }
   if (value.tabId !== tabId) return false;
-  await chrome.storage.local.remove(NATIVE_NEW_TAB_BYPASS_KEY);
+  if (typeof value.consumedAt !== "number") {
+    await chrome.storage.local.set({
+      [NATIVE_NEW_TAB_BYPASS_KEY]: { ...value, consumedAt: Date.now() },
+    });
+  }
   return true;
 }

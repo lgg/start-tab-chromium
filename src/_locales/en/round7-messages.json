@@ -31,5 +31,8 @@
   },
   "gateUntitledTab": {
     "message": "Untitled tab"
+  },
+  "currentSiteChanged": {
+    "message": "The active tab changed. Review the current site and try again."
   }
 }
