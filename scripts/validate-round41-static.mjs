@@ -41,6 +41,8 @@ assert.match(gate, /chrome\.storage\.onChanged\.addListener[\s\S]*if \(await loa
 assert.match(gate, /loadGateCatalog\(\)\.then\(\(current\) => current \? apply\(\) : undefined\)/);
 assert.match(gate, /if \(generation === applyGeneration\) window\.dispatchEvent/);
 
+assert.match(popupTarget, /\): current is PopupTarget/,
+  "Popup target comparison must expose non-null narrowing to TypeScript callers");
 assert.match(popupTarget, /current\.tabId === expected\.tabId/);
 assert.match(popupTarget, /current\.host === expected\.host/);
 assert.match(popupTarget, /current\.blockedHost === expected\.blockedHost/);
