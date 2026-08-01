@@ -11,27 +11,32 @@
   const ignore = () => undefined;
   let catalog = null;
   let previousFocus = null;
+  let catalogLoadGeneration = 0;
+  let applyGeneration = 0;
 
   const run = (action) => {
     try { void Promise.resolve(action()).catch(ignore); } catch { ignore(); }
   };
 
   async function loadGateCatalog() {
+    const generation = ++catalogLoadGeneration;
     const items = await chrome.storage.local.get(LOCALE_OVERRIDE_KEY).catch(() => ({}));
     const locale = items[LOCALE_OVERRIDE_KEY];
-    if (locale !== "en" && locale !== "ru") {
-      catalog = null;
-      return;
+    let nextCatalog = null;
+    if (locale === "en" || locale === "ru") {
+      const catalogs = await Promise.all(catalogFiles.map(async (file) => {
+        try {
+          const response = await fetch(chrome.runtime.getURL(`_locales/${locale}/${file}`));
+          return response.ok ? await response.json() : {};
+        } catch {
+          return {};
+        }
+      }));
+      nextCatalog = Object.assign({}, ...catalogs);
     }
-    const catalogs = await Promise.all(catalogFiles.map(async (file) => {
-      try {
-        const response = await fetch(chrome.runtime.getURL(`_locales/${locale}/${file}`));
-        return response.ok ? await response.json() : {};
-      } catch {
-        return {};
-      }
-    }));
-    catalog = Object.assign({}, ...catalogs);
+    if (generation !== catalogLoadGeneration) return false;
+    catalog = nextCatalog;
+    return true;
   }
 
   const text = (key, fallback) => catalog?.[key]?.message || chrome.i18n.getMessage(key) || fallback;
@@ -173,6 +178,7 @@
   }
 
   async function apply() {
+    const generation = ++applyGeneration;
     try {
       if (await splitContext()) {
         const current = await chrome.tabs.getCurrent().catch(() => null);
@@ -180,30 +186,31 @@
           .filter((tab) => tab.id !== current?.id)
           .map(webTab)
           .filter(Boolean);
+        if (generation !== applyGeneration) return;
         showOverlay(text("splitViewTitle", "Choose a tab for Split View"), text("splitViewText", "Select an open tab below."), tabs);
         return;
       }
       const items = await chrome.storage.local.get(SETTINGS_KEY);
+      if (generation !== applyGeneration) return;
       if (items[SETTINGS_KEY]?.startTab?.enabled !== false) removeOverlay();
       else showOverlay(text("startTabDisabledTitle", "Start Tab is disabled"), text("startTabDisabledText", "Re-enable Start Tab in extension settings."));
     } finally {
-      window.dispatchEvent(new Event(GATE_CHANGE_EVENT));
+      if (generation === applyGeneration) window.dispatchEvent(new Event(GATE_CHANGE_EVENT));
     }
   }
 
   async function initGate() {
-    await loadGateCatalog();
     const nativeButton = document.getElementById("nativeNewTab");
     if (nativeButton) nativeButton.addEventListener("click", () => run(openNative));
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
       if (changes[LOCALE_OVERRIDE_KEY]) {
-        void loadGateCatalog().then(apply).catch(ignore);
+        void loadGateCatalog().then((current) => current ? apply() : undefined).catch(ignore);
       } else if (changes[SETTINGS_KEY]) {
         void apply().catch(ignore);
       }
     });
-    await apply();
+    if (await loadGateCatalog()) await apply();
   }
 
   window.startTabGateReady = Promise.resolve().then(initGate).catch(ignore);

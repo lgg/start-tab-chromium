@@ -26,6 +26,7 @@ import { jsonContentEqual } from "./lib/json-content.js";
 import { MAX_NOTE_LENGTH } from "./lib/platform-limits.js";
 import { runIndependentEffects } from "./lib/independent-effects.js";
 import { containsSplitViewMarker } from "./lib/split-view-markers.js";
+import { changedTabNavigationUrl } from "./lib/tab-navigation-change.js";
 import { assertRuntimeMutationTarget } from "./lib/runtime-mutation-target.js";
 import { isMessage, type Ack, type ClockAction, type Message } from "./lib/messages.js";
 import { consumeNativeNewTabBypass, openNativeNewTab } from "./lib/native-new-tab.js";
@@ -114,8 +115,10 @@ chrome.tabs.onCreated.addListener((tab) => {
   void redirectBrowserNewTab(tab.id, tab.url ?? tab.pendingUrl).catch(ignoreBackgroundError);
 });
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  void redirectBrowserNewTab(tabId, changeInfo.url ?? tab.url ?? tab.pendingUrl).catch(ignoreBackgroundError);
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  const url = changedTabNavigationUrl(changeInfo);
+  if (!url) return;
+  void redirectBrowserNewTab(tabId, url).catch(ignoreBackgroundError);
 });
 
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {

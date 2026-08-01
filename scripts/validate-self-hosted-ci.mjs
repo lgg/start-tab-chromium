@@ -52,12 +52,8 @@ assert.match(workflow, /uses: actions\/setup-node@v6/);
 assert.match(workflow, /node-version: 22/);
 assert.match(workflow, /architecture: x64/);
 assert.match(workflow, /package-manager-cache: false/);
-assert.match(workflow, /uses: actions\/cache\/restore@v5/);
-assert.match(workflow, /uses: actions\/cache\/save@v5/);
-assert.match(
-  workflow,
-  /start-tab-chromium-npm-\$\{\{ runner\.os \}\}-\$\{\{ runner\.arch \}\}-node22-\$\{\{ hashFiles\('package-lock\.json'\) \}\}/,
-);
+assert.doesNotMatch(workflow, /uses: actions\/cache(?:\/restore|\/save)?@/,
+  "The job must reach bounded cleanup without downloading an external cache action first");
 assert.doesNotMatch(workflow, /path:\s*node_modules/);
 
 const releaseValidationCommands = [
@@ -130,6 +126,8 @@ const regressionCommands = [
   "node scripts/validate-round39-static.mjs",
   "node scripts/run-round40-fixtures.mjs",
   "node scripts/validate-round40-static.mjs",
+  "node scripts/run-round41-fixtures.mjs",
+  "node scripts/validate-round41-static.mjs",
   "node scripts/validate-self-hosted-ci.mjs",
 ];
 
@@ -219,7 +217,7 @@ assert.match(runnerGuide, /2\.329\.0 or newer/);
 assert.match(runnerGuide, /does not contain a Dockerfile or Compose configuration/);
 assert.match(runnerGuide, /does not package or upload any build artifacts/);
 assert.match(runnerGuide, /No repository secret or Actions variable is required/);
-assert.match(runnerGuide, /cache retention at \*\*1 day\*\*/);
+assert.match(runnerGuide, /does not use the GitHub Actions cache service/);
 assert.match(runnerGuide, /Never approve or manually dispatch a fork-authored workflow/);
 assert.match(runnerGuide, /pull requests targeting `master` and manual `workflow_dispatch` runs/);
 assert.match(runnerGuide, /`opened`, `reopened`, and `ready_for_review`/);
@@ -227,7 +225,7 @@ assert.match(runnerGuide, /does not subscribe to `synchronize` or `push`/);
 assert.match(runnerGuide, /draft pull request does not allocate the self-hosted runner/);
 assert.match(runnerGuide, /Actions -> CI -> Run workflow/);
 assert.match(runnerGuide, /cancel-in-progress: true/);
-assert.match(runnerGuide, /project-specific cache directory inside `RUNNER_TEMP`/);
+assert.match(runnerGuide, /project-specific npm cache directory inside `RUNNER_TEMP`/);
 assert.match(runnerGuide, /checkout's built-in recursive clean is disabled/,
   "Runner documentation must explain why checkout delegates deletion to bounded cleanup");
 

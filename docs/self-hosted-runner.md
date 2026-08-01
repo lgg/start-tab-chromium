@@ -26,7 +26,7 @@ A single online runner matching `start-tab-chromium-ci` still provides the final
 - A current GitHub Actions runner, version **2.329.0 or newer**.
 - Git for Windows available to the runner service account.
 - PowerShell 7 available as `pwsh`; CI deliberately does not use legacy Windows PowerShell.
-- Network access to GitHub, the GitHub Actions cache service, the Node.js distribution endpoints, and the npm registry.
+- Network access to GitHub, the Node.js distribution endpoints, and the npm registry.
 - Enough disk space for dependencies and three extension build directories. Keep at least 5 GB free for comfortable operation.
 - The runner service account must have read/write/delete access to its own `_work` and runtime temporary directories.
 
@@ -46,15 +46,9 @@ After installation, CI verifies the TypeScript and esbuild entrypoints before te
 
 ## Cache behavior
 
-The workflow caches only npm's download cache, never `node_modules` or build outputs. The cache key includes:
+The workflow does not use the GitHub Actions cache service. Downloading an external cache action happens before repository steps begin, so a disk-pressure incident could otherwise prevent the bounded cleanup step from running at all. The dependency set is intentionally small, and a clean `npm ci` is preferred over remote cache restoration.
 
-- repository-specific prefix;
-- runner OS;
-- runner architecture;
-- Node.js major version 22;
-- `package-lock.json` hash.
-
-A runtime setup step resolves a project-specific cache directory inside `RUNNER_TEMP` and exports it through `GITHUB_ENV` without creating or overwriting a stale path first. After checkout and the pinned Node.js setup, the shared cleanup script safely removes any old project cache, the GitHub cache action restores the requested entry, and the final `if: always()` cleanup removes the local cache again. In repository **Settings -> Actions -> General -> Cache settings**, keep cache retention at **1 day** and use a conservative repository cache-size limit.
+A runtime setup step resolves a project-specific npm cache directory inside `RUNNER_TEMP` and exports it through `GITHUB_ENV` without creating or overwriting a stale path first. After checkout and the pinned Node.js setup, the shared cleanup script safely removes any old project cache before `npm ci`; the final `if: always()` cleanup removes the local cache again. The workflow never caches `node_modules` or build outputs.
 
 ## Build outputs and artifacts
 
@@ -72,7 +66,7 @@ The workflow does not package or upload any build artifacts, test reports, logs,
 
 The workflow uses `actions/checkout` with `clean: false`: checkout's built-in recursive clean is disabled so it cannot delete arbitrary untracked or ignored workspace data before the repository's path-safety code is available. Checkout still updates the tracked source tree; a conflicting stale untracked path must fail visibly rather than being silently removed by an unrestricted pre-checkout clean.
 
-After the pinned Node.js toolchain is installed, the checked-in `scripts/clean-ci.mjs` removes only the known project outputs below, before dependency/cache restoration, and repeats the same bounded cleanup with `if: always()` after validation:
+After the pinned Node.js toolchain is installed, the checked-in `scripts/clean-ci.mjs` removes only the known project outputs below, before dependency installation, and repeats the same bounded cleanup with `if: always()` after validation:
 
 - `node_modules/`
 - `build/`
@@ -97,7 +91,7 @@ An `opened` or `reopened` draft pull request may create a skipped workflow recor
 
 Pull requests from forks do not execute on the self-hosted runner. The workflow uses `pull_request`, never `pull_request_target`, checks that the PR head repository equals this repository before allocating the job, and limits token permission to `contents: read`.
 
-To rerun CI deliberately, open **Actions -> CI -> Run workflow**, select the trusted repository branch/ref, and choose **Run workflow**. `workflow_dispatch` uses the same commands, cache handling, cleanup, fork boundary, and concurrency policy as the automatic run.
+To rerun CI deliberately, open **Actions -> CI -> Run workflow**, select the trusted repository branch/ref, and choose **Run workflow**. `workflow_dispatch` uses the same commands, isolated npm-cache handling, cleanup, fork boundary, and concurrency policy as the automatic run.
 
 This is a public repository, so treat write access to repository branches and approval of workflow changes as permission to execute code on the Windows runner. Never approve or manually dispatch a fork-authored workflow on this runner. Keep GitHub's outside-collaborator workflow approval enabled, review every workflow diff before approval, and reserve same-repository branches for trusted contributors.
 
@@ -109,7 +103,6 @@ No repository secret or Actions variable is required for CI. The Google-enabled 
 
 Configure these once in GitHub; they cannot be expressed inside the workflow YAML:
 
-- Keep Actions cache retention at **1 day**.
 - Require approval for workflows from outside collaborators and never approve a fork workflow for the self-hosted runner.
 - Keep `start-tab-chromium-ci` assigned to exactly one repository runner.
 - Require the successful `validate` check before merging changes into `master` when branch protection is enabled.

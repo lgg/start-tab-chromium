@@ -75,13 +75,6 @@ jobs:
       - name: Remove stale project outputs
         run: node scripts/clean-ci.mjs
 
-      - name: Restore npm download cache
-        id: npm-cache
-        uses: actions/cache/restore@v5
-        with:
-          path: ${{ env.NPM_CONFIG_CACHE }}
-          key: start-tab-chromium-npm-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json') }}
-
       - name: Install dependencies
         run: npm ci --include=dev --bin-links=true --no-audit --no-fund --loglevel=error
 
@@ -96,13 +89,6 @@ jobs:
               throw "Required CI tool is missing after npm ci: $relativePath"
             }
           }
-
-      - name: Save npm download cache
-        if: steps.npm-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: ${{ env.NPM_CONFIG_CACHE }}
-          key: ${{ steps.npm-cache.outputs.cache-primary-key }}
 
       - name: Generate locale parity report
         run: node scripts/report-locale-parity.mjs
@@ -304,6 +290,12 @@ jobs:
 
       - name: Validate round 40
         run: node scripts/validate-round40-static.mjs
+
+      - name: Run round 41 fixtures
+        run: node scripts/run-round41-fixtures.mjs
+
+      - name: Validate round 41
+        run: node scripts/validate-round41-static.mjs
 
       - name: Validate self-hosted CI contract
         run: node scripts/validate-self-hosted-ci.mjs
