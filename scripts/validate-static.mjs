@@ -50,8 +50,8 @@ function assertCiPolicy(ci) {
     /actions\/upload-artifact|Compress-Archive|retention-days:/,
     "PR CI must not upload or package build artifacts",
   );
-  assert.match(ci, /uses: actions\/cache\/restore@v5/, "CI must restore only the npm download cache");
-  assert.match(ci, /uses: actions\/cache\/save@v5/, "CI must save only the npm download cache");
+  assert.doesNotMatch(ci, /uses: actions\/cache(?:\/restore|\/save)?@/,
+    "PR CI must not download an external cache action before bounded workspace cleanup can run");
   assert.doesNotMatch(ci, /path:\s*node_modules/, "CI must not cache node_modules");
 }
 
