@@ -3,6 +3,11 @@ import { loadI18n, type I18n } from "../lib/i18n.js";
 import { sendMessage } from "../lib/messages.js";
 import { withStorageLock } from "../lib/storage-lock.js";
 import {
+  START_PAGE_ONBOARDING_KEY,
+  isStartPageOnboardingComplete,
+  onboardingStorageAction,
+} from "./onboarding-state.js";
+import {
   getStartPageRuntimeState,
   isFutureRuntimeSchema,
   normalizeRuntimeState,
@@ -27,7 +32,6 @@ import { recoverRuntimeMutation } from "./runtime-mutation-recovery.js";
 import { planStartPageStorageChange, sameRuntimeContent } from "./storage-change-plan.js";
 import { applyTheme } from "./theme-runtime.js";
 
-const ONBOARDING_KEY = "startPageOnboarding";
 const GATE_CHANGE_EVENT = "start-tab-gate-change";
 const DISMISS_ONBOARDING_EVENT = "start-tab-dismiss-onboarding";
 
@@ -309,9 +313,8 @@ async function refreshState(): Promise<void> {
 }
 
 async function onboardingState(): Promise<boolean> {
-  const items = await chrome.storage.local.get(ONBOARDING_KEY);
-  const value = items[ONBOARDING_KEY];
-  return typeof value === "object" && value !== null && (value as { onboarded?: unknown }).onboarded === true;
+  const items = await chrome.storage.local.get(START_PAGE_ONBOARDING_KEY);
+  return isStartPageOnboardingComplete(items[START_PAGE_ONBOARDING_KEY]);
 }
 
 function dismissOnboarding(restoreFocus = true): void {
@@ -333,28 +336,34 @@ async function finishOnboarding(presetId: LayoutPresetId | null): Promise<void> 
   onboardingFinishing = true;
   setOnboardingActionsDisabled(true);
   try {
-    if (presetId) {
-      const next = settingsWithLayoutPreset(savedSettings, presetId);
-      const removesUserData = layoutReplacementRemovesUserData(savedSettings, next, runtime);
-      if (removesUserData && !window.confirm(i18n.t("applyPresetWithDataConfirm"))) return;
-      await sendMessage({
-        type: "replace-start-page-settings",
-        settings: next,
-        expectedSettingsUpdatedAt: savedSettings.updatedAt,
-        expectedRuntimeUpdatedAt: runtime.updatedAt,
+    await withStorageLock("onboarding", async () => {
+      if (await onboardingState()) {
+        dismissOnboarding();
+        return;
+      }
+      if (presetId) {
+        const next = settingsWithLayoutPreset(savedSettings, presetId);
+        const removesUserData = layoutReplacementRemovesUserData(savedSettings, next, runtime);
+        if (removesUserData && !window.confirm(i18n.t("applyPresetWithDataConfirm"))) return;
+        await sendMessage({
+          type: "replace-start-page-settings",
+          settings: next,
+          expectedSettingsUpdatedAt: savedSettings.updatedAt,
+          expectedRuntimeUpdatedAt: runtime.updatedAt,
+        });
+        savedSettings = await getStartPageSettings();
+        editor.replaceSavedSettings(savedSettings);
+        runtime = await getStartPageRuntimeState(savedSettings);
+      }
+      await withStorageLock("data-write", async () => {
+        await commitStorageMutationWithRevision(
+          [START_PAGE_ONBOARDING_KEY],
+          () => chrome.storage.local.set({ [START_PAGE_ONBOARDING_KEY]: { onboarded: true } }),
+        );
       });
-      savedSettings = await getStartPageSettings();
-      editor.replaceSavedSettings(savedSettings);
-      runtime = await getStartPageRuntimeState(savedSettings);
-    }
-    await withStorageLock("data-write", async () => {
-      await commitStorageMutationWithRevision(
-        [ONBOARDING_KEY],
-        () => chrome.storage.local.set({ [ONBOARDING_KEY]: { onboarded: true } }),
-      );
+      dismissOnboarding();
+      queueRender();
     });
-    dismissOnboarding();
-    queueRender();
   } finally {
     onboardingFinishing = false;
     if (document.getElementById("onboarding")) setOnboardingActionsDisabled(false);
@@ -407,6 +416,15 @@ function handleStorageChange(changes: Record<string, chrome.storage.StorageChang
   if (changes.localeOverride) {
     location.reload();
     return;
+  }
+  const onboardingAction = onboardingStorageAction(changes[START_PAGE_ONBOARDING_KEY]);
+  if (onboardingAction === "dismiss") {
+    dismissOnboarding();
+  } else if (onboardingAction === "show") {
+    runUiTask(async () => {
+      if (!editor.hasUnsavedChanges) await refreshState();
+      await showOnboarding();
+    });
   }
   if (changes.startPageSettings || changes.startPageRuntimeState || changes.focusStats) {
     let runtimeNeedsRefresh = Boolean(changes.startPageRuntimeState);
