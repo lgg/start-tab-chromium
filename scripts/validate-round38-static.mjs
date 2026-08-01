@@ -47,8 +47,8 @@ for (const [kind, type] of [["note", "note"], ["tasks", "localTasks"]]) {
   assert.ok(runtimeTarget.includes(`block.type === "${type}"`));
 }
 assert.match(runtimeTarget, /block\.type === "links" \|\| block\.type === "startPinned"/);
-assert.equal((worker.match(/assertRuntimeMutationTarget\(settings, instanceId,/g) ?? []).length, 3,
-  "Every non-clock per-instance runtime mutation must validate the current block target");
+assert.ok((worker.match(/assertRuntimeMutationTarget\(settings, instanceId,/g) ?? []).length >= 3,
+  "Every Round 38 non-clock per-instance runtime mutation must validate the current block target");
 assert.match(worker, /assertRuntimeMutationTarget\(settings, instanceId, "note"\)/);
 assert.match(worker, /assertRuntimeMutationTarget\(settings, instanceId, "tasks"\)/);
 assert.match(worker, /assertRuntimeMutationTarget\(settings, instanceId, "linkPage"\)/);

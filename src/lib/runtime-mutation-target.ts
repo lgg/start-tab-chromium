@@ -1,6 +1,6 @@
 import type { StartPageSettings } from "./start-page-settings.js";
 
-export type RuntimeMutationTargetKind = "note" | "tasks" | "linkPage";
+export type RuntimeMutationTargetKind = "clock" | "note" | "tasks" | "linkPage";
 
 export function runtimeMutationTargetExists(
   settings: StartPageSettings,
@@ -10,6 +10,8 @@ export function runtimeMutationTargetExists(
   const block = settings.layout.blocks.find((candidate) => candidate.id === instanceId);
   if (!block) return false;
   switch (kind) {
+    case "clock":
+      return block.type === "timer" || block.type === "stopwatch" || block.type === "pomodoro";
     case "note":
       return block.type === "note";
     case "tasks":
