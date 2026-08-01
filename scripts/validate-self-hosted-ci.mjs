@@ -128,8 +128,6 @@ const regressionCommands = [
   "node scripts/validate-round40-static.mjs",
   "node scripts/run-round41-fixtures.mjs",
   "node scripts/validate-round41-static.mjs",
-  "node scripts/run-round42-fixtures.mjs",
-  "node scripts/validate-round42-static.mjs",
   "node scripts/validate-self-hosted-ci.mjs",
 ];
 
@@ -230,5 +228,8 @@ assert.match(runnerGuide, /cancel-in-progress: true/);
 assert.match(runnerGuide, /project-specific npm cache directory inside `RUNNER_TEMP`/);
 assert.match(runnerGuide, /checkout's built-in recursive clean is disabled/,
   "Runner documentation must explain why checkout delegates deletion to bounded cleanup");
+
+await import("./run-round42-fixtures.mjs");
+await import("./validate-round42-static.mjs");
 
 console.log("Self-hosted Windows CI validation passed");
