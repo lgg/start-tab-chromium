@@ -222,6 +222,7 @@ async function performClockAction(instanceId: string, action: ClockAction): Prom
     interruptedMs: number;
     startedWork: boolean;
   } | null>((runtime, settings) => {
+    assertRuntimeMutationTarget(settings, instanceId, "clock");
     const block = settings.layout.blocks.find(
       (candidate): candidate is ClockBlock => candidate.id === instanceId && isClockBlock(candidate),
     ) ?? null;
