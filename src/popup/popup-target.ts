@@ -6,7 +6,10 @@ export interface PopupTarget {
 }
 
 /** Ensure a popup action still describes the active tab and its current block state. */
-export function samePopupTarget(expected: PopupTarget, current: PopupTarget | null): boolean {
+export function samePopupTarget(
+  expected: PopupTarget,
+  current: PopupTarget | null,
+): current is PopupTarget {
   return current !== null
     && current.tabId === expected.tabId
     && current.host === expected.host
