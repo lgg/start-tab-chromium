@@ -34,6 +34,10 @@ interface LayoutEditorOptions {
   onError: (error: unknown) => void;
 }
 
+export function shouldRefreshLayoutDraft(active: boolean, dirty: boolean, savePending: boolean): boolean {
+  return !active || (!dirty && !savePending);
+}
+
 interface PointerSession {
   pointerId: number;
   blockId: string;
@@ -77,6 +81,7 @@ export class LayoutEditor {
   private draft: StartPageSettings;
   private active = false;
   private dirty = false;
+  private savePending = false;
   private destructiveRuntimeUpdatedAt: number | null = null;
   private pointerSession: PointerSession | null = null;
   private readonly options: LayoutEditorOptions;
@@ -97,7 +102,7 @@ export class LayoutEditor {
   }
 
   get hasUnsavedChanges(): boolean {
-    return this.active && this.dirty;
+    return this.active && (this.dirty || this.savePending);
   }
 
   private displayTitle(block: BlockInstance): string {
@@ -105,12 +110,14 @@ export class LayoutEditor {
   }
 
   replaceSavedSettings(settings: StartPageSettings): void {
+    const refreshDraft = shouldRefreshLayoutDraft(this.active, this.dirty, this.savePending);
     this.saved = cloneSettings(settings);
-    if (!this.active) this.draft = cloneSettings(settings);
+    if (refreshDraft) this.draft = cloneSettings(settings);
     this.renderControls();
   }
 
   enter(): void {
+    if (this.savePending) return;
     this.active = true;
     this.dirty = false;
     this.destructiveRuntimeUpdatedAt = null;
@@ -120,26 +127,33 @@ export class LayoutEditor {
   }
 
   async save(): Promise<void> {
-    if (!this.active) return;
-    await sendMessage({
-      type: "replace-start-page-settings",
-      settings: this.draft,
-      expectedSettingsUpdatedAt: this.saved.updatedAt,
-      expectedRuntimeUpdatedAt: this.destructiveRuntimeUpdatedAt ?? this.options.getRuntime().updatedAt,
-    });
-    const persisted = await getStartPageSettings();
-    this.saved = cloneSettings(persisted);
-    this.draft = cloneSettings(persisted);
-    this.active = false;
-    this.dirty = false;
-    this.destructiveRuntimeUpdatedAt = null;
+    if (!this.active || this.savePending) return;
+    this.savePending = true;
     this.renderControls();
-    this.options.onSaved(cloneSettings(this.saved));
     this.options.requestRender();
+    try {
+      await sendMessage({
+        type: "replace-start-page-settings",
+        settings: this.draft,
+        expectedSettingsUpdatedAt: this.saved.updatedAt,
+        expectedRuntimeUpdatedAt: this.destructiveRuntimeUpdatedAt ?? this.options.getRuntime().updatedAt,
+      });
+      const persisted = await getStartPageSettings();
+      this.saved = cloneSettings(persisted);
+      this.draft = cloneSettings(persisted);
+      this.active = false;
+      this.dirty = false;
+      this.destructiveRuntimeUpdatedAt = null;
+      this.options.onSaved(cloneSettings(this.saved));
+    } finally {
+      this.savePending = false;
+      this.renderControls();
+      this.options.requestRender();
+    }
   }
 
   cancel(): void {
-    if (!this.active) return;
+    if (!this.active || this.savePending) return;
     if (this.dirty && !window.confirm(this.options.i18n.t("discardChangesConfirm"))) return;
     this.draft = cloneSettings(this.saved);
     this.active = false;
@@ -152,7 +166,7 @@ export class LayoutEditor {
   decorateCard(card: HTMLElement, block: BlockInstance): void {
     card.dataset.blockId = block.id;
     card.dataset.blockType = block.type;
-    if (!this.active) return;
+    if (!this.active || this.savePending) return;
     card.classList.add("card--editing");
     card.tabIndex = 0;
     card.setAttribute("aria-label", this.options.i18n.t("editableBlockLabel", { title: this.displayTitle(block) }));
@@ -204,6 +218,7 @@ export class LayoutEditor {
   }
 
   private mutate(mutator: (settings: StartPageSettings) => StartPageSettings): void {
+    if (this.savePending) return;
     this.draft = mutator(cloneSettings(this.draft));
     this.draft.layout.profile = "custom";
     this.dirty = true;
@@ -240,10 +255,16 @@ export class LayoutEditor {
   }
 
   private async configure(id: string): Promise<void> {
+    if (this.savePending) return;
     const block = this.draft.layout.blocks.find((candidate) => candidate.id === id);
     if (!block) return;
+    const expectedSettingsUpdatedAt = this.saved.updatedAt;
     const configured = await editBlockInstance(block, this.options.i18n);
-    if (configured) this.updateBlock(id, () => configured);
+    if (!configured) return;
+    if (this.saved.updatedAt !== expectedSettingsUpdatedAt) {
+      throw new Error("Start Tab settings changed in another extension context; reload before saving");
+    }
+    this.updateBlock(id, () => configured);
   }
 
   private duplicate(id: string): void {
@@ -335,6 +356,7 @@ export class LayoutEditor {
     toolbarHost.hidden = false;
     if (!this.active) {
       const edit = button(i18n.t("editLayout"), "button button--primary");
+      edit.disabled = this.savePending;
       edit.addEventListener("click", () => this.enter());
       toolbarHost.append(edit);
       paletteHost.hidden = true;
@@ -342,9 +364,11 @@ export class LayoutEditor {
     }
 
     const mode = select<LayoutMode>(this.draft.layout.mode, [["grid", i18n.t("layoutModeGrid")], ["free", i18n.t("layoutModeFree")]]);
+    mode.disabled = this.savePending;
     mode.setAttribute("aria-label", i18n.t("layoutMode"));
     mode.addEventListener("change", () => this.setMode(mode.value as LayoutMode));
     const zone = select<LayoutZone>(this.draft.layout.zone, [["contained", i18n.t("layoutZoneContained")], ["full", i18n.t("layoutZoneFull")]]);
+    zone.disabled = this.savePending;
     zone.setAttribute("aria-label", i18n.t("layoutZone"));
     zone.addEventListener("change", () => this.setZone(zone.value as LayoutZone));
     const status = element("span", "editor-toolbar__status", i18n.t("layoutEditorStatus", {
@@ -352,8 +376,10 @@ export class LayoutEditor {
       zone: i18n.t(this.draft.layout.zone === "contained" ? "layoutZoneContained" : "layoutZoneFull"),
     }));
     const save = button(i18n.t("saveLayout"), "button button--primary");
+    save.disabled = this.savePending;
     save.addEventListener("click", () => this.runAsync(() => this.save()));
     const cancel = button(i18n.t("cancel"), "button button--secondary");
+    cancel.disabled = this.savePending;
     cancel.addEventListener("click", () => this.cancel());
     toolbarHost.append(status, mode, zone, cancel, save);
 
@@ -363,7 +389,7 @@ export class LayoutEditor {
     for (const descriptor of BLOCK_DESCRIPTORS) {
       const available = canAddBlock(this.draft, descriptor.type);
       const tile = button("", "palette-tile");
-      tile.disabled = !available;
+      tile.disabled = this.savePending || !available;
       tile.append(
         element("span", "palette-tile__title", i18n.t(descriptor.titleKey)),
         element("span", "palette-tile__description", i18n.t(descriptor.descriptionKey)),
