@@ -114,6 +114,11 @@ await assert.rejects(
   /changed or was removed/,
   "A stale theme dialog must not recreate a theme deleted elsewhere",
 );
+await assert.rejects(
+  () => settingsApi.duplicateTheme(staleTheme.id, undefined, staleTheme.updatedAt),
+  /changed or was removed/,
+  "A stale theme card must not duplicate a fallback theme after its source was deleted",
+);
 
 const runtimeSettings = await settingsApi.getStartPageSettings();
 const note = runtimeSettings.layout.blocks.find((candidate) => candidate.type === "note");
