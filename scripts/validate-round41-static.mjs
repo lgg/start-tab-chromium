@@ -63,7 +63,12 @@ for (const command of ["node scripts/run-round41-fixtures.mjs", "node scripts/va
 for (const phrase of ["native new tab", "status-only", "locale", "active tab", "block state"]) {
   assert.ok(manualQa.toLowerCase().includes(phrase), `Round 41 manual QA is missing: ${phrase}`);
 }
-for (const phrase of ["267 tracked files", "native-new-tab", "generation", "popup", "validation boundary"]) {
+assert.match(audit, /^# .*CI race hardening/m);
+assert.deepEqual(audit.match(/^\d+\./gm), ["1.", "2.", "3.", "4."],
+  "Round 41 audit defects must be consecutively numbered");
+assert.match(audit, /Removed external `actions\/cache` restore\/save steps/,
+  "Round 41 audit must document the self-healing CI correction");
+for (const phrase of ["267 tracked files", "native-new-tab", "generation", "popup", "self-hosted cleanup ordering", "validation boundary"]) {
   assert.ok(audit.toLowerCase().includes(phrase.toLowerCase()), `Round 41 audit is missing: ${phrase}`);
 }
 
