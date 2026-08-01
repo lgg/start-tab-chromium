@@ -354,13 +354,21 @@ export async function addBlockInstance<T extends BlockType>(type: T): Promise<Bl
   return saveNewBlockInstance(block);
 }
 
+function assertEntityRevision(actualUpdatedAt: number, expectedUpdatedAt: number | undefined, entity: "block" | "theme"): void {
+  if (expectedUpdatedAt !== undefined && actualUpdatedAt !== expectedUpdatedAt) {
+    throw new Error(`Start Tab ${entity} changed in another extension context; reload before saving`);
+  }
+}
+
 export async function updateBlockInstance(
   id: string,
   updater: (block: BlockInstance) => BlockInstance,
+  expectedUpdatedAt?: number,
 ): Promise<BlockInstance> {
   const result = await updateStartPageSettings((current) => {
     const existing = current.layout.blocks.find((block) => block.id === id);
     if (!existing) throw new Error(`Block instance not found: ${id}`);
+    assertEntityRevision(existing.updatedAt, expectedUpdatedAt, "block");
     const candidate = updater(cloneBlock(existing));
     if (candidate.id !== id || candidate.type !== existing.type) throw new Error("Block identity and type cannot be changed");
     return {
@@ -377,15 +385,16 @@ export async function updateBlockInstance(
   return saved;
 }
 
-export async function setBlockEnabled(id: string, enabled: boolean): Promise<BlockInstance> {
-  return updateBlockInstance(id, (block) => ({ ...block, enabled }));
+export async function setBlockEnabled(id: string, enabled: boolean, expectedUpdatedAt?: number): Promise<BlockInstance> {
+  return updateBlockInstance(id, (block) => ({ ...block, enabled }), expectedUpdatedAt);
 }
 
-export async function duplicateBlockInstance(id: string, title?: string): Promise<BlockInstance> {
+export async function duplicateBlockInstance(id: string, title?: string, expectedUpdatedAt?: number): Promise<BlockInstance> {
   let duplicateId = "";
   const result = await updateStartPageSettings((current) => {
     const source = current.layout.blocks.find((block) => block.id === id);
     if (!source) throw new Error(`Block instance not found: ${id}`);
+    assertEntityRevision(source.updatedAt, expectedUpdatedAt, "block");
     if (isSingletonBlockType(source.type)) throw new Error(`Singleton block cannot be duplicated: ${source.type}`);
     if (current.layout.blocks.length >= MAX_START_PAGE_BLOCKS) {
       throw new Error(`Start Tab supports at most ${MAX_START_PAGE_BLOCKS} block instances`);
@@ -582,12 +591,15 @@ export async function createCustomTheme(name: string, sourceThemeId?: string): P
   return createCustomThemeDraft(current, name, sourceThemeId);
 }
 
-export async function updateCustomTheme(theme: StartPageTheme): Promise<StartPageTheme> {
+export async function updateCustomTheme(theme: StartPageTheme, expectedUpdatedAt?: number): Promise<StartPageTheme> {
   let savedId = theme.id;
   const result = await updateStartPageSettings((current) => {
     if (getBuiltInTheme(theme.id)) throw new Error("Built-in themes cannot be edited");
     const existing = current.themes.customThemes.find((item) => item.id === theme.id);
     if (!existing) {
+      if (expectedUpdatedAt !== undefined) {
+        throw new Error("Start Tab theme changed or was removed in another extension context; reload before saving");
+      }
       const now = Date.now();
       const fallback = cloneTheme(getTheme(current));
       fallback.id = theme.id;
@@ -603,6 +615,7 @@ export async function updateCustomTheme(theme: StartPageTheme): Promise<StartPag
         themes: { selectedThemeId: normalized.id, customThemes: [...current.themes.customThemes, normalized] },
       };
     }
+    assertEntityRevision(existing.updatedAt, expectedUpdatedAt, "theme");
     const normalized = normalizeTheme({
       ...theme,
       builtIn: false,
@@ -623,10 +636,11 @@ export async function updateCustomTheme(theme: StartPageTheme): Promise<StartPag
   return saved;
 }
 
-export async function duplicateTheme(themeId: string, name?: string): Promise<StartPageTheme> {
+export async function duplicateTheme(themeId: string, name?: string, expectedUpdatedAt?: number): Promise<StartPageTheme> {
   let duplicateId = "";
   const result = await updateStartPageSettings((current) => {
     const source = getTheme(current, themeId);
+    assertEntityRevision(source.updatedAt, expectedUpdatedAt, "theme");
     const now = Date.now();
     const duplicate: StartPageTheme = {
       ...cloneTheme(source),
@@ -647,10 +661,17 @@ export async function duplicateTheme(themeId: string, name?: string): Promise<St
   return duplicate;
 }
 
-export async function deleteCustomTheme(themeId: string): Promise<void> {
+export async function deleteCustomTheme(themeId: string, expectedUpdatedAt?: number): Promise<void> {
   await updateStartPageSettings((current) => {
     if (getBuiltInTheme(themeId)) throw new Error("Built-in themes cannot be deleted");
-    if (!current.themes.customThemes.some((theme) => theme.id === themeId)) return current;
+    const existing = current.themes.customThemes.find((theme) => theme.id === themeId);
+    if (!existing) {
+      if (expectedUpdatedAt !== undefined) {
+        throw new Error("Start Tab theme changed or was removed in another extension context; reload before saving");
+      }
+      return current;
+    }
+    assertEntityRevision(existing.updatedAt, expectedUpdatedAt, "theme");
     const customThemes = current.themes.customThemes.filter((theme) => theme.id !== themeId);
     const selectedThemeId = current.themes.selectedThemeId === themeId
       ? DEFAULT_SETTINGS.themes.selectedThemeId

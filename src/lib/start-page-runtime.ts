@@ -880,9 +880,27 @@ function rawRuntimeHasInstance(value: unknown, instanceId: string): boolean {
   });
 }
 
-export async function deleteInstanceRuntime(instanceId: string): Promise<void> {
+export async function deleteInstanceRuntime(instanceId: string): Promise<void>;
+export async function deleteInstanceRuntime(
+  instanceId: string,
+  expectedBlockUpdatedAt: number,
+  expectedRuntimeUpdatedAt: number,
+): Promise<void>;
+export async function deleteInstanceRuntime(
+  instanceId: string,
+  expectedBlockUpdatedAt?: number,
+  expectedRuntimeUpdatedAt?: number,
+): Promise<void> {
   if (typeof document !== "undefined") {
-    await sendMessage({ type: "delete-instance-runtime", instanceId });
+    if (expectedBlockUpdatedAt === undefined || expectedRuntimeUpdatedAt === undefined) {
+      throw new Error("Clearing instance runtime requires the current block and runtime revisions");
+    }
+    await sendMessage({
+      type: "delete-instance-runtime",
+      instanceId,
+      expectedBlockUpdatedAt,
+      expectedRuntimeUpdatedAt,
+    });
     return;
   }
   await withStorageLock("data-write", async () => {
@@ -902,6 +920,18 @@ export async function deleteInstanceRuntime(instanceId: string): Promise<void> {
     }
     const settings = normalizeStartPageSettings(rawSettings);
     const runtime = normalizeRuntimeState(rawRuntime, settings, rawLegacy);
+    if (expectedBlockUpdatedAt !== undefined || expectedRuntimeUpdatedAt !== undefined) {
+      if (expectedBlockUpdatedAt === undefined || expectedRuntimeUpdatedAt === undefined) {
+        throw new Error("Instance runtime revision validation is incomplete");
+      }
+      const block = settings.layout.blocks.find((candidate) => candidate.id === instanceId);
+      if (!block || block.updatedAt !== expectedBlockUpdatedAt) {
+        throw new Error("Start Tab block changed or was removed in another extension context; reload before clearing runtime data");
+      }
+      if (runtime.updatedAt !== expectedRuntimeUpdatedAt) {
+        throw new Error("Start Tab runtime changed in another extension context; reload before clearing runtime data");
+      }
+    }
     const normalizedHasInstance = Object.prototype.hasOwnProperty.call(runtime.clocks, instanceId)
       || Object.prototype.hasOwnProperty.call(runtime.notes, instanceId)
       || Object.prototype.hasOwnProperty.call(runtime.tasks, instanceId)
