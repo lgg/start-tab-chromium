@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { build as esbuildBuild } from "esbuild";
 
 import {
   STATIC_ASSET_WATCH_IMPORT,
@@ -83,6 +84,22 @@ try {
   assert.equal(loaded.loader, "js");
   assert.ok(loaded.watchFiles.includes(created.get("src/manifest.json")));
   assert.ok(loaded.watchDirs.includes(path.resolve(root, "icons")));
+
+  const smoke = await esbuildBuild({
+    stdin: {
+      contents: "export const fixture = true;",
+      sourcefile: "round43-smoke.js",
+      resolveDir: root,
+    },
+    bundle: true,
+    write: false,
+    format: "esm",
+    logLevel: "silent",
+    inject: [STATIC_ASSET_WATCH_IMPORT],
+    plugins: [createStaticAssetWatchPlugin(root, false)],
+  });
+  assert.equal(smoke.errors.length, 0);
+  assert.equal(smoke.outputFiles?.length, 1, "The virtual watch module must be accepted by a real esbuild build");
 
   console.log("Round 43 fixtures passed");
 } finally {
