@@ -1,0 +1,86 @@
+name: Portable Round 43 Validation
+
+on:
+  pull_request:
+    branches:
+      - master
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-round43-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CI: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          architecture: x64
+          package-manager-cache: false
+
+      - name: Configure isolated CI paths
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
+            throw 'RUNNER_TEMP is empty'
+          }
+          $cacheRoot = Join-Path $env:RUNNER_TEMP 'start-tab-chromium-cache'
+          "CI_CACHE_ROOT=$cacheRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "NPM_CONFIG_CACHE=$(Join-Path $cacheRoot 'npm')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install dependencies
+        run: npm ci --include=dev --bin-links=true --no-audit --no-fund --loglevel=error
+
+      - name: Generate locale parity report
+        run: node scripts/report-locale-parity.mjs
+
+      - name: Run complete regression chain
+        run: npm test
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build full extension
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: should-be-ignored.apps.googleusercontent.com
+        run: npm run build
+
+      - name: Build blocker-only extension
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: should-be-ignored.apps.googleusercontent.com
+        run: npm run build:blocker-only
+
+      - name: Validate Google-enabled build
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: ci-validation.apps.googleusercontent.com
+        run: npm run build:google
+
+      - name: Clean project workspace
+        if: always()
+        run: node scripts/clean-ci.mjs
