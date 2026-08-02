@@ -36,13 +36,13 @@ assert.doesNotMatch(readme, /CI caches only npm download data/);
 
 for (const command of ["node scripts/run-round42-fixtures.mjs", "node scripts/validate-round42-static.mjs"]) {
   assert.ok(packageJson.scripts.test.includes(command), `npm test must include ${command}`);
+  assert.ok(workflow.includes(command), `CI must execute ${command} explicitly`);
+  assert.ok(selfHosted.includes(`"${command}"`), `The self-hosted CI contract must require ${command}`);
 }
-assert.ok(workflow.includes("node scripts/validate-self-hosted-ci.mjs"),
-  "CI must execute the self-hosted contract that owns Round 42 validation");
-assert.ok(selfHosted.includes('await import("./run-round42-fixtures.mjs")'),
-  "The mandatory self-hosted contract must execute Round 42 fixtures");
-assert.ok(selfHosted.includes('await import("./validate-round42-static.mjs")'),
-  "The mandatory self-hosted contract must execute Round 42 static validation");
+assert.doesNotMatch(selfHosted, /await import\("\.\/run-round42-fixtures\.mjs"\)/,
+  "Round 42 fixtures must not be hidden as a validator side effect");
+assert.doesNotMatch(selfHosted, /await import\("\.\/validate-round42-static\.mjs"\)/,
+  "Round 42 static validation must not be hidden as a validator side effect");
 for (const phrase of ["cross-tab", "import", "reset", "preset", "Web Lock"]) {
   assert.ok(audit.toLowerCase().includes(phrase.toLowerCase()), `Round 42 audit is missing: ${phrase}`);
 }
