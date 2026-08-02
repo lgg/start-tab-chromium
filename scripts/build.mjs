@@ -42,6 +42,10 @@ const commonFiles = [
 ];
 
 async function copyStaticAssets() {
+  await Promise.all([
+    rm(output("icons"), { recursive: true, force: true }),
+    rm(output("_locales"), { recursive: true, force: true }),
+  ]);
   await Promise.all(commonFiles.map(([from, to]) => cp(from, to)));
   if (!blockerOnly) {
     await Promise.all([
