@@ -8,10 +8,12 @@ function uniqueResolved(paths) {
   return [...new Set(paths.map((value) => path.resolve(value)))].sort((left, right) => left.localeCompare(right));
 }
 
-async function listRegularFiles(directory) {
+async function listRegularTree(directory) {
   const files = [];
+  const directories = [];
 
   async function visit(current) {
+    directories.push(current);
     const entries = await readdir(current, { withFileTypes: true });
     entries.sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
@@ -27,7 +29,7 @@ async function listRegularFiles(directory) {
   }
 
   await visit(directory);
-  return files;
+  return { files, directories };
 }
 
 export function explicitStaticAssetSources(root, blockerOnly = false) {
@@ -57,13 +59,15 @@ export async function collectStaticAssetWatchInputs(root, blockerOnly = false) {
     path.join(root, "icons"),
     path.join(root, "src", "_locales"),
   ];
-  const recursiveFiles = (await Promise.all(recursiveDirectories.map(listRegularFiles))).flat();
+  const trees = await Promise.all(recursiveDirectories.map(listRegularTree));
+  const recursiveFiles = trees.flatMap((tree) => tree.files);
+  const traversedDirectories = trees.flatMap((tree) => tree.directories);
   const watchFiles = uniqueResolved([
     ...explicitStaticAssetSources(root, blockerOnly),
     ...recursiveFiles,
   ]);
   const watchDirs = uniqueResolved([
-    ...recursiveDirectories,
+    ...traversedDirectories,
     ...watchFiles.map((file) => path.dirname(file)),
   ]);
   return { watchFiles, watchDirs };
