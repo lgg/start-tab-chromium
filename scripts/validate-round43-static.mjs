@@ -65,7 +65,7 @@ assert.match(watchGuide, /HTML, CSS, manifest, locale, icon, and early gate chan
 assert.match(watchGuide, /blocker-only/);
 assert.match(audit, /static asset/);
 assert.match(audit, /Round 42/);
-assert.match(audit, /stale copied files/);
+assert.match(audit, /stale copied file/);
 assert.match(manualQa, /npm run watch/);
 assert.match(manualQa, /newtab-gate\.js/);
 
