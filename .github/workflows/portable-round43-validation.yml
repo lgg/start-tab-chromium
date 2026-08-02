@@ -3,10 +3,11 @@ name: Portable Round 43 Validation
 on:
   pull_request:
     branches:
-      - master
+      - audit/round43-static-watch-ci-20260803
     types:
-      - ready_for_review
+      - opened
       - reopened
+      - synchronize
 
 permissions:
   contents: read
