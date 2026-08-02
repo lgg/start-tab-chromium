@@ -14,6 +14,16 @@ assert.match(build, /createStaticAssetWatchPlugin/);
 assert.match(build, /if \(watch\) plugins\.unshift\(createStaticAssetWatchPlugin\(root, blockerOnly\)\)/);
 assert.match(build, /\.\.\.\(watch \? \{ inject: \[STATIC_ASSET_WATCH_IMPORT\] \} : \{\}\)/);
 assert.match(build, /Watching \$\{profile\} extension sources and static assets/);
+assert.match(build, /rm\(output\("icons"\), \{ recursive: true, force: true \}\)/);
+assert.match(build, /rm\(output\("_locales"\), \{ recursive: true, force: true \}\)/);
+assert.ok(
+  build.indexOf('rm(output("icons")') < build.indexOf('cp(path.join(root, "icons")'),
+  "Copied icon output must be removed before the source tree is recopied",
+);
+assert.ok(
+  build.indexOf('rm(output("_locales")') < build.indexOf('cp(source("_locales")'),
+  "Copied locale output must be removed before the source tree is recopied",
+);
 assert.match(helper, /watchFiles/);
 assert.match(helper, /watchDirs/);
 assert.ok(helper.includes('path.join(root, "src", "_locales")'));
@@ -52,6 +62,7 @@ assert.match(watchGuide, /HTML, CSS, manifest, locale, icon, and early gate chan
 assert.match(watchGuide, /blocker-only/);
 assert.match(audit, /static assets/);
 assert.match(audit, /Round 42/);
+assert.match(audit, /stale copied files/);
 assert.match(manualQa, /npm run watch/);
 assert.match(manualQa, /newtab-gate\.js/);
 
