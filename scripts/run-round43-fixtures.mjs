@@ -40,6 +40,8 @@ try {
   ];
   const created = new Map();
   for (const relativePath of required) created.set(relativePath, await create(relativePath));
+  await mkdir(path.join(root, "icons", "empty", "nested"), { recursive: true });
+  await mkdir(path.join(root, "src", "_locales", "empty", "nested"), { recursive: true });
 
   const fullExplicit = explicitStaticAssetSources(root, false);
   const blockerExplicit = explicitStaticAssetSources(root, true);
@@ -61,8 +63,20 @@ try {
   }
   assert.equal(new Set(full.watchFiles).size, full.watchFiles.length, "Watch files must be unique");
   assert.equal(new Set(full.watchDirs).size, full.watchDirs.length, "Watch directories must be unique");
-  assert.ok(full.watchDirs.includes(path.resolve(root, "icons", "nested")));
-  assert.ok(full.watchDirs.includes(path.resolve(root, "src", "_locales", "ru", "nested")));
+  for (const relativeDirectory of [
+    "icons/nested",
+    "icons/empty",
+    "icons/empty/nested",
+    "src/_locales/ru",
+    "src/_locales/ru/nested",
+    "src/_locales/empty",
+    "src/_locales/empty/nested",
+  ]) {
+    assert.ok(
+      full.watchDirs.includes(path.resolve(root, relativeDirectory)),
+      `Every traversed directory must be watched: ${relativeDirectory}`,
+    );
+  }
 
   let resolveRegistration;
   let loadRegistration;
@@ -84,6 +98,7 @@ try {
   assert.equal(loaded.loader, "js");
   assert.ok(loaded.watchFiles.includes(created.get("src/manifest.json")));
   assert.ok(loaded.watchDirs.includes(path.resolve(root, "icons")));
+  assert.ok(loaded.watchDirs.includes(path.resolve(root, "icons", "empty", "nested")));
 
   const smoke = await esbuildBuild({
     stdin: {
