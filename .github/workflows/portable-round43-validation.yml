@@ -21,6 +21,10 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      CI: "true"
+      CI_CACHE_ROOT: ${{ runner.temp }}/start-tab-chromium-cache
+      NPM_CONFIG_CACHE: ${{ runner.temp }}/start-tab-chromium-cache/npm
 
     steps:
       - name: Checkout
