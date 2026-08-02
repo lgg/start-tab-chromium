@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { assertSafeBuildOutputFilesystem, resolveSafeBuildOutput } from "./build-output-path.mjs";
 import { requireGoogleOAuthClientId } from "./google-oauth-client.mjs";
+import { STATIC_ASSET_WATCH_IMPORT, createStaticAssetWatchPlugin } from "./static-asset-watch.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const watch = process.argv.includes("--watch");
@@ -110,6 +111,9 @@ await assertSafeBuildOutputFilesystem(root, tmpdir(), outdir);
 await rm(outdir, { recursive: true, force: true });
 await mkdir(outdir, { recursive: true });
 
+const plugins = [copyPlugin];
+if (watch) plugins.unshift(createStaticAssetWatchPlugin(root, blockerOnly));
+
 const options = {
   entryPoints,
   outdir,
@@ -122,14 +126,15 @@ const options = {
   legalComments: "none",
   logLevel: "info",
   metafile: true,
-  plugins: [copyPlugin],
+  plugins,
+  ...(watch ? { inject: [STATIC_ASSET_WATCH_IMPORT] } : {}),
 };
 
 if (watch) {
   const context = await esbuild.context(options);
   await context.watch();
   const profile = googleEnabled ? "Google-enabled full" : blockerOnly ? "blocker-only" : "full";
-  console.log(`Watching ${profile} extension sources...`);
+  console.log(`Watching ${profile} extension sources and static assets...`);
 } else {
   await esbuild.build(options);
 }
