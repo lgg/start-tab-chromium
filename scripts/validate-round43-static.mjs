@@ -6,7 +6,7 @@ const helper = await readFile("scripts/static-asset-watch.mjs", "utf8");
 const fixtures = await readFile("scripts/run-round43-fixtures.mjs", "utf8");
 const workflow = await readFile(".github/workflows/ci.yml", "utf8");
 const packageJson = JSON.parse(await readFile("package.json", "utf8"));
-const readme = await readFile("README.md", "utf8");
+const watchGuide = await readFile("docs/watch-mode.md", "utf8");
 const audit = await readFile("docs/audit-2026-08-03-round-43.md", "utf8");
 const manualQa = await readFile("docs/manual-qa-round43.md", "utf8");
 
@@ -16,14 +16,16 @@ assert.match(build, /\.\.\.\(watch \? \{ inject: \[STATIC_ASSET_WATCH_IMPORT\] \
 assert.match(build, /Watching \$\{profile\} extension sources and static assets/);
 assert.match(helper, /watchFiles/);
 assert.match(helper, /watchDirs/);
-assert.match(helper, /src["', ]*,["', ]*"_locales"/);
-assert.match(helper, /path\.join\(root, "icons"\)/);
+assert.ok(helper.includes('path.join(root, "src", "_locales")'));
+assert.ok(helper.includes('path.join(root, "icons")'));
 assert.match(helper, /if \(!blockerOnly\)/);
 assert.match(helper, /entry\.isFile\(\)/);
 assert.match(helper, /Static asset trees must contain regular files and directories only/);
 assert.match(fixtures, /Full watch set is missing/);
 assert.match(fixtures, /Blocker watch set must omit/);
 assert.match(fixtures, /start-tab-static-assets/);
+assert.match(fixtures, /esbuildBuild/);
+assert.match(fixtures, /real esbuild build/);
 
 for (const command of [
   "node scripts/run-round42-fixtures.mjs",
@@ -45,8 +47,9 @@ assert.ok(
       < workflow.indexOf("node scripts/validate-round43-static.mjs"),
   "The latest regression rounds must run explicitly and in order",
 );
-assert.match(readme, /npm run watch/);
-assert.match(readme, /HTML, CSS, manifest, locale, icon, and early gate changes/);
+assert.match(watchGuide, /npm run watch/);
+assert.match(watchGuide, /HTML, CSS, manifest, locale, icon, and early gate changes/);
+assert.match(watchGuide, /blocker-only/);
 assert.match(audit, /static assets/);
 assert.match(audit, /Round 42/);
 assert.match(manualQa, /npm run watch/);
