@@ -26,6 +26,8 @@ assert.ok(
 );
 assert.match(helper, /watchFiles/);
 assert.match(helper, /watchDirs/);
+assert.match(helper, /directories\.push\(current\)/);
+assert.match(helper, /traversedDirectories/);
 assert.ok(helper.includes('path.join(root, "src", "_locales")'));
 assert.ok(helper.includes('path.join(root, "icons")'));
 assert.match(helper, /if \(!blockerOnly\)/);
@@ -33,6 +35,7 @@ assert.match(helper, /entry\.isFile\(\)/);
 assert.match(helper, /Static asset trees must contain regular files and directories only/);
 assert.match(fixtures, /Full watch set is missing/);
 assert.match(fixtures, /Blocker watch set must omit/);
+assert.match(fixtures, /Every traversed directory must be watched/);
 assert.match(fixtures, /start-tab-static-assets/);
 assert.match(fixtures, /esbuildBuild/);
 assert.match(fixtures, /real esbuild build/);
