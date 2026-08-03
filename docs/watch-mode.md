@@ -16,6 +16,8 @@ Static coverage includes:
 - `src/manifest.json` with the normal profile transformations;
 - every regular file below `src/_locales/` and `icons/`.
 
+Before each static copy, watch mode revalidates the build output and removes every generated static target before copying the new revision. If a source asset is deleted or a copy fails, the corresponding stale generated file is left absent rather than silently surviving from an older build. Restore the source and wait for the next successful rebuild before reloading the extension.
+
 For blocker-only watch mode, run:
 
 ```bash
