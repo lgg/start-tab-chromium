@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { assertSafeBuildOutputFilesystem, resolveSafeBuildOutput } from "./build-output-path.mjs";
 import { requireGoogleOAuthClientId } from "./google-oauth-client.mjs";
+import { prepareStaticAssetOutputs } from "./static-asset-output.mjs";
 import { STATIC_ASSET_WATCH_IMPORT, createStaticAssetWatchPlugin } from "./static-asset-watch.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -42,10 +43,7 @@ const commonFiles = [
 ];
 
 async function copyStaticAssets() {
-  await Promise.all([
-    rm(output("icons"), { recursive: true, force: true }),
-    rm(output("_locales"), { recursive: true, force: true }),
-  ]);
+  await prepareStaticAssetOutputs(root, tmpdir(), outdir, blockerOnly);
   await Promise.all(commonFiles.map(([from, to]) => cp(from, to)));
   if (!blockerOnly) {
     await Promise.all([
