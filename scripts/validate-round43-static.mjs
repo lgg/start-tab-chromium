@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const build = await readFile("scripts/build.mjs", "utf8");
-const helper = await readFile("scripts/static-asset-watch.mjs", "utf8");
+const watchHelper = await readFile("scripts/static-asset-watch.mjs", "utf8");
+const outputHelper = await readFile("scripts/static-asset-output.mjs", "utf8");
 const fixtures = await readFile("scripts/run-round43-fixtures.mjs", "utf8");
 const workflow = await readFile(".github/workflows/ci.yml", "utf8");
 const packageJson = JSON.parse(await readFile("package.json", "utf8"));
@@ -14,25 +15,24 @@ assert.match(build, /createStaticAssetWatchPlugin/);
 assert.match(build, /if \(watch\) plugins\.unshift\(createStaticAssetWatchPlugin\(root, blockerOnly\)\)/);
 assert.match(build, /\.\.\.\(watch \? \{ inject: \[STATIC_ASSET_WATCH_IMPORT\] \} : \{\}\)/);
 assert.match(build, /Watching \$\{profile\} extension sources and static assets/);
-assert.match(build, /rm\(output\("icons"\), \{ recursive: true, force: true \}\)/);
-assert.match(build, /rm\(output\("_locales"\), \{ recursive: true, force: true \}\)/);
+assert.match(build, /await prepareStaticAssetOutputs\(root, tmpdir\(\), outdir, blockerOnly\)/);
+assert.match(outputHelper, /removePathWithinBoundary/);
+assert.ok(outputHelper.includes('"icons"'), "Copied icon output must be included in exact static cleanup");
+assert.ok(outputHelper.includes('"_locales"'), "Copied locale output must be included in exact static cleanup");
 assert.ok(
-  build.indexOf('rm(output("icons")') < build.indexOf('cp(path.join(root, "icons")'),
-  "Copied icon output must be removed before the source tree is recopied",
+  build.indexOf("await prepareStaticAssetOutputs(root, tmpdir(), outdir, blockerOnly)")
+    < build.indexOf('cp(path.join(root, "icons")'),
+  "Copied static trees must be removed before they are recopied",
 );
-assert.ok(
-  build.indexOf('rm(output("_locales")') < build.indexOf('cp(source("_locales")'),
-  "Copied locale output must be removed before the source tree is recopied",
-);
-assert.match(helper, /watchFiles/);
-assert.match(helper, /watchDirs/);
-assert.match(helper, /directories\.push\(current\)/);
-assert.match(helper, /traversedDirectories/);
-assert.ok(helper.includes('path.join(root, "src", "_locales")'));
-assert.ok(helper.includes('path.join(root, "icons")'));
-assert.match(helper, /if \(!blockerOnly\)/);
-assert.match(helper, /entry\.isFile\(\)/);
-assert.match(helper, /Static asset trees must contain regular files and directories only/);
+assert.match(watchHelper, /watchFiles/);
+assert.match(watchHelper, /watchDirs/);
+assert.match(watchHelper, /directories\.push\(current\)/);
+assert.match(watchHelper, /traversedDirectories/);
+assert.ok(watchHelper.includes('path.join(root, "src", "_locales")'));
+assert.ok(watchHelper.includes('path.join(root, "icons")'));
+assert.match(watchHelper, /if \(!blockerOnly\)/);
+assert.match(watchHelper, /entry\.isFile\(\)/);
+assert.match(watchHelper, /Static asset trees must contain regular files and directories only/);
 assert.match(fixtures, /Full watch set is missing/);
 assert.match(fixtures, /Blocker watch set must omit/);
 assert.match(fixtures, /Every traversed directory must be watched/);
