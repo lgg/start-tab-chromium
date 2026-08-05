@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { createBuildOutputLifecyclePlugin } from "./build-output-lifecycle.mjs";
 import { assertSafeBuildOutputFilesystem, resolveSafeBuildOutput } from "./build-output-path.mjs";
 import { requireGoogleOAuthClientId } from "./google-oauth-client.mjs";
-import { prepareStaticAssetOutputs } from "./static-asset-output.mjs";
 import { STATIC_ASSET_WATCH_IMPORT, createStaticAssetWatchPlugin } from "./static-asset-watch.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -23,6 +23,7 @@ const requestedOutdir = outdirFlag?.slice("--outdir=".length)
 const outdir = resolveSafeBuildOutput(root, tmpdir(), requestedOutdir);
 const source = (...parts) => path.join(root, "src", ...parts);
 const output = (...parts) => path.join(outdir, ...parts);
+const profile = googleEnabled ? "Google-enabled full" : blockerOnly ? "blocker-only" : "full";
 
 const entryPoints = {
   "service-worker": source("service-worker.ts"),
@@ -43,7 +44,6 @@ const commonFiles = [
 ];
 
 async function copyStaticAssets() {
-  await prepareStaticAssetOutputs(root, tmpdir(), outdir, blockerOnly);
   await Promise.all(commonFiles.map(([from, to]) => cp(from, to)));
   if (!blockerOnly) {
     await Promise.all([
@@ -95,25 +95,21 @@ function assertProductionGraph(metafile) {
   }
 }
 
-const copyPlugin = {
-  name: "copy-extension-static-assets",
-  setup(build) {
-    build.onEnd(async (result) => {
-      if (result.errors.length === 0) {
-        assertProductionGraph(result.metafile);
-        await copyStaticAssets();
-        const profile = googleEnabled ? "Google-enabled full" : blockerOnly ? "blocker-only" : "full";
-        console.log(`Built ${profile} extension at ${outdir}`);
-      }
-    });
-  },
-};
+const outputLifecyclePlugin = createBuildOutputLifecyclePlugin({
+  root,
+  temporaryRoot: tmpdir(),
+  outdir,
+  blockerOnly,
+  assertProductionGraph,
+  copyStaticAssets,
+  profile,
+});
 
 await assertSafeBuildOutputFilesystem(root, tmpdir(), outdir);
 await rm(outdir, { recursive: true, force: true });
 await mkdir(outdir, { recursive: true });
 
-const plugins = [copyPlugin];
+const plugins = [outputLifecyclePlugin];
 if (watch) plugins.unshift(createStaticAssetWatchPlugin(root, blockerOnly));
 
 const options = {
@@ -135,7 +131,6 @@ const options = {
 if (watch) {
   const context = await esbuild.context(options);
   await context.watch();
-  const profile = googleEnabled ? "Google-enabled full" : blockerOnly ? "blocker-only" : "full";
   console.log(`Watching ${profile} extension sources and static assets...`);
 } else {
   await esbuild.build(options);

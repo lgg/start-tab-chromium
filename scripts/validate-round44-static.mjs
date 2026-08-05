@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const build = await readFile("scripts/build.mjs", "utf8");
+const lifecycle = await readFile("scripts/build-output-lifecycle.mjs", "utf8");
 const outputHelper = await readFile("scripts/static-asset-output.mjs", "utf8");
 const fixtures = await readFile("scripts/run-round44-fixtures.mjs", "utf8");
 const workflow = await readFile(".github/workflows/ci.yml", "utf8");
@@ -10,12 +11,15 @@ const watchGuide = await readFile("docs/watch-mode.md", "utf8");
 const audit = await readFile("docs/audit-2026-08-03-round-44.md", "utf8");
 const manualQa = await readFile("docs/manual-qa-round44.md", "utf8");
 
-assert.match(build, /import \{ prepareStaticAssetOutputs \} from "\.\/static-asset-output\.mjs"/);
-assert.match(build, /await prepareStaticAssetOutputs\(root, tmpdir\(\), outdir, blockerOnly\)/);
+assert.match(build, /import \{ createBuildOutputLifecyclePlugin \} from "\.\/build-output-lifecycle\.mjs"/);
+assert.match(build, /const outputLifecyclePlugin = createBuildOutputLifecyclePlugin\(\{/);
+assert.match(build, /copyStaticAssets,/);
+assert.match(lifecycle, /prepareGeneratedOutputs/);
+assert.match(lifecycle, /build\.onStart/);
 assert.ok(
-  build.indexOf("await prepareStaticAssetOutputs(root, tmpdir(), outdir, blockerOnly)")
-    < build.indexOf("await Promise.all(commonFiles.map"),
-  "Every static destination must be prepared before the first copy",
+  build.indexOf("const outputLifecyclePlugin = createBuildOutputLifecyclePlugin")
+    < build.indexOf("await esbuild.build(options)"),
+  "Every generated destination must be delegated to lifecycle cleanup before esbuild starts",
 );
 assert.doesNotMatch(build, /rm\(output\("icons"\)/,
   "Static output cleanup must be centralized in the bounded helper");
@@ -27,7 +31,9 @@ assert.equal((outputHelper.match(/await assertSafeBuildOutputFilesystem/g) ?? []
   "Output safety must be checked before and after recreating the output directory");
 assert.match(outputHelper, /await mkdir\(outdir, \{ recursive: true \}\)/);
 assert.match(outputHelper, /await removePathWithinBoundary\(outdir, relativePath\)/);
-assert.match(outputHelper, /for \(const relativePath of staticAssetOutputPaths\(blockerOnly\)\)/);
+assert.match(outputHelper, /prepareOutputPaths\(root, temporaryRoot, outdir, staticAssetOutputPaths\(blockerOnly\)\)/);
+assert.match(outputHelper, /generatedOutputPaths\(blockerOnly\)/,
+  "The stronger lifecycle cleanup must include the complete Round 44 static output set");
 for (const output of [
   "popup.html",
   "popup.css",
