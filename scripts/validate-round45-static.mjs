@@ -79,7 +79,7 @@ assert.match(watchGuide, /failed rebuild leaves the generated extension incomple
 assert.match(audit, /early compilation or watch-input failure/);
 assert.match(audit, /mixed-version output/);
 assert.match(manualQa, /TypeScript syntax error/);
-assert.match(manualQa, /temporarily rename the root `icons\/` directory/);
+assert.match(manualQa, /temporarily rename the root `icons\/` directory/i);
 assert.match(manualQa, /all generated files return only after a successful rebuild/);
 
 console.log("Round 45 static validation passed");
