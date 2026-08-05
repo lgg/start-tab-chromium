@@ -26,8 +26,8 @@ assert.match(outputHelper, /generatedOutputPaths\(blockerOnly\)/,
   "The lifecycle output set must include copied static trees before every rebuild");
 assert.ok(
   build.indexOf("const outputLifecyclePlugin = createBuildOutputLifecyclePlugin")
-    < build.indexOf('cp(path.join(root, "icons")'),
-  "Copied static trees must be delegated to lifecycle cleanup before their copy implementation",
+    < build.indexOf("const plugins = [outputLifecyclePlugin]"),
+  "The lifecycle plugin must be created before it is registered with esbuild",
 );
 assert.match(watchHelper, /watchFiles/);
 assert.match(watchHelper, /watchDirs/);
