@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const build = await readFile("scripts/build.mjs", "utf8");
+const lifecycle = await readFile("scripts/build-output-lifecycle.mjs", "utf8");
 const watchHelper = await readFile("scripts/static-asset-watch.mjs", "utf8");
 const outputHelper = await readFile("scripts/static-asset-output.mjs", "utf8");
 const fixtures = await readFile("scripts/run-round43-fixtures.mjs", "utf8");
@@ -15,14 +16,18 @@ assert.match(build, /createStaticAssetWatchPlugin/);
 assert.match(build, /if \(watch\) plugins\.unshift\(createStaticAssetWatchPlugin\(root, blockerOnly\)\)/);
 assert.match(build, /\.\.\.\(watch \? \{ inject: \[STATIC_ASSET_WATCH_IMPORT\] \} : \{\}\)/);
 assert.match(build, /Watching \$\{profile\} extension sources and static assets/);
-assert.match(build, /await prepareStaticAssetOutputs\(root, tmpdir\(\), outdir, blockerOnly\)/);
+assert.match(build, /createBuildOutputLifecyclePlugin/);
+assert.match(lifecycle, /prepareGeneratedOutputs/);
+assert.match(lifecycle, /build\.onStart/);
 assert.match(outputHelper, /removePathWithinBoundary/);
 assert.ok(outputHelper.includes('"icons"'), "Copied icon output must be included in exact static cleanup");
 assert.ok(outputHelper.includes('"_locales"'), "Copied locale output must be included in exact static cleanup");
+assert.match(outputHelper, /generatedOutputPaths\(blockerOnly\)/,
+  "The lifecycle output set must include copied static trees before every rebuild");
 assert.ok(
-  build.indexOf("await prepareStaticAssetOutputs(root, tmpdir(), outdir, blockerOnly)")
+  build.indexOf("const outputLifecyclePlugin = createBuildOutputLifecyclePlugin")
     < build.indexOf('cp(path.join(root, "icons")'),
-  "Copied static trees must be removed before they are recopied",
+  "Copied static trees must be delegated to lifecycle cleanup before their copy implementation",
 );
 assert.match(watchHelper, /watchFiles/);
 assert.match(watchHelper, /watchDirs/);
