@@ -14,6 +14,7 @@ let updatedUrls: string[] = [];
 let removedTabs: number[] = [];
 let nextTabId = 51;
 let storageSetHook: ((items: Record<string, unknown>) => Promise<void>) | null = null;
+let storageRemoveHook: ((keys: string | string[]) => Promise<void>) | null = null;
 
 function resetState(): void {
   for (const key of Object.keys(storage)) delete storage[key];
@@ -22,6 +23,7 @@ function resetState(): void {
   removedTabs = [];
   nextTabId = 51;
   storageSetHook = null;
+  storageRemoveHook = null;
 }
 
 const localStorageMock = {
@@ -37,6 +39,7 @@ const localStorageMock = {
     Object.assign(storage, items);
   },
   async remove(keys: string | string[]): Promise<void> {
+    if (storageRemoveHook) await storageRemoveHook(keys);
     for (const key of typeof keys === "string" ? [keys] : keys) delete storage[key];
   },
 };
@@ -74,8 +77,8 @@ assert.equal(consumed?.tabId, 51);
 assert.equal(typeof consumed?.consumedAt, "number");
 
 // Regression: a grant can expire while tabs.update is still settling. The old
-// poller started a fresh timeout afterward, accepted the expired consumer's
-// deletion as success, and returned even though no bypass was consumed.
+// poller started a fresh timeout afterward and could accept loss of the grant
+// as success even though no bypass was consumed.
 resetState();
 const realNow = Date.now;
 let fakeNow = 10_000;
@@ -121,14 +124,41 @@ await assert.rejects(
 assert.equal((storage[NATIVE_NEW_TAB_BYPASS_KEY] as { tabId?: number }).tabId, 999,
   "Failure cleanup must not delete another tab's bypass");
 
-// Expired consumers leave cleanup to the opener. A stale read must never issue
-// a global remove that could erase a newer retry written in between.
+// Expired leases should still be cleaned promptly. The cleanup is safe now
+// because the read and remove happen under the same lock used by retry grants.
 resetState();
-const expired = { tabId: 51, expiresAt: Date.now() - 1 };
-storage[NATIVE_NEW_TAB_BYPASS_KEY] = expired;
+storage[NATIVE_NEW_TAB_BYPASS_KEY] = { tabId: 51, expiresAt: Date.now() - 1 };
 assert.equal(await consumeNativeNewTabBypass(51), false);
-assert.deepEqual(storage[NATIVE_NEW_TAB_BYPASS_KEY], expired,
-  "An expired consumer must not delete the shared bypass key");
+assert.equal(storage[NATIVE_NEW_TAB_BYPASS_KEY], undefined,
+  "An expired consumer must remove its stale bypass lease under the shared lock");
+
+// Regression: delayed expired cleanup must finish before a retry can publish.
+// Therefore the old cleanup can never erase the newer grant after publication.
+resetState();
+storage[NATIVE_NEW_TAB_BYPASS_KEY] = { tabId: 51, expiresAt: Date.now() - 1 };
+let signalExpiredRemoval!: () => void;
+let releaseExpiredRemoval!: () => void;
+const expiredRemovalStarted = new Promise<void>((resolve) => { signalExpiredRemoval = resolve; });
+const expiredRemovalRelease = new Promise<void>((resolve) => { releaseExpiredRemoval = resolve; });
+storageRemoveHook = async (keys) => {
+  const requested = typeof keys === "string" ? [keys] : keys;
+  if (!requested.includes(NATIVE_NEW_TAB_BYPASS_KEY)) return;
+  signalExpiredRemoval();
+  await expiredRemovalRelease;
+};
+const expiredConsumer = consumeNativeNewTabBypass(51);
+await expiredRemovalStarted;
+updateHandler = async (tabId) => {
+  assert.equal(await consumeNativeNewTabBypass(tabId), true);
+};
+const retryAfterCleanup = openNativeNewTab({ consumptionTimeoutMs: 100, pollIntervalMs: 1 });
+releaseExpiredRemoval();
+assert.equal(await expiredConsumer, false);
+await retryAfterCleanup;
+const afterExpiredCleanupRace = storage[NATIVE_NEW_TAB_BYPASS_KEY] as { tabId?: number; expiresAt?: number; consumedAt?: number } | undefined;
+assert.equal(afterExpiredCleanupRace?.tabId, 51,
+  "Locked expired cleanup must not erase a retry grant published afterward");
+assert.equal(typeof afterExpiredCleanupRace?.consumedAt, "number");
 
 // Regression: a delayed consumer from attempt 1 must not overwrite attempt 2.
 // The shared native-bypass storage lock makes the retry wait for the old
