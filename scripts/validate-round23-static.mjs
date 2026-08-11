@@ -17,12 +17,20 @@ const blocked = read("src/blocked/blocked.ts");
 const packageJson = JSON.parse(read("package.json"));
 const workflow = read(".github/workflows/ci.yml");
 
+const googleValidationCall = 'const googleOAuthClientId = googleEnabled ? requireGoogleOAuthClientId() : ""';
+const lifecycleCreation = "const outputLifecyclePlugin = createBuildOutputLifecyclePlugin";
+
 assert.match(build, /resolveSafeBuildOutput\(root, tmpdir\(\), requestedOutdir\)/,
-  "Builder must validate the output path before recursive cleanup");
+  "Builder must validate the output path before generated-output cleanup");
 assert.match(build, /const googleOAuthClientId = googleEnabled \? requireGoogleOAuthClientId\(\) : ""/,
   "Google credentials must be validated before output cleanup or compilation");
-assert.ok(build.indexOf("requireGoogleOAuthClientId()") < build.indexOf("await rm(outdir"),
-  "Google profile validation must run before existing output is removed");
+assert.ok(
+  build.indexOf(googleValidationCall) >= 0
+    && build.indexOf(googleValidationCall) < build.indexOf(lifecycleCreation),
+  "Google profile validation must run before the generated-output lifecycle can remove existing generated files",
+);
+assert.doesNotMatch(build, /rm\(outdir,\s*\{\s*recursive:\s*true/,
+  "OAuth ordering must not depend on broad recursive startup cleanup");
 assert.match(outputGuard, /Repository-local outputs must live under a top-level build\* path/);
 assert.match(outputGuard, /External build output must be inside the operating-system temp directory/);
 assert.match(outputGuard, /Refusing to use the repository or its parent as build output/);
