@@ -26,8 +26,8 @@ assert.match(watchHelper, /if \(errorCodeIs\(error, "ENOENT"\)\)/);
 assert.match(watchHelper, /missingDirectories\.push\(current\)/);
 assert.match(watchHelper, /recursiveDirectories\.map\(\(directory\) => path\.dirname\(directory\)\)/,
   "Existing parents of recursive static roots must always remain watched");
-assert.match(watchHelper, /return \{ watchFiles, watchDirs, missingDirectories, invalidPaths \}/,
-  "Round 46 missing-root metadata must remain available even after Round 47 adds invalid-path recovery");
+assert.match(watchHelper, /return \{ watchFiles, watchDirs, missingDirectories, missingFiles, invalidPaths \}/,
+  "Round 46 missing-root metadata must remain available when later rounds add explicit-file recovery");
 assert.match(watchHelper, /inputs\.missingDirectories\.map\(\(directory\) =>/);
 assert.match(watchHelper, /Required static asset directory is missing/);
 assert.match(watchHelper, /watchDirs: inputs\.watchDirs/);
