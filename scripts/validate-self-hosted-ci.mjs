@@ -142,6 +142,8 @@ const regressionCommands = [
   "node scripts/validate-round47-static.mjs",
   "node scripts/run-round48-fixtures.mjs",
   "node scripts/validate-round48-static.mjs",
+  "node scripts/run-round49-fixtures.mjs",
+  "node scripts/validate-round49-static.mjs",
   "node scripts/validate-self-hosted-ci.mjs",
 ];
 

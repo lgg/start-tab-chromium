@@ -174,6 +174,38 @@ export function staticAssetInputErrors(inputs) {
   ];
 }
 
+function throwStaticAssetErrors(errors) {
+  if (errors.length === 0) return;
+  throw new AggregateError(
+    errors.map(({ text }) => new Error(text)),
+    errors.map(({ text }) => text).join("\n"),
+  );
+}
+
+/**
+ * Revalidate one concrete source immediately before a finalization operation.
+ * This narrows the gap between the whole-tree preflight and the later cp/read
+ * that consumes an individual static input.
+ */
+export async function assertValidStaticCopySource(source, options = {}) {
+  if (options?.recursive) {
+    const tree = await listRegularTree(source);
+    throwStaticAssetErrors(staticAssetInputErrors({
+      missingDirectories: uniqueResolved(tree.missingDirectories),
+      missingFiles: [],
+      invalidPaths: uniqueResolved(tree.invalidPaths),
+    }));
+    return;
+  }
+
+  const inspection = await inspectExplicitStaticFiles([source]);
+  throwStaticAssetErrors(staticAssetInputErrors({
+    missingDirectories: [],
+    missingFiles: inspection.missingFiles,
+    invalidPaths: inspection.invalidPaths,
+  }));
+}
+
 /**
  * Apply the same static-input validation to one-shot/release builds and
  * successful watch finalization. The watch plugin alone is not sufficient
@@ -181,13 +213,7 @@ export function staticAssetInputErrors(inputs) {
  */
 export async function assertValidStaticAssetTrees(root, blockerOnly = false) {
   const inputs = await collectStaticAssetWatchInputs(root, blockerOnly);
-  const errors = staticAssetInputErrors(inputs);
-  if (errors.length > 0) {
-    throw new AggregateError(
-      errors.map(({ text }) => new Error(text)),
-      errors.map(({ text }) => text).join("\n"),
-    );
-  }
+  throwStaticAssetErrors(staticAssetInputErrors(inputs));
   return inputs;
 }
 
