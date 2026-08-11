@@ -13,12 +13,6 @@ function optionalFunction(name, value, fallback) {
   return requiredFunction(name, value);
 }
 
-function samePath(left, right) {
-  return process.platform === "win32"
-    ? left.toLowerCase() === right.toLowerCase()
-    : left === right;
-}
-
 function resolveOutputTarget(outdir, requested) {
   const root = path.resolve(outdir);
   const candidate = path.resolve(requested);
@@ -123,13 +117,10 @@ export function createStaticOutputWriter({
       );
     }
 
-    for (const { relativePath, target } of expected.values()) {
+    for (const { target } of expected.values()) {
       const key = process.platform === "win32" ? target.toLowerCase() : target;
       const outputFile = actual.get(key);
       await writeOne(target, outputFile.contents);
-      if (!samePath(target, path.join(resolvedOutdir, relativePath))) {
-        throw new Error(`Resolved esbuild output changed unexpectedly: ${target}`);
-      }
     }
   }
 
