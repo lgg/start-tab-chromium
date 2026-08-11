@@ -36,11 +36,10 @@ const consumeIndex = nativeTab.indexOf("export async function consumeNativeNewTa
 assert.ok(consumeIndex >= 0, "Missing native new-tab bypass consumer");
 const consumeSource = nativeTab.slice(consumeIndex);
 assert.match(consumeSource, /return withStorageLock\(NATIVE_NEW_TAB_BYPASS_LOCK/,
-  "Bypass consumption must serialize its read and consumedAt write with retries");
-assert.match(consumeSource, /value\.expiresAt <= Date\.now\(\)\) return false/,
-  "A grant expiring at the current instant must already be invalid");
-assert.doesNotMatch(consumeSource, /storage\.local\.remove/,
-  "Consumers must not delete a shared expired grant after a stale read");
+  "Bypass consumption must serialize its read, expiry cleanup, and consumedAt write with retries");
+assert.match(consumeSource,
+  /if \(value\.expiresAt <= Date\.now\(\)\) \{[\s\S]*await chrome\.storage\.local\.remove\(NATIVE_NEW_TAB_BYPASS_KEY\);[\s\S]*return false;/,
+  "Expired leases must be removed while the native-bypass lock still protects the stale read");
 
 assert.match(gate, /function resolvedGateLocale\(override\)/);
 assert.match(gate, /chrome\.i18n\.getUILanguage\(\)/,
@@ -79,7 +78,8 @@ for (const marker of [
   "Expiry before tabs.update settles must fail closed",
   "A disappeared bypass key must not be mistaken for consumption",
   "A bypass owned by another tab must not acknowledge this opener",
-  "An expired consumer must not delete the shared bypass key",
+  "An expired consumer must remove its stale bypass lease under the shared lock",
+  "Locked expired cleanup must not erase a retry grant published afterward",
   "A late first-attempt consumer must not overwrite the second attempt's grant",
 ]) {
   assert.ok(fixtures.includes(marker), `Round 51 fixture is missing: ${marker}`);
