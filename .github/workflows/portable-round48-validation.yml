@@ -42,7 +42,7 @@ jobs:
 
       - name: Configure isolated paths
         run: |
-          $cacheRoot = Join-Path $env:RUNNER_TEMP 'start-tab-chromium-portable-round48-cache'
+          $cacheRoot = Join-Path $env:RUNNER_TEMP 'start-tab-chromium-cache'
           "CI_CACHE_ROOT=$cacheRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "NPM_CONFIG_CACHE=$(Join-Path $cacheRoot 'npm')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
