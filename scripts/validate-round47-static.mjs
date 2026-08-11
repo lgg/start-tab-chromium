@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
+const build = await readFile("scripts/build.mjs", "utf8");
 const lifecycle = await readFile("scripts/build-output-lifecycle.mjs", "utf8");
 const outputHelper = await readFile("scripts/static-asset-output.mjs", "utf8");
 const staticWatch = await readFile("scripts/static-asset-watch.mjs", "utf8");
@@ -39,7 +40,24 @@ assert.match(staticWatch, /invalidPaths\.push\(absolute\)/,
 assert.doesNotMatch(staticWatch, /throw new Error\(`Static asset trees must contain regular files and directories only/,
   "Nested special entries must not throw before recovery watch metadata can be returned");
 assert.match(staticWatch, /return \{ watchFiles, watchDirs, missingDirectories, invalidPaths \}/);
+assert.match(staticWatch, /export function staticAssetInputErrors\(inputs\)/);
+assert.match(staticWatch, /export async function assertValidStaticAssetTrees\(root, blockerOnly = false\)/,
+  "Recursive static-tree validation must be reusable outside watch mode");
+assert.match(staticWatch, /throw new AggregateError/,
+  "One-shot recursive-tree validation must fail the build when invalid roots are found");
 assert.match(staticWatch, /Recursive static asset tree contains an invalid filesystem path/);
+
+assert.match(build, /assertValidStaticAssetTrees/,
+  "The builder must import the shared recursive static-tree validator");
+const copyFunctionIndex = build.indexOf("async function copyStaticAssets()");
+const sharedTreeGuardIndex = build.indexOf("await assertValidStaticAssetTrees(root, blockerOnly)");
+const firstStaticCopyIndex = build.indexOf("await Promise.all(commonFiles.map");
+assert.ok(
+  copyFunctionIndex >= 0
+    && sharedTreeGuardIndex > copyFunctionIndex
+    && firstStaticCopyIndex > sharedTreeGuardIndex,
+  "Every successful finalization, including one-shot/release builds, must validate recursive static trees before copying",
+);
 
 for (const marker of [
   "Blocker-only cleanup must remove stale generated output from any profile",
@@ -79,9 +97,11 @@ assert.ok(
 
 assert.match(watchGuide, /revalidates the build output immediately before static finalization/i);
 assert.match(watchGuide, /links, junctions, and other special filesystem entries are rejected/i);
+assert.match(watchGuide, /one-shot\/release builds/i);
 assert.match(watchGuide, /reusing the same safe `--outdir` across profiles/i);
 assert.match(audit, /late output-path replacement/i);
 assert.match(audit, /symlink\/junction/i);
+assert.match(audit, /one-shot\/release builds/i);
 assert.match(audit, /mixed-profile/i);
 assert.match(manualQa, /junction/i);
 assert.match(manualQa, /same `--outdir`/i);
