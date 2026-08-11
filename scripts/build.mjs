@@ -1,5 +1,4 @@
 import * as esbuild from "esbuild";
-import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,9 +7,11 @@ import { createBuildOutputLifecyclePlugin } from "./build-output-lifecycle.mjs";
 import { assertSafeBuildOutputFilesystem, resolveSafeBuildOutput } from "./build-output-path.mjs";
 import { requireGoogleOAuthClientId } from "./google-oauth-client.mjs";
 import { createStaticOutputWriter } from "./static-asset-finalization.mjs";
+import { bundleOutputPaths } from "./static-asset-output.mjs";
 import {
   STATIC_ASSET_WATCH_IMPORT,
   assertValidStaticAssetTrees,
+  assertValidStaticCopySource,
   createStaticAssetWatchPlugin,
 } from "./static-asset-watch.mjs";
 
@@ -29,7 +30,12 @@ const outdir = resolveSafeBuildOutput(root, tmpdir(), requestedOutdir);
 const source = (...parts) => path.join(root, "src", ...parts);
 const output = (...parts) => path.join(outdir, ...parts);
 const profile = googleEnabled ? "Google-enabled full" : blockerOnly ? "blocker-only" : "full";
-const staticOutputWriter = createStaticOutputWriter({ root, temporaryRoot: tmpdir(), outdir });
+const staticOutputWriter = createStaticOutputWriter({
+  root,
+  temporaryRoot: tmpdir(),
+  outdir,
+  assertSourceSafe: assertValidStaticCopySource,
+});
 
 const entryPoints = {
   "service-worker": source("service-worker.ts"),
@@ -49,10 +55,19 @@ const commonFiles = [
   [source("shared-ui.css"), output("shared-ui.css")],
 ];
 
+async function validateFinalizationInputs() {
+  await assertValidStaticAssetTrees(root, blockerOnly);
+}
+
+async function writeBundleOutputs(outputFiles) {
+  await staticOutputWriter.writeOutputFiles(outputFiles, bundleOutputPaths(blockerOnly));
+}
+
 async function copyStaticAssets() {
-  // Validate every static input before the first output write. The writer then
-  // revalidates the output filesystem immediately before each individual copy
-  // or manifest write, so the source scan cannot reopen the output-link window.
+  // Validate every static input before the first static output write. The
+  // lifecycle already performs the same whole-tree preflight before bundle
+  // finalization, and the writer additionally revalidates each concrete source
+  // immediately before its cp/read operation.
   await assertValidStaticAssetTrees(root, blockerOnly);
 
   // Static writes are intentionally serialized. A failing Promise.all sibling
@@ -71,7 +86,7 @@ async function copyStaticAssets() {
     [source("_locales"), output("_locales"), { recursive: true }],
   ]);
 
-  const manifest = JSON.parse(await readFile(source("manifest.json"), "utf8"));
+  const manifest = JSON.parse(await staticOutputWriter.readOne(source("manifest.json"), "utf8"));
   if (blockerOnly) {
     delete manifest.chrome_url_overrides;
     manifest.permissions = (manifest.permissions ?? []).filter((permission) => permission !== "history");
@@ -115,6 +130,8 @@ const outputLifecyclePlugin = createBuildOutputLifecyclePlugin({
   outdir,
   blockerOnly,
   assertProductionGraph,
+  validateFinalizationInputs,
+  writeBundleOutputs,
   copyStaticAssets,
   profile,
 });
@@ -128,6 +145,7 @@ const options = {
   entryPoints,
   outdir,
   bundle: true,
+  write: false,
   format: "esm",
   platform: "browser",
   target: ["chrome120"],
