@@ -31,9 +31,12 @@ assert.equal((outputHelper.match(/await assertSafeBuildOutputFilesystem/g) ?? []
   "Output safety must be checked before and after recreating the output directory");
 assert.match(outputHelper, /await mkdir\(outdir, \{ recursive: true \}\)/);
 assert.match(outputHelper, /await removePathWithinBoundary\(outdir, relativePath\)/);
-assert.match(outputHelper, /prepareOutputPaths\(root, temporaryRoot, outdir, staticAssetOutputPaths\(blockerOnly\)\)/);
-assert.match(outputHelper, /generatedOutputPaths\(blockerOnly\)/,
+assert.match(outputHelper, /prepareOutputPaths\(root, temporaryRoot, outdir, staticAssetOutputPaths\(blockerOnly\)\)/,
+  "Round 44 focused static preparation must remain profile-aware");
+assert.match(outputHelper, /generatedOutputCleanupPaths\(\)/,
   "The stronger lifecycle cleanup must include the complete Round 44 static output set");
+assert.match(outputHelper, /return generatedOutputPaths\(false\)/,
+  "Lifecycle cleanup must retain every full static destination even when the selected profile is blocker-only");
 for (const output of [
   "popup.html",
   "popup.css",
