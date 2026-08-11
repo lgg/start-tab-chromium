@@ -7,7 +7,7 @@ import {
 import {
   backupFileName,
   exportBackup,
-  importBackup,
+  importBackupAfterRead,
   restorePreImportBackup,
 } from "../lib/backup.js";
 import {
@@ -729,7 +729,12 @@ backupImportInput.addEventListener("change", () => {
   const file = backupImportInput.files?.[0];
   backupImportInput.value = "";
   if (!file || !confirmDataRestore()) return;
-  void runAction(async () => { await importBackup(await readJsonFile(file)); }, i18n.t("backupImported"));
+  void runAction(async () => {
+    await importBackupAfterRead(
+      () => readJsonFile(file),
+      "Start Tab data changed while the backup file was being read; retry the import",
+    );
+  }, i18n.t("backupImported"));
 });
 
 themeImportInput.addEventListener("change", () => {

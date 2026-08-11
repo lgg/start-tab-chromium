@@ -1,4 +1,4 @@
-import { exportBackup, importBackup, type BackupBundle } from "./backup.js";
+import { exportBackup, exportBackupSnapshot, importBackup, type BackupBundle } from "./backup.js";
 
 const GOOGLE_CALENDAR_EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/{calendarId}/events";
 const GOOGLE_DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files";
@@ -211,8 +211,13 @@ export async function uploadDriveBackup(): Promise<void> {
 }
 
 export async function restoreDriveBackup(): Promise<void> {
+  const localBeforeNetwork = await exportBackupSnapshot();
   const existing = await findDriveBackupFile(true);
   if (!existing) throw new Error("No Start Tab backup found in Google Drive app data");
   const bundle = await googleFetch<BackupBundle>(`${GOOGLE_DRIVE_FILES_URL}/${existing.id}?alt=media`, {}, true);
-  await importBackup(bundle);
+  await importBackup(bundle, {
+    expectedCurrentDataRevision: localBeforeNetwork.dataRevision,
+    expectedCurrentDataRevisionFallback: localBeforeNetwork.dataRevisionFallback,
+    revisionConflictMessage: "Start Tab data changed while the Google Drive restore was being downloaded",
+  });
 }

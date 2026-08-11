@@ -6,7 +6,12 @@ import {
   restoreDynamicRulesSnapshot,
   syncRulesInCurrentTransaction,
 } from "./blocklist.js";
-import { DATA_REVISION_KEY, markStartTabDataChanged, readStartTabDataRevision } from "./data-revision.js";
+import {
+  DATA_REVISION_KEY,
+  assertStartTabDataRevisionUnchanged,
+  markStartTabDataChanged,
+  readStartTabDataRevision,
+} from "./data-revision.js";
 import { runIndependentEffects } from "./independent-effects.js";
 import { withStorageLock } from "./storage-lock.js";
 import { FOCUS_STATS_KEY, isFutureFocusStatsSchema, normalizeFocusStats } from "./focus-stats.js";
@@ -65,11 +70,15 @@ export interface BackupBundle {
 
 export interface BackupImportOptions {
   dataRevisionAt?: number;
+  expectedCurrentDataRevision?: number;
+  expectedCurrentDataRevisionFallback?: number;
+  revisionConflictMessage?: string;
 }
 
 export interface ExportedBackupSnapshot {
   bundle: BackupBundle;
   dataRevision: number;
+  dataRevisionFallback: number;
 }
 
 export interface BackupImportReport {
@@ -228,8 +237,9 @@ async function exportBackupInCurrentTransaction(): Promise<BackupBundle> {
 export async function exportBackupSnapshot(): Promise<ExportedBackupSnapshot> {
   return withStorageLock("data-write", async () => {
     const bundle = await exportBackupInCurrentTransaction();
-    const dataRevision = await readStartTabDataRevision(backupModifiedAt(bundle));
-    return { bundle, dataRevision };
+    const dataRevisionFallback = backupModifiedAt(bundle);
+    const dataRevision = await readStartTabDataRevision(dataRevisionFallback);
+    return { bundle, dataRevision, dataRevisionFallback };
   });
 }
 
@@ -254,6 +264,13 @@ export async function importBackup(value: unknown, options: BackupImportOptions 
   const migrated = migrateBackup(value);
 
   return withStorageLock("data-write", async () => {
+    if (typeof options.expectedCurrentDataRevision === "number") {
+      await assertStartTabDataRevisionUnchanged(
+        options.expectedCurrentDataRevision,
+        options.expectedCurrentDataRevisionFallback ?? 0,
+        options.revisionConflictMessage,
+      );
+    }
     const current = await chrome.storage.local.get([...ROLLBACK_KEYS]);
     assertSupportedSchemas(current);
     const currentRules = await readDynamicRulesSnapshot();
@@ -291,11 +308,31 @@ export async function importBackup(value: unknown, options: BackupImportOptions 
   });
 }
 
+/**
+ * Capture local revision before an asynchronous backup read, then atomically
+ * reject the import if another extension context changes data while that read
+ * is in flight. This is used by file and recovery restores after confirmation.
+ */
+export async function importBackupAfterRead(
+  readBackup: () => Promise<unknown>,
+  revisionConflictMessage = "Start Tab data changed while the backup was being read; retry the restore",
+): Promise<BackupImportReport> {
+  const localBeforeRead = await exportBackupSnapshot();
+  const value = await readBackup();
+  return importBackup(value, {
+    expectedCurrentDataRevision: localBeforeRead.dataRevision,
+    expectedCurrentDataRevisionFallback: localBeforeRead.dataRevisionFallback,
+    revisionConflictMessage,
+  });
+}
+
 export async function restorePreImportBackup(): Promise<void> {
-  const items = await chrome.storage.local.get(PRE_IMPORT_BACKUP_KEY);
-  const backup = items[PRE_IMPORT_BACKUP_KEY];
-  if (!backup) throw new Error("No pre-import recovery backup is available");
-  await importBackup(backup);
+  await importBackupAfterRead(async () => {
+    const items = await chrome.storage.local.get(PRE_IMPORT_BACKUP_KEY);
+    const backup = items[PRE_IMPORT_BACKUP_KEY];
+    if (!backup) throw new Error("No pre-import recovery backup is available");
+    return backup;
+  }, "Start Tab data changed while the recovery backup was being read; retry the restore");
 }
 
 export function backupModifiedAt(bundle: BackupBundle): number {

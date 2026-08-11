@@ -13,6 +13,13 @@ export interface DataRevisionWriteOptions {
   allowFutureOverwrite?: boolean;
 }
 
+export class StartTabDataRevisionConflictError extends Error {
+  constructor(message = "Start Tab data changed in another extension context; retry the operation") {
+    super(message);
+    this.name = "StartTabDataRevisionConflictError";
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -41,6 +48,21 @@ export async function readStartTabDataRevision(fallback = 0): Promise<number> {
     throw new Error("Start Tab data revision was created by a newer extension version");
   }
   return revisionValue(revision, fallback);
+}
+
+/**
+ * Optimistic-concurrency guard for callers that already own any stronger lock
+ * required by their transaction. The fallback must be the same value used when
+ * the expected revision was captured so legacy states without a revision key
+ * remain comparable until their first revisioned mutation.
+ */
+export async function assertStartTabDataRevisionUnchanged(
+  expected: number,
+  fallback = 0,
+  message = "Start Tab data changed in another extension context; retry the operation",
+): Promise<void> {
+  const current = await readStartTabDataRevision(fallback);
+  if (current !== expected) throw new StartTabDataRevisionConflictError(message);
 }
 
 export async function markStartTabDataChanged(
