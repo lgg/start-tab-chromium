@@ -37,11 +37,16 @@ async function waitForNativeBypassConsumption(
   return false;
 }
 
-async function writeOwnedBypass(tabId: number, expiresAt: number): Promise<void> {
-  await withStorageLock(NATIVE_NEW_TAB_BYPASS_LOCK, async () => {
+async function writeOwnedBypass(tabId: number, timeoutMs: number): Promise<number> {
+  return withStorageLock(NATIVE_NEW_TAB_BYPASS_LOCK, async () => {
+    // Start this attempt's timeout only when its grant can actually be
+    // published. Time spent queued behind an older consumer is not usable
+    // navigation time and must not make the new grant stale on arrival.
+    const expiresAt = Date.now() + timeoutMs;
     await chrome.storage.local.set({
       [NATIVE_NEW_TAB_BYPASS_KEY]: { tabId, expiresAt },
     });
+    return expiresAt;
   });
 }
 
@@ -67,8 +72,7 @@ export async function openNativeNewTab(options: NativeNewTabOpenOptions = {}): P
 
   for (const url of NATIVE_NEW_TAB_URLS) {
     try {
-      const expiresAt = Date.now() + timeoutMs;
-      await writeOwnedBypass(tabId, expiresAt);
+      const expiresAt = await writeOwnedBypass(tabId, timeoutMs);
       await chrome.tabs.update(tabId, { url });
       if (await waitForNativeBypassConsumption(tabId, expiresAt, pollIntervalMs)) return;
       failures.push(new Error(`Native new-tab bypass was not consumed for ${url}`));
