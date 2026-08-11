@@ -1,5 +1,5 @@
 import * as esbuild from "esbuild";
-import { cp, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createBuildOutputLifecyclePlugin } from "./build-output-lifecycle.mjs";
 import { assertSafeBuildOutputFilesystem, resolveSafeBuildOutput } from "./build-output-path.mjs";
 import { requireGoogleOAuthClientId } from "./google-oauth-client.mjs";
+import { createStaticOutputWriter } from "./static-asset-finalization.mjs";
 import {
   STATIC_ASSET_WATCH_IMPORT,
   assertValidStaticAssetTrees,
@@ -28,6 +29,7 @@ const outdir = resolveSafeBuildOutput(root, tmpdir(), requestedOutdir);
 const source = (...parts) => path.join(root, "src", ...parts);
 const output = (...parts) => path.join(outdir, ...parts);
 const profile = googleEnabled ? "Google-enabled full" : blockerOnly ? "blocker-only" : "full";
+const staticOutputWriter = createStaticOutputWriter({ root, temporaryRoot: tmpdir(), outdir });
 
 const entryPoints = {
   "service-worker": source("service-worker.ts"),
@@ -48,23 +50,25 @@ const commonFiles = [
 ];
 
 async function copyStaticAssets() {
-  // The watch plugin validates recursive static trees before compilation, but
-  // one-shot builds do not register that plugin. Revalidate here for every
-  // successful finalization, also closing source-tree changes between watch
-  // input collection and the actual recursive copy.
+  // Validate every static input before the first output write. The writer then
+  // revalidates the output filesystem immediately before each individual copy
+  // or manifest write, so the source scan cannot reopen the output-link window.
   await assertValidStaticAssetTrees(root, blockerOnly);
 
-  await Promise.all(commonFiles.map(([from, to]) => cp(from, to)));
+  // Static writes are intentionally serialized. A failing Promise.all sibling
+  // can otherwise reject early while another cp() keeps writing and recreates
+  // generated output after lifecycle cleanup has already completed.
+  await staticOutputWriter.copyBatch(commonFiles);
   if (!blockerOnly) {
-    await Promise.all([
-      cp(source("newtab", "newtab.html"), output("newtab.html")),
-      cp(source("newtab", "newtab.css"), output("newtab.css")),
-      cp(source("newtab", "newtab-gate.js"), output("newtab-gate.js")),
+    await staticOutputWriter.copyBatch([
+      [source("newtab", "newtab.html"), output("newtab.html")],
+      [source("newtab", "newtab.css"), output("newtab.css")],
+      [source("newtab", "newtab-gate.js"), output("newtab-gate.js")],
     ]);
   }
-  await Promise.all([
-    cp(path.join(root, "icons"), output("icons"), { recursive: true }),
-    cp(source("_locales"), output("_locales"), { recursive: true }),
+  await staticOutputWriter.copyBatch([
+    [path.join(root, "icons"), output("icons"), { recursive: true }],
+    [source("_locales"), output("_locales"), { recursive: true }],
   ]);
 
   const manifest = JSON.parse(await readFile(source("manifest.json"), "utf8"));
@@ -78,7 +82,7 @@ async function copyStaticAssets() {
     delete manifest.oauth2;
     manifest.permissions = (manifest.permissions ?? []).filter((permission) => permission !== "identity");
   }
-  await writeFile(output("manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  await staticOutputWriter.writeOne(output("manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 const forbiddenProductionInputs = [

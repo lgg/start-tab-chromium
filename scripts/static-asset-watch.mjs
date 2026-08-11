@@ -104,18 +104,52 @@ export function explicitStaticAssetSources(root, blockerOnly = false) {
   return uniqueResolved(files);
 }
 
+async function inspectExplicitStaticFiles(files) {
+  const missingFiles = [];
+  const invalidPaths = [];
+
+  await Promise.all(files.map(async (file) => {
+    try {
+      const status = await lstat(file);
+      if (!status.isFile()) invalidPaths.push(file);
+    } catch (error) {
+      if (errorCodeIs(error, "ENOENT")) {
+        missingFiles.push(file);
+        return;
+      }
+      throw error;
+    }
+  }));
+
+  return {
+    missingFiles: uniqueResolved(missingFiles),
+    invalidPaths: uniqueResolved(invalidPaths),
+  };
+}
+
 export async function collectStaticAssetWatchInputs(root, blockerOnly = false) {
+  const explicitFiles = explicitStaticAssetSources(root, blockerOnly);
   const recursiveDirectories = [
     path.join(root, "icons"),
     path.join(root, "src", "_locales"),
   ];
-  const trees = await Promise.all(recursiveDirectories.map(listRegularTree));
+  const [trees, explicitInspection] = await Promise.all([
+    Promise.all(recursiveDirectories.map(listRegularTree)),
+    inspectExplicitStaticFiles(explicitFiles),
+  ]);
   const recursiveFiles = trees.flatMap((tree) => tree.files);
   const traversedDirectories = trees.flatMap((tree) => tree.directories);
   const missingDirectories = uniqueResolved(trees.flatMap((tree) => tree.missingDirectories));
-  const invalidPaths = uniqueResolved(trees.flatMap((tree) => tree.invalidPaths));
+  const missingFiles = explicitInspection.missingFiles;
+  const invalidPaths = uniqueResolved([
+    ...trees.flatMap((tree) => tree.invalidPaths),
+    ...explicitInspection.invalidPaths,
+  ]);
+  // Keep missing explicit files in watchFiles and their parents in watchDirs so
+  // recreating a required manifest/HTML/CSS/gate file can recover watch mode
+  // without an unrelated source edit.
   const watchFiles = uniqueResolved([
-    ...explicitStaticAssetSources(root, blockerOnly),
+    ...explicitFiles,
     ...recursiveFiles,
   ]);
   const watchDirs = uniqueResolved([
@@ -123,7 +157,7 @@ export async function collectStaticAssetWatchInputs(root, blockerOnly = false) {
     ...traversedDirectories,
     ...watchFiles.map((file) => path.dirname(file)),
   ]);
-  return { watchFiles, watchDirs, missingDirectories, invalidPaths };
+  return { watchFiles, watchDirs, missingDirectories, missingFiles, invalidPaths };
 }
 
 export function staticAssetInputErrors(inputs) {
@@ -131,15 +165,18 @@ export function staticAssetInputErrors(inputs) {
     ...inputs.missingDirectories.map((directory) => ({
       text: `Required static asset directory is missing: ${directory}`,
     })),
+    ...inputs.missingFiles.map((file) => ({
+      text: `Required static asset file is missing: ${file}`,
+    })),
     ...inputs.invalidPaths.map((invalidPath) => ({
-      text: `Recursive static asset tree contains an invalid filesystem path; directory roots must be real directories and links, junctions, or other special entries are not allowed: ${invalidPath}`,
+      text: `Static asset input contains an invalid filesystem path; explicit assets must be regular files, recursive roots must be real directories, and links, junctions, or other special entries are not allowed: ${invalidPath}`,
     })),
   ];
 }
 
 /**
- * Apply the same recursive static-tree validation to one-shot/release builds
- * and successful watch finalization. The watch plugin alone is not sufficient
+ * Apply the same static-input validation to one-shot/release builds and
+ * successful watch finalization. The watch plugin alone is not sufficient
  * because it is intentionally registered only for --watch mode.
  */
 export async function assertValidStaticAssetTrees(root, blockerOnly = false) {

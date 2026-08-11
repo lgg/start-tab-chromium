@@ -30,7 +30,10 @@ assert.match(outputHelper, /assertSafeBuildOutputFilesystem/);
 assert.equal((outputHelper.match(/await assertSafeBuildOutputFilesystem/g) ?? []).length, 2,
   "Output safety must be checked before and after recreating the output directory");
 assert.match(outputHelper, /await mkdir\(outdir, \{ recursive: true \}\)/);
-assert.match(outputHelper, /await removePathWithinBoundary\(outdir, relativePath\)/);
+assert.match(outputHelper, /trustedBuildOutputRoot/,
+  "Later hardening may strengthen the boundary but must preserve bounded exact cleanup");
+assert.match(outputHelper, /await removePathWithinBoundary\(trustedRoot, path\.join\(outdir, relativePath\)\)/,
+  "Round 44 exact outputs must still be removed through the bounded path helper");
 assert.match(outputHelper, /prepareOutputPaths\(root, temporaryRoot, outdir, staticAssetOutputPaths\(blockerOnly\)\)/,
   "Round 44 focused static preparation must remain profile-aware");
 assert.match(outputHelper, /generatedOutputCleanupPaths\(\)/,

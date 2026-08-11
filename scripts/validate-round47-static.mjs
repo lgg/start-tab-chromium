@@ -19,7 +19,7 @@ const graphIndex = lifecycle.indexOf("assertGraph(result.metafile)");
 const finalizationGuardIndex = lifecycle.indexOf("await assertSafeBuildOutputFilesystem(root, temporaryRoot, outdir)");
 const copyIndex = lifecycle.indexOf("await copyStatic()");
 assert.ok(graphIndex >= 0 && finalizationGuardIndex > graphIndex && copyIndex > finalizationGuardIndex,
-  "Output filesystem safety must be revalidated after compilation and immediately before static copy");
+  "Output filesystem safety must be revalidated after compilation and before static copy");
 assert.match(lifecycle, /Build finalization failed and generated-output cleanup also failed/,
   "Late filesystem-safety failures must still use fail-closed cleanup handling");
 
@@ -31,7 +31,7 @@ assert.match(outputHelper, /prepareGeneratedOutputs[\s\S]*generatedOutputCleanup
 assert.match(outputHelper, /full -> blocker-only profile transition cannot leave stale new-tab code/);
 
 assert.match(staticWatch, /import \{ lstat, readdir \} from "node:fs\/promises"/,
-  "Recursive static roots must be inspected without following links");
+  "Static inputs must be inspected without following links");
 assert.match(staticWatch, /status = await lstat\(current\)/);
 assert.match(staticWatch, /if \(!status\.isDirectory\(\)\)[\s\S]*invalidPaths\.push\(current\)/,
   "Wrong-type and linked recursive directory positions must become structured invalid paths");
@@ -39,24 +39,25 @@ assert.match(staticWatch, /invalidPaths\.push\(absolute\)/,
   "Nested links and special entries must fail structurally instead of aborting watch metadata collection");
 assert.doesNotMatch(staticWatch, /throw new Error\(`Static asset trees must contain regular files and directories only/,
   "Nested special entries must not throw before recovery watch metadata can be returned");
-assert.match(staticWatch, /return \{ watchFiles, watchDirs, missingDirectories, invalidPaths \}/);
+assert.match(staticWatch, /return \{ watchFiles, watchDirs, missingDirectories, missingFiles, invalidPaths \}/,
+  "Round 47 recursive recovery metadata must remain present after explicit-file validation is added");
 assert.match(staticWatch, /export function staticAssetInputErrors\(inputs\)/);
 assert.match(staticWatch, /export async function assertValidStaticAssetTrees\(root, blockerOnly = false\)/,
-  "Recursive static-tree validation must be reusable outside watch mode");
+  "Shared static validation must remain reusable outside watch mode");
 assert.match(staticWatch, /throw new AggregateError/,
-  "One-shot recursive-tree validation must fail the build when invalid roots are found");
-assert.match(staticWatch, /Recursive static asset tree contains an invalid filesystem path/);
+  "One-shot static validation must fail the build when invalid inputs are found");
+assert.match(staticWatch, /Static asset input contains an invalid filesystem path/);
 
 assert.match(build, /assertValidStaticAssetTrees/,
-  "The builder must import the shared recursive static-tree validator");
+  "The builder must invoke the shared static-input validator");
 const copyFunctionIndex = build.indexOf("async function copyStaticAssets()");
 const sharedTreeGuardIndex = build.indexOf("await assertValidStaticAssetTrees(root, blockerOnly)");
-const firstStaticCopyIndex = build.indexOf("await Promise.all(commonFiles.map");
+const firstStaticCopyIndex = build.indexOf("await staticOutputWriter.copyBatch(commonFiles)");
 assert.ok(
   copyFunctionIndex >= 0
     && sharedTreeGuardIndex > copyFunctionIndex
     && firstStaticCopyIndex > sharedTreeGuardIndex,
-  "Every successful finalization, including one-shot/release builds, must validate recursive static trees before copying",
+  "Every successful finalization, including one-shot/release builds, must validate static inputs before copying",
 );
 
 for (const marker of [
