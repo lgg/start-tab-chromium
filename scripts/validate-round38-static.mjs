@@ -25,15 +25,17 @@ const audit = read("docs/audit-2026-07-31-round-38.md");
 for (const file of ["messages.json", "roadmap-messages.json", "round7-messages.json"]) {
   assert.ok(gate.includes(`"${file}"`), `Early gate must merge locale catalog ${file}`);
 }
-assert.match(gate, /nextCatalog = Object\.assign\(\{\}, \.\.\.catalogs\)[\s\S]*generation !== catalogLoadGeneration[\s\S]*catalog = nextCatalog/,
+assert.match(gate, /const nextCatalog = Object\.assign\(\{\}, \.\.\.catalogs\)[\s\S]*generation !== catalogLoadGeneration[\s\S]*catalog = nextCatalog/,
   "The early gate must merge every locale fragment and publish it only if the load is still current");
 assert.match(gate, /chrome\.tabs\.query\(\{ currentWindow: true \}\)\.catch\(\(\) => \[\]\)/,
   "A Split View query failure must fail closed with the overlay still rendered");
-assert.match(gate, /let nextCatalog = null[\s\S]*if \(locale === "en" \|\| locale === "ru"\)[\s\S]*catalog = nextCatalog/,
-  "Returning to automatic locale selection must publish a null catalog through the same latest-only path");
+assert.match(gate, /function resolvedGateLocale\(override\)[\s\S]*override === "en" \|\| override === "ru"[\s\S]*chrome\.i18n\.getUILanguage\(\)[\s\S]*browserLocale\.startsWith\("ru"\) \? "ru" : "en"/,
+  "Automatic locale selection must resolve the supported browser UI language instead of discarding fragment catalogs");
+assert.match(gate, /const locale = resolvedGateLocale\(items\[LOCALE_OVERRIDE_KEY\]\)[\s\S]*Promise\.all\(catalogFiles\.map/,
+  "Explicit and automatic locale modes must load the same complete fragment set through the latest-only path");
 assert.match(gate, /changes\[LOCALE_OVERRIDE_KEY\]/);
 assert.match(gate, /loadGateCatalog\(\)\.then\(\(current\) => current \? apply\(\) : undefined\)/,
-  "An open gate must refresh only after the latest explicit-locale catalog load commits");
+  "An open gate must refresh only after the latest locale catalog load commits");
 assert.match(gate, /text\("gateUntitledTab", "Untitled tab"\)/);
 for (const catalog of [en, ru]) {
   for (const key of ["splitViewTitle", "splitViewText", "startTabDisabledTitle", "startTabDisabledText", "gateUntitledTab"]) {
