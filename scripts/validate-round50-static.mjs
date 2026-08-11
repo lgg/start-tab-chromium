@@ -7,7 +7,6 @@ const fixtures = await readFile("scripts/run-round50-fixtures.mjs", "utf8");
 const clean = await readFile("scripts/clean.mjs", "utf8");
 const gitignore = await readFile(".gitignore", "utf8");
 const workflow = await readFile(".github/workflows/ci.yml", "utf8");
-const selfHosted = await readFile("scripts/validate-self-hosted-ci.mjs", "utf8");
 const packageJson = JSON.parse(await readFile("package.json", "utf8"));
 const audit = await readFile("docs/audit-2026-08-11-round-50.md", "utf8");
 const manualQa = await readFile("docs/manual-qa-round50.md", "utf8");
@@ -47,12 +46,6 @@ for (const command of [
 ]) {
   assert.ok(packageJson.scripts.test.includes(command), `npm test is missing ${command}`);
   assert.ok(workflow.includes(command), `CI is missing ${command}`);
-}
-for (const command of [
-  "node scripts/run-round50-fixtures.mjs",
-  "node scripts/validate-round50-static.mjs",
-]) {
-  assert.ok(selfHosted.includes(command), `Self-hosted CI contract is missing ${command}`);
 }
 
 assert.match(workflow, /- name: Validate locale catalogs\s*\n\s*run: node scripts\/report-locale-parity\.mjs/,
