@@ -8,13 +8,31 @@ function uniqueResolved(paths) {
   return [...new Set(paths.map((value) => path.resolve(value)))].sort((left, right) => left.localeCompare(right));
 }
 
+function isMissingPath(error) {
+  return Boolean(error)
+    && typeof error === "object"
+    && "code" in error
+    && error.code === "ENOENT";
+}
+
 async function listRegularTree(directory) {
   const files = [];
   const directories = [];
+  const missingDirectories = [];
 
   async function visit(current) {
+    let entries;
+    try {
+      entries = await readdir(current, { withFileTypes: true });
+    } catch (error) {
+      if (isMissingPath(error)) {
+        missingDirectories.push(current);
+        return;
+      }
+      throw error;
+    }
+
     directories.push(current);
-    const entries = await readdir(current, { withFileTypes: true });
     entries.sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
       const absolute = path.join(current, entry.name);
@@ -29,7 +47,7 @@ async function listRegularTree(directory) {
   }
 
   await visit(directory);
-  return { files, directories };
+  return { files, directories, missingDirectories };
 }
 
 export function explicitStaticAssetSources(root, blockerOnly = false) {
@@ -62,15 +80,17 @@ export async function collectStaticAssetWatchInputs(root, blockerOnly = false) {
   const trees = await Promise.all(recursiveDirectories.map(listRegularTree));
   const recursiveFiles = trees.flatMap((tree) => tree.files);
   const traversedDirectories = trees.flatMap((tree) => tree.directories);
+  const missingDirectories = uniqueResolved(trees.flatMap((tree) => tree.missingDirectories));
   const watchFiles = uniqueResolved([
     ...explicitStaticAssetSources(root, blockerOnly),
     ...recursiveFiles,
   ]);
   const watchDirs = uniqueResolved([
+    ...recursiveDirectories.map((directory) => path.dirname(directory)),
     ...traversedDirectories,
     ...watchFiles.map((file) => path.dirname(file)),
   ]);
-  return { watchFiles, watchDirs };
+  return { watchFiles, watchDirs, missingDirectories };
 }
 
 export function createStaticAssetWatchPlugin(root, blockerOnly = false) {
@@ -81,11 +101,22 @@ export function createStaticAssetWatchPlugin(root, blockerOnly = false) {
         path: "anchor",
         namespace: STATIC_ASSET_WATCH_NAMESPACE,
       }));
-      build.onLoad({ filter: /.*/, namespace: STATIC_ASSET_WATCH_NAMESPACE }, async () => ({
-        contents: "",
-        loader: "js",
-        ...(await collectStaticAssetWatchInputs(root, blockerOnly)),
-      }));
+      build.onLoad({ filter: /.*/, namespace: STATIC_ASSET_WATCH_NAMESPACE }, async () => {
+        const inputs = await collectStaticAssetWatchInputs(root, blockerOnly);
+        return {
+          contents: "",
+          loader: "js",
+          watchFiles: inputs.watchFiles,
+          watchDirs: inputs.watchDirs,
+          ...(inputs.missingDirectories.length > 0
+            ? {
+                errors: inputs.missingDirectories.map((directory) => ({
+                  text: `Required static asset directory is missing: ${directory}`,
+                })),
+              }
+            : {}),
+        };
+      });
     },
   };
 }
