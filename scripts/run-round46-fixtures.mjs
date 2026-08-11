@@ -112,7 +112,6 @@ try {
   assert.match(initial.errors.map((error) => error.text).join("\n"), /Required static asset directory is missing: .*icons/);
 
   await mkdir(path.join(root, "icons"), { recursive: true });
-  await writeFile(path.join(root, "icons", "icon.16.png"), "icon", "utf8");
   const recovered = await observer.next();
   assert.equal(recovered.errors.length, 0,
     "Creating a previously missing root static directory must trigger an automatic successful rebuild");
@@ -122,7 +121,6 @@ try {
   assert.ok(removed.errors.length > 0, "Deleting the root icons directory must invalidate the watch build");
 
   await mkdir(path.join(root, "icons"), { recursive: true });
-  await writeFile(path.join(root, "icons", "icon.16.png"), "icon-restored", "utf8");
   const restored = await observer.next();
   assert.equal(restored.errors.length, 0,
     "Restoring the root icons directory after a failed rebuild must recover without a source-code edit");
