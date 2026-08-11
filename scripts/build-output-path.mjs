@@ -53,13 +53,24 @@ export function resolveSafeBuildOutput(root, temporaryRoot, requested) {
 }
 
 /**
+ * Return the trusted repository/temp boundary that contains a validated build
+ * output. Callers that remove generated children should use this root as the
+ * removal boundary so the mutable outdir itself is checked as an intermediate
+ * path instead of being treated as inherently trusted.
+ */
+export function trustedBuildOutputRoot(root, temporaryRoot, output) {
+  const repositoryRoot = path.resolve(root);
+  const tempRoot = path.resolve(temporaryRoot);
+  const candidate = path.resolve(output);
+  return trustedRootFor(repositoryRoot, tempRoot, candidate);
+}
+
+/**
  * Reject an existing symbolic link or Windows junction anywhere below the
  * trusted repository/temp root before recursive output cleanup.
  */
 export async function assertSafeBuildOutputFilesystem(root, temporaryRoot, output) {
-  const repositoryRoot = path.resolve(root);
-  const tempRoot = path.resolve(temporaryRoot);
   const candidate = path.resolve(output);
-  const trustedRoot = trustedRootFor(repositoryRoot, tempRoot, candidate);
+  const trustedRoot = trustedBuildOutputRoot(root, temporaryRoot, candidate);
   await assertPathContainsNoLinks(trustedRoot, candidate);
 }
