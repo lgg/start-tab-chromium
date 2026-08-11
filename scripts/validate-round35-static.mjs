@@ -25,6 +25,7 @@ const popup = read("src/popup/popup.ts");
 const blocked = read("src/blocked/blocked.ts");
 const worker = read("src/service-worker.ts");
 const localeReport = read("scripts/report-locale-parity.mjs");
+const localeValidation = read("scripts/locale-catalog-validation.mjs");
 const readme = read("README.md");
 const manualQa = read("docs/manual-qa-3.0.0.md");
 const packageJson = JSON.parse(read("package.json"));
@@ -93,11 +94,15 @@ assert.match(popup, /languageEl\.value = localePreference/,
 assert.match(blocked, /remaining <= 0[\s\S]*cancelEl\.disabled = true[\s\S]*finishUnblock/,
   "The countdown cancel action must not race an unblock already being committed");
 
-assert.match(localeReport, /readdir\(directory\)/);
-assert.match(localeReport, /filter\(\(file\) => file\.endsWith\("\.json"\)\)/,
+assert.match(localeReport, /buildLocaleParityReport/,
+  "The locale report must delegate catalog enumeration to the shared validator");
+assert.match(localeValidation, /readdir\(directory\)/);
+assert.match(localeValidation, /filter\(\(file\) => file\.endsWith\("\.json"\)\)/,
   "Locale parity must cover every catalog loaded by the runtime");
 assert.match(localeReport, /duplicateEnglishKeys/);
 assert.match(localeReport, /duplicateRussianKeys/);
+assert.match(localeValidation, /duplicateKeys/,
+  "The extracted locale validator must preserve duplicate-key detection");
 assert.doesNotMatch(optionsHtml, /aria-label="Settings sections"/);
 assert.match(options, /nav\.setAttribute\("aria-label", i18n\.t\("settingsSections"\)\)/);
 
