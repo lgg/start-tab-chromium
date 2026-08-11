@@ -101,13 +101,7 @@ try {
   await seedGeneratedOutputs(false);
   await createGeneratedOutput("keep.txt", "unrelated output survives");
   await prepareGeneratedOutputs(root, tmpdir(), outdir, true);
-  await assertGeneratedAbsent(true);
-  for (const relativePath of generatedOutputPaths(false).filter(
-    (relativePath) => !generatedOutputPaths(true).includes(relativePath),
-  )) {
-    assert.equal(await exists(path.join(outdir, relativePath)), true,
-      `Blocker-only invalidation must preserve full-profile-only output: ${relativePath}`);
-  }
+  await assertGeneratedAbsent(false);
   assert.equal(await readFile(path.join(outdir, "keep.txt"), "utf8"), "unrelated output survives");
 
   await rm(outdir, { recursive: true, force: true });

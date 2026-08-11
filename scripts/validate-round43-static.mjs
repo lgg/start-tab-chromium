@@ -22,8 +22,10 @@ assert.match(lifecycle, /build\.onStart/);
 assert.match(outputHelper, /removePathWithinBoundary/);
 assert.ok(outputHelper.includes('"icons"'), "Copied icon output must be included in exact static cleanup");
 assert.ok(outputHelper.includes('"_locales"'), "Copied locale output must be included in exact static cleanup");
-assert.match(outputHelper, /generatedOutputPaths\(blockerOnly\)/,
-  "The lifecycle output set must include copied static trees before every rebuild");
+assert.match(outputHelper, /generatedOutputCleanupPaths\(\)/,
+  "The lifecycle cleanup universe must include copied static trees before every rebuild");
+assert.match(outputHelper, /return generatedOutputPaths\(false\)/,
+  "The exact lifecycle cleanup set must retain the complete generated static tree universe");
 assert.ok(
   build.indexOf("const outputLifecyclePlugin = createBuildOutputLifecyclePlugin")
     < build.indexOf("const plugins = [outputLifecyclePlugin]"),
@@ -37,7 +39,10 @@ assert.ok(watchHelper.includes('path.join(root, "src", "_locales")'));
 assert.ok(watchHelper.includes('path.join(root, "icons")'));
 assert.match(watchHelper, /if \(!blockerOnly\)/);
 assert.match(watchHelper, /entry\.isFile\(\)/);
-assert.match(watchHelper, /Static asset trees must contain regular files and directories only/);
+assert.match(watchHelper, /invalidPaths\.push\(absolute\)/,
+  "Round 43 regular-tree enforcement must remain fail-visible after later rounds make invalid entries recoverable");
+assert.match(watchHelper, /links, junctions, or other special entries are not allowed/,
+  "Recursive static trees must still reject non-regular entries");
 assert.match(fixtures, /Full watch set is missing/);
 assert.match(fixtures, /Blocker watch set must omit/);
 assert.match(fixtures, /Every traversed directory must be watched/);

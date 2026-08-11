@@ -1,3 +1,4 @@
+import { assertSafeBuildOutputFilesystem } from "./build-output-path.mjs";
 import { prepareGeneratedOutputs } from "./static-asset-output.mjs";
 
 function requiredFunction(name, value) {
@@ -45,6 +46,11 @@ export function createBuildOutputLifecyclePlugin({
 
         try {
           assertGraph(result.metafile);
+          // Compilation can take long enough for an otherwise-safe output path
+          // to be replaced after onStart. Revalidate immediately before static
+          // finalization so copied assets and the manifest never use a stale
+          // filesystem-safety decision.
+          await assertSafeBuildOutputFilesystem(root, temporaryRoot, outdir);
           await copyStatic();
           writeLog(`Built ${profile} extension at ${outdir}`);
         } catch (error) {

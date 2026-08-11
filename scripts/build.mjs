@@ -7,7 +7,11 @@ import { fileURLToPath } from "node:url";
 import { createBuildOutputLifecyclePlugin } from "./build-output-lifecycle.mjs";
 import { assertSafeBuildOutputFilesystem, resolveSafeBuildOutput } from "./build-output-path.mjs";
 import { requireGoogleOAuthClientId } from "./google-oauth-client.mjs";
-import { STATIC_ASSET_WATCH_IMPORT, createStaticAssetWatchPlugin } from "./static-asset-watch.mjs";
+import {
+  STATIC_ASSET_WATCH_IMPORT,
+  assertValidStaticAssetTrees,
+  createStaticAssetWatchPlugin,
+} from "./static-asset-watch.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const watch = process.argv.includes("--watch");
@@ -44,6 +48,12 @@ const commonFiles = [
 ];
 
 async function copyStaticAssets() {
+  // The watch plugin validates recursive static trees before compilation, but
+  // one-shot builds do not register that plugin. Revalidate here for every
+  // successful finalization, also closing source-tree changes between watch
+  // input collection and the actual recursive copy.
+  await assertValidStaticAssetTrees(root, blockerOnly);
+
   await Promise.all(commonFiles.map(([from, to]) => cp(from, to)));
   if (!blockerOnly) {
     await Promise.all([

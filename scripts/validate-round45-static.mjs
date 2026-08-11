@@ -35,8 +35,9 @@ assert.match(lifecycle, /throw error/);
 assert.match(outputHelper, /COMMON_BUNDLE_OUTPUTS/);
 assert.match(outputHelper, /NEW_TAB_BUNDLE_OUTPUTS/);
 assert.match(outputHelper, /export function generatedOutputPaths/);
+assert.match(outputHelper, /export function generatedOutputCleanupPaths/);
 assert.match(outputHelper, /export async function prepareGeneratedOutputs/);
-assert.match(outputHelper, /generatedOutputPaths\(blockerOnly\)/);
+assert.match(outputHelper, /generatedOutputCleanupPaths\(\)/);
 for (const output of [
   "service-worker.js",
   "popup.js",
@@ -53,7 +54,8 @@ assert.match(fixtures, /fixture finalization failure/);
 assert.match(fixtures, /partial new output/);
 assert.match(fixtures, /Generated output must be absent after a failed build/);
 assert.match(fixtures, /A successful build must retain its fresh JavaScript bundle/);
-assert.match(fixtures, /Blocker-only invalidation must preserve full-profile-only output/);
+assert.match(fixtures, /prepareGeneratedOutputs\(root, tmpdir\(\), outdir, true\)[\s\S]*assertGeneratedAbsent\(false\)/,
+  "Blocker-only invalidation must remove stale full-profile outputs when an outdir is reused");
 assert.match(fixtures, /unrelated output survives/);
 assert.match(fixtures, /esbuildBuild/);
 
