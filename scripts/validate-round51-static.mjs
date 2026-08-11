@@ -19,9 +19,12 @@ assert.match(nativeTab, /value\?\.tabId !== tabId \|\| value\.expiresAt !== expi
   "Missing, foreign, or replaced bypass ownership must fail closed");
 assert.match(nativeTab, /typeof value\.consumedAt === "number"\) return true/,
   "Only explicit consumption of the exact grant may acknowledge native-new-tab success");
-assert.match(nativeTab, /const expiresAt = Date\.now\(\) \+ timeoutMs;[\s\S]*writeOwnedBypass\(tabId, expiresAt\)[\s\S]*waitForNativeBypassConsumption\(tabId, expiresAt, pollIntervalMs\)/,
-  "The exact grant expiry must follow the attempt through navigation and polling");
-assert.match(nativeTab, /async function writeOwnedBypass[\s\S]*withStorageLock\(NATIVE_NEW_TAB_BYPASS_LOCK/);
+assert.match(nativeTab,
+  /async function writeOwnedBypass\(tabId: number, timeoutMs: number\): Promise<number> \{[\s\S]*withStorageLock\(NATIVE_NEW_TAB_BYPASS_LOCK[\s\S]*const expiresAt = Date\.now\(\) \+ timeoutMs;[\s\S]*return expiresAt/,
+  "A retry must start its expiry only after acquiring the grant lock, not while queued behind an older consumer");
+assert.match(nativeTab,
+  /const expiresAt = await writeOwnedBypass\(tabId, timeoutMs\);[\s\S]*chrome\.tabs\.update\(tabId, \{ url \}\)[\s\S]*waitForNativeBypassConsumption\(tabId, expiresAt, pollIntervalMs\)/,
+  "The published grant's exact expiry must follow the attempt through navigation and polling");
 assert.match(nativeTab, /async function removeOwnedBypass[\s\S]*withStorageLock\(NATIVE_NEW_TAB_BYPASS_LOCK/);
 
 const consumeIndex = nativeTab.indexOf("export async function consumeNativeNewTabBypass");
