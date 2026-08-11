@@ -20,22 +20,27 @@
     try { void Promise.resolve(action()).catch(ignore); } catch { ignore(); }
   };
 
+  function resolvedGateLocale(override) {
+    if (override === "en" || override === "ru") return override;
+    const browserLocale = typeof chrome.i18n.getUILanguage === "function"
+      ? String(chrome.i18n.getUILanguage() || "").toLowerCase()
+      : "";
+    return browserLocale.startsWith("ru") ? "ru" : "en";
+  }
+
   async function loadGateCatalog() {
     const generation = ++catalogLoadGeneration;
     const items = await chrome.storage.local.get(LOCALE_OVERRIDE_KEY).catch(() => ({}));
-    const locale = items[LOCALE_OVERRIDE_KEY];
-    let nextCatalog = null;
-    if (locale === "en" || locale === "ru") {
-      const catalogs = await Promise.all(catalogFiles.map(async (file) => {
-        try {
-          const response = await fetch(chrome.runtime.getURL(`_locales/${locale}/${file}`));
-          return response.ok ? await response.json() : {};
-        } catch {
-          return {};
-        }
-      }));
-      nextCatalog = Object.assign({}, ...catalogs);
-    }
+    const locale = resolvedGateLocale(items[LOCALE_OVERRIDE_KEY]);
+    const catalogs = await Promise.all(catalogFiles.map(async (file) => {
+      try {
+        const response = await fetch(chrome.runtime.getURL(`_locales/${locale}/${file}`));
+        return response.ok ? await response.json() : {};
+      } catch {
+        return {};
+      }
+    }));
+    const nextCatalog = Object.assign({}, ...catalogs);
     if (generation !== catalogLoadGeneration) return false;
     catalog = nextCatalog;
     return true;
