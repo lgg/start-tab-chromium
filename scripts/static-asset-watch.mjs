@@ -126,6 +126,34 @@ export async function collectStaticAssetWatchInputs(root, blockerOnly = false) {
   return { watchFiles, watchDirs, missingDirectories, invalidPaths };
 }
 
+export function staticAssetInputErrors(inputs) {
+  return [
+    ...inputs.missingDirectories.map((directory) => ({
+      text: `Required static asset directory is missing: ${directory}`,
+    })),
+    ...inputs.invalidPaths.map((invalidPath) => ({
+      text: `Recursive static asset tree contains an invalid filesystem path; directory roots must be real directories and links, junctions, or other special entries are not allowed: ${invalidPath}`,
+    })),
+  ];
+}
+
+/**
+ * Apply the same recursive static-tree validation to one-shot/release builds
+ * and successful watch finalization. The watch plugin alone is not sufficient
+ * because it is intentionally registered only for --watch mode.
+ */
+export async function assertValidStaticAssetTrees(root, blockerOnly = false) {
+  const inputs = await collectStaticAssetWatchInputs(root, blockerOnly);
+  const errors = staticAssetInputErrors(inputs);
+  if (errors.length > 0) {
+    throw new AggregateError(
+      errors.map(({ text }) => new Error(text)),
+      errors.map(({ text }) => text).join("\n"),
+    );
+  }
+  return inputs;
+}
+
 export function createStaticAssetWatchPlugin(root, blockerOnly = false) {
   return {
     name: "watch-static-extension-assets",
@@ -136,14 +164,7 @@ export function createStaticAssetWatchPlugin(root, blockerOnly = false) {
       }));
       build.onLoad({ filter: /.*/, namespace: STATIC_ASSET_WATCH_NAMESPACE }, async () => {
         const inputs = await collectStaticAssetWatchInputs(root, blockerOnly);
-        const errors = [
-          ...inputs.missingDirectories.map((directory) => ({
-            text: `Required static asset directory is missing: ${directory}`,
-          })),
-          ...inputs.invalidPaths.map((invalidPath) => ({
-            text: `Recursive static asset tree contains an invalid filesystem path; directory roots must be real directories and links, junctions, or other special entries are not allowed: ${invalidPath}`,
-          })),
-        ];
+        const errors = staticAssetInputErrors(inputs);
         return {
           contents: "",
           loader: "js",
