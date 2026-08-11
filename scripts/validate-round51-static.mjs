@@ -6,6 +6,7 @@ const gate = await readFile("src/newtab/newtab-gate.js", "utf8");
 const en = await readFile("src/_locales/en/round7-messages.json", "utf8");
 const ru = await readFile("src/_locales/ru/round7-messages.json", "utf8");
 const round16Fixtures = await readFile("scripts/round16-fixtures.ts", "utf8");
+const round38Static = await readFile("scripts/validate-round38-static.mjs", "utf8");
 const fixtures = await readFile("scripts/round51-fixtures.ts", "utf8");
 const runner = await readFile("scripts/run-round51-fixtures.mjs", "utf8");
 const workflow = await readFile(".github/workflows/ci.yml", "utf8");
@@ -69,6 +70,10 @@ assert.match(round16Fixtures, /assert\.equal\(await consumeNativeBypass\(tabId\)
   "Round 16 must no longer model deletion of the bypass key as successful consumption");
 assert.doesNotMatch(round16Fixtures, /if \(consumeBypassOnUpdate\) delete localState\.startTabNativeNewTabBypass/,
   "Historical fixtures must not preserve the removed false-success contract");
+assert.match(round38Static, /Automatic locale selection must resolve the supported browser UI language/,
+  "Round 38 must retain the evolved Auto-locale contract instead of requiring a null catalog");
+assert.doesNotMatch(round38Static, /Returning to automatic locale selection must publish a null catalog/,
+  "Historical validation must not reintroduce the broken Auto-locale behavior");
 
 for (const marker of [
   "Expiry before tabs.update settles must fail closed",
@@ -107,7 +112,7 @@ assert.ok(
   "Round 51 must run explicitly after Round 50 and before the self-hosted CI contract",
 );
 
-for (const phrase of ["false success", "expired", "storage lock", "retry", "visible feedback", "automatic language mode", "round 16"] ) {
+for (const phrase of ["false success", "expired", "storage lock", "retry", "visible feedback", "automatic language mode", "round 16", "round 38"] ) {
   assert.ok(audit.toLowerCase().includes(phrase), `Round 51 audit is missing: ${phrase}`);
 }
 for (const phrase of ["native new tab", "fallback", "temporary", "rapid", "alert"]) {
