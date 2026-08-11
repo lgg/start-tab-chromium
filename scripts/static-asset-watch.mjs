@@ -19,7 +19,7 @@ async function listRegularTree(directory) {
   const files = [];
   const directories = [];
   const missingDirectories = [];
-  const invalidDirectories = [];
+  const invalidPaths = [];
 
   async function visit(current) {
     let status;
@@ -38,7 +38,7 @@ async function listRegularTree(directory) {
     // directories inside the repository instead of silently traversing an
     // external tree.
     if (!status.isDirectory()) {
-      invalidDirectories.push(current);
+      invalidPaths.push(current);
       return;
     }
 
@@ -54,7 +54,7 @@ async function listRegularTree(directory) {
       // Keep the failure structured so the already-watched parent can recover
       // when the correct directory is restored.
       if (errorCodeIs(error, "ENOTDIR")) {
-        invalidDirectories.push(current);
+        invalidPaths.push(current);
         return;
       }
       throw error;
@@ -69,13 +69,17 @@ async function listRegularTree(directory) {
       } else if (entry.isFile()) {
         files.push(absolute);
       } else {
-        throw new Error(`Static asset trees must contain regular files and directories only: ${absolute}`);
+        // Symlinks, junctions and other special filesystem entries must fail
+        // visibly without aborting watch metadata collection. The containing
+        // directory remains watched so deleting/replacing the invalid entry
+        // can recover the same watch process automatically.
+        invalidPaths.push(absolute);
       }
     }
   }
 
   await visit(directory);
-  return { files, directories, missingDirectories, invalidDirectories };
+  return { files, directories, missingDirectories, invalidPaths };
 }
 
 export function explicitStaticAssetSources(root, blockerOnly = false) {
@@ -109,7 +113,7 @@ export async function collectStaticAssetWatchInputs(root, blockerOnly = false) {
   const recursiveFiles = trees.flatMap((tree) => tree.files);
   const traversedDirectories = trees.flatMap((tree) => tree.directories);
   const missingDirectories = uniqueResolved(trees.flatMap((tree) => tree.missingDirectories));
-  const invalidDirectories = uniqueResolved(trees.flatMap((tree) => tree.invalidDirectories));
+  const invalidPaths = uniqueResolved(trees.flatMap((tree) => tree.invalidPaths));
   const watchFiles = uniqueResolved([
     ...explicitStaticAssetSources(root, blockerOnly),
     ...recursiveFiles,
@@ -119,7 +123,7 @@ export async function collectStaticAssetWatchInputs(root, blockerOnly = false) {
     ...traversedDirectories,
     ...watchFiles.map((file) => path.dirname(file)),
   ]);
-  return { watchFiles, watchDirs, missingDirectories, invalidDirectories };
+  return { watchFiles, watchDirs, missingDirectories, invalidPaths };
 }
 
 export function createStaticAssetWatchPlugin(root, blockerOnly = false) {
@@ -136,8 +140,8 @@ export function createStaticAssetWatchPlugin(root, blockerOnly = false) {
           ...inputs.missingDirectories.map((directory) => ({
             text: `Required static asset directory is missing: ${directory}`,
           })),
-          ...inputs.invalidDirectories.map((directory) => ({
-            text: `Required static asset path must be a real directory, not a file, symbolic link, or junction: ${directory}`,
+          ...inputs.invalidPaths.map((invalidPath) => ({
+            text: `Recursive static asset tree contains an invalid filesystem path; directory roots must be real directories and links, junctions, or other special entries are not allowed: ${invalidPath}`,
           })),
         ];
         return {
