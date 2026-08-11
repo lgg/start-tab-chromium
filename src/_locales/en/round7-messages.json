@@ -34,5 +34,8 @@
   },
   "currentSiteChanged": {
     "message": "The active tab changed. Review the current site and try again."
+  },
+  "nativeNewTabFailed": {
+    "message": "Couldn't open the browser's native new tab. Try again."
   }
 }

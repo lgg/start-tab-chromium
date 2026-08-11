@@ -13,27 +13,34 @@
   let previousFocus = null;
   let catalogLoadGeneration = 0;
   let applyGeneration = 0;
+  const nativeActionGenerations = new WeakMap();
+  const nativeStatusElements = new WeakMap();
 
   const run = (action) => {
     try { void Promise.resolve(action()).catch(ignore); } catch { ignore(); }
   };
 
+  function resolvedGateLocale(override) {
+    if (override === "en" || override === "ru") return override;
+    const browserLocale = typeof chrome.i18n.getUILanguage === "function"
+      ? String(chrome.i18n.getUILanguage() || "").toLowerCase()
+      : "";
+    return browserLocale.startsWith("ru") ? "ru" : "en";
+  }
+
   async function loadGateCatalog() {
     const generation = ++catalogLoadGeneration;
     const items = await chrome.storage.local.get(LOCALE_OVERRIDE_KEY).catch(() => ({}));
-    const locale = items[LOCALE_OVERRIDE_KEY];
-    let nextCatalog = null;
-    if (locale === "en" || locale === "ru") {
-      const catalogs = await Promise.all(catalogFiles.map(async (file) => {
-        try {
-          const response = await fetch(chrome.runtime.getURL(`_locales/${locale}/${file}`));
-          return response.ok ? await response.json() : {};
-        } catch {
-          return {};
-        }
-      }));
-      nextCatalog = Object.assign({}, ...catalogs);
-    }
+    const locale = resolvedGateLocale(items[LOCALE_OVERRIDE_KEY]);
+    const catalogs = await Promise.all(catalogFiles.map(async (file) => {
+      try {
+        const response = await fetch(chrome.runtime.getURL(`_locales/${locale}/${file}`));
+        return response.ok ? await response.json() : {};
+      } catch {
+        return {};
+      }
+    }));
+    const nextCatalog = Object.assign({}, ...catalogs);
     if (generation !== catalogLoadGeneration) return false;
     catalog = nextCatalog;
     return true;
@@ -47,6 +54,37 @@
   }
 
   const openNative = () => workerCommand({ type: "open-native-new-tab" });
+
+  function nativeStatus(button) {
+    const existing = nativeStatusElements.get(button);
+    if (existing?.isConnected) return existing;
+    const status = document.createElement("p");
+    status.hidden = true;
+    status.setAttribute("role", "alert");
+    status.setAttribute("aria-live", "assertive");
+    status.style.cssText = "margin:8px 0;color:#fecaca;font-size:14px";
+    button.after(status);
+    nativeStatusElements.set(button, status);
+    return status;
+  }
+
+  async function runNative(button) {
+    const generation = (nativeActionGenerations.get(button) || 0) + 1;
+    nativeActionGenerations.set(button, generation);
+    const status = nativeStatus(button);
+    status.hidden = true;
+    status.textContent = "";
+    button.setAttribute("aria-busy", "true");
+    try {
+      await openNative();
+    } catch {
+      if (nativeActionGenerations.get(button) !== generation) return;
+      status.textContent = text("nativeNewTabFailed", "Couldn't open the browser's native new tab. Try again.");
+      status.hidden = false;
+    } finally {
+      if (nativeActionGenerations.get(button) === generation) button.removeAttribute("aria-busy");
+    }
+  }
 
   function webTab(tab) {
     const value = typeof tab?.url === "string" ? tab.url.trim() : "";
@@ -143,7 +181,7 @@
     const native = document.createElement("button");
     native.type = "button";
     native.textContent = text("openNativeNewTab", "Open browser new tab");
-    native.addEventListener("click", () => run(openNative));
+    native.addEventListener("click", () => run(() => runNative(native)));
     const settings = document.createElement("button");
     settings.type = "button";
     settings.textContent = text("openSettings", "Open settings");
@@ -201,7 +239,7 @@
 
   async function initGate() {
     const nativeButton = document.getElementById("nativeNewTab");
-    if (nativeButton) nativeButton.addEventListener("click", () => run(openNative));
+    if (nativeButton) nativeButton.addEventListener("click", () => run(() => runNative(nativeButton)));
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
       if (changes[LOCALE_OVERRIDE_KEY]) {

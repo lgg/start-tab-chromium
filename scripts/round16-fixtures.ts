@@ -9,6 +9,7 @@ const removedTabs: number[] = [];
 const updatedUrls: string[] = [];
 let rejectNativeUpdates = false;
 let consumeBypassOnUpdate = false;
+let consumeNativeBypass: ((tabId: number) => Promise<boolean>) | null = null;
 
 function requestedKeys(keys?: string | string[] | Record<string, unknown> | null): string[] {
   if (keys == null) return [];
@@ -64,7 +65,11 @@ const chromeMock = {
     async update(tabId: number, update: chrome.tabs.UpdateProperties): Promise<chrome.tabs.Tab> {
       updatedUrls.push(String(update.url ?? ""));
       if (rejectNativeUpdates) throw new Error(`forced native URL rejection for ${update.url ?? ""}`);
-      if (consumeBypassOnUpdate) delete localState.startTabNativeNewTabBypass;
+      if (consumeBypassOnUpdate) {
+        if (!consumeNativeBypass) throw new Error("Native bypass consumer is not initialized");
+        assert.equal(await consumeNativeBypass(tabId), true,
+          "A successful navigation fixture must explicitly consume the exact native-new-tab grant");
+      }
       return { id: tabId, url: update.url } as chrome.tabs.Tab;
     },
     async remove(tabId: number): Promise<void> { removedTabs.push(tabId); },
@@ -82,7 +87,7 @@ const [settingsApi, runtimeApi, focusApi, nativeTabApi, blocklistApi, messagesAp
   import("../src/lib/backup.js"),
   import("../src/lib/platform-limits.js"),
 ]);
-
+consumeNativeBypass = nativeTabApi.consumeNativeNewTabBypass;
 
 const maximumSites = Array.from({ length: limitsApi.MAX_BLOCKED_SITES }, (_, index) => `site-${index}.example`);
 const tooManySites = [...maximumSites, "overflow.example"];
@@ -188,6 +193,6 @@ consumeBypassOnUpdate = true;
 const successfulTabId = nextTabId + 1;
 await nativeTabApi.openNativeNewTab({ consumptionTimeoutMs: 5, pollIntervalMs: 1 });
 assert.equal(removedTabs.includes(successfulTabId), false, "A successfully opened native tab must remain open");
-assert.equal(updatedUrls.at(-1), "chrome://new-tab-page/", "Successful bypass consumption must stop trying fallback URLs");
+assert.equal(updatedUrls.at(-1), "chrome://new-tab-page/", "Successful explicit bypass consumption must stop trying fallback URLs");
 
 console.log("Round 16 fixtures passed");
