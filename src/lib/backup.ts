@@ -308,11 +308,31 @@ export async function importBackup(value: unknown, options: BackupImportOptions 
   });
 }
 
+/**
+ * Capture local revision before an asynchronous backup read, then atomically
+ * reject the import if another extension context changes data while that read
+ * is in flight. This is used by file and recovery restores after confirmation.
+ */
+export async function importBackupAfterRead(
+  readBackup: () => Promise<unknown>,
+  revisionConflictMessage = "Start Tab data changed while the backup was being read; retry the restore",
+): Promise<BackupImportReport> {
+  const localBeforeRead = await exportBackupSnapshot();
+  const value = await readBackup();
+  return importBackup(value, {
+    expectedCurrentDataRevision: localBeforeRead.dataRevision,
+    expectedCurrentDataRevisionFallback: localBeforeRead.dataRevisionFallback,
+    revisionConflictMessage,
+  });
+}
+
 export async function restorePreImportBackup(): Promise<void> {
-  const items = await chrome.storage.local.get(PRE_IMPORT_BACKUP_KEY);
-  const backup = items[PRE_IMPORT_BACKUP_KEY];
-  if (!backup) throw new Error("No pre-import recovery backup is available");
-  await importBackup(backup);
+  await importBackupAfterRead(async () => {
+    const items = await chrome.storage.local.get(PRE_IMPORT_BACKUP_KEY);
+    const backup = items[PRE_IMPORT_BACKUP_KEY];
+    if (!backup) throw new Error("No pre-import recovery backup is available");
+    return backup;
+  }, "Start Tab data changed while the recovery backup was being read; retry the restore");
 }
 
 export function backupModifiedAt(bundle: BackupBundle): number {
