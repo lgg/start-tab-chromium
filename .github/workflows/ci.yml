@@ -90,7 +90,7 @@ jobs:
             }
           }
 
-      - name: Generate locale parity report
+      - name: Validate locale catalogs
         run: node scripts/report-locale-parity.mjs
 
       - name: Validate core architecture
@@ -344,6 +344,12 @@ jobs:
 
       - name: Validate round 49
         run: node scripts/validate-round49-static.mjs
+
+      - name: Run round 50 fixtures
+        run: node scripts/run-round50-fixtures.mjs
+
+      - name: Validate round 50
+        run: node scripts/validate-round50-static.mjs
 
       - name: Validate self-hosted CI contract
         run: node scripts/validate-self-hosted-ci.mjs
