@@ -40,6 +40,13 @@ assert.match(consumeSource, /value\.expiresAt <= Date\.now\(\)\) return false/,
 assert.doesNotMatch(consumeSource, /storage\.local\.remove/,
   "Consumers must not delete a shared expired grant after a stale read");
 
+assert.match(gate, /function resolvedGateLocale\(override\)/);
+assert.match(gate, /chrome\.i18n\.getUILanguage\(\)/,
+  "Automatic locale mode must resolve the browser UI language for fragment-only gate strings");
+assert.match(gate, /return browserLocale\.startsWith\("ru"\) \? "ru" : "en"/);
+assert.match(gate, /const locale = resolvedGateLocale\(items\[LOCALE_OVERRIDE_KEY\]\)/);
+assert.match(gate, /Promise\.all\(catalogFiles\.map/,
+  "Every gate locale mode must merge all catalog fragments, not only explicit overrides");
 assert.match(gate, /const nativeActionGenerations = new WeakMap\(\)/,
   "Rapid native-tab requests need a per-button result generation guard");
 assert.match(gate, /async function runNative\(button\)/);
@@ -92,7 +99,7 @@ assert.ok(
   "Round 51 must run explicitly after Round 50 and before the self-hosted CI contract",
 );
 
-for (const phrase of ["false success", "expired", "storage lock", "retry", "visible feedback"]) {
+for (const phrase of ["false success", "expired", "storage lock", "retry", "visible feedback", "automatic language mode"]) {
   assert.ok(audit.toLowerCase().includes(phrase), `Round 51 audit is missing: ${phrase}`);
 }
 for (const phrase of ["native new tab", "fallback", "temporary", "rapid", "alert"]) {
