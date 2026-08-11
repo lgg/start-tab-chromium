@@ -15,6 +15,77 @@ function placeholders(message) {
   return [...values].sort();
 }
 
+function readJsonString(source, start) {
+  let escaped = false;
+  for (let index = start + 1; index < source.length; index += 1) {
+    const character = source[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (character === '"') {
+      const raw = source.slice(start, index + 1);
+      return { value: JSON.parse(raw), end: index + 1 };
+    }
+  }
+  throw new SyntaxError("Unterminated JSON string while inspecting locale keys");
+}
+
+// JSON.parse() keeps only the final value for a repeated object property. Scan
+// the source as well so duplicate top-level translation keys inside one file
+// are visible instead of being silently erased before validation can see them.
+function topLevelObjectKeys(source) {
+  const keys = [];
+  let objectDepth = 0;
+  let arrayDepth = 0;
+  let expectKey = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (expectKey) {
+      if (/\s/.test(character)) continue;
+      if (character === '"') {
+        const token = readJsonString(source, index);
+        keys.push(token.value);
+        index = token.end - 1;
+        expectKey = false;
+        continue;
+      }
+      if (character !== "}") continue;
+    }
+
+    if (character === '"') {
+      const token = readJsonString(source, index);
+      index = token.end - 1;
+      continue;
+    }
+    if (character === "{") {
+      objectDepth += 1;
+      if (objectDepth === 1 && arrayDepth === 0) expectKey = true;
+      continue;
+    }
+    if (character === "}") {
+      if (objectDepth === 1 && arrayDepth === 0) expectKey = false;
+      objectDepth -= 1;
+      continue;
+    }
+    if (character === "[") {
+      arrayDepth += 1;
+      continue;
+    }
+    if (character === "]") {
+      arrayDepth -= 1;
+      continue;
+    }
+    if (character === "," && objectDepth === 1 && arrayDepth === 0) expectKey = true;
+  }
+  return keys;
+}
+
 export async function readLocaleCatalog(localesRoot, locale) {
   const directory = path.join(localesRoot, locale);
   const files = (await readdir(directory))
@@ -25,11 +96,18 @@ export async function readLocaleCatalog(localesRoot, locale) {
   const schemaErrors = [];
 
   for (const file of files) {
-    const source = path.join(directory, file);
-    const value = JSON.parse(await readFile(source, "utf8"));
+    const sourcePath = path.join(directory, file);
+    const sourceText = await readFile(sourcePath, "utf8");
+    const value = JSON.parse(sourceText);
     if (!isRecord(value)) {
       schemaErrors.push(`${locale}/${file}: catalog root must be an object`);
       continue;
+    }
+
+    const seenInFile = new Set();
+    for (const key of topLevelObjectKeys(sourceText)) {
+      if (seenInFile.has(key)) duplicateKeys.push(key);
+      seenInFile.add(key);
     }
 
     for (const [key, entry] of Object.entries(value)) {
