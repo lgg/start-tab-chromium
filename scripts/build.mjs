@@ -1,5 +1,5 @@
 import * as esbuild from "esbuild";
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -106,8 +106,6 @@ const outputLifecyclePlugin = createBuildOutputLifecyclePlugin({
 });
 
 await assertSafeBuildOutputFilesystem(root, tmpdir(), outdir);
-await rm(outdir, { recursive: true, force: true });
-await mkdir(outdir, { recursive: true });
 
 const plugins = [outputLifecyclePlugin];
 if (watch) plugins.unshift(createStaticAssetWatchPlugin(root, blockerOnly));
