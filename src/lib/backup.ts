@@ -6,7 +6,12 @@ import {
   restoreDynamicRulesSnapshot,
   syncRulesInCurrentTransaction,
 } from "./blocklist.js";
-import { DATA_REVISION_KEY, markStartTabDataChanged, readStartTabDataRevision } from "./data-revision.js";
+import {
+  DATA_REVISION_KEY,
+  assertStartTabDataRevisionUnchanged,
+  markStartTabDataChanged,
+  readStartTabDataRevision,
+} from "./data-revision.js";
 import { runIndependentEffects } from "./independent-effects.js";
 import { withStorageLock } from "./storage-lock.js";
 import { FOCUS_STATS_KEY, isFutureFocusStatsSchema, normalizeFocusStats } from "./focus-stats.js";
@@ -65,11 +70,15 @@ export interface BackupBundle {
 
 export interface BackupImportOptions {
   dataRevisionAt?: number;
+  expectedCurrentDataRevision?: number;
+  expectedCurrentDataRevisionFallback?: number;
+  revisionConflictMessage?: string;
 }
 
 export interface ExportedBackupSnapshot {
   bundle: BackupBundle;
   dataRevision: number;
+  dataRevisionFallback: number;
 }
 
 export interface BackupImportReport {
@@ -228,8 +237,9 @@ async function exportBackupInCurrentTransaction(): Promise<BackupBundle> {
 export async function exportBackupSnapshot(): Promise<ExportedBackupSnapshot> {
   return withStorageLock("data-write", async () => {
     const bundle = await exportBackupInCurrentTransaction();
-    const dataRevision = await readStartTabDataRevision(backupModifiedAt(bundle));
-    return { bundle, dataRevision };
+    const dataRevisionFallback = backupModifiedAt(bundle);
+    const dataRevision = await readStartTabDataRevision(dataRevisionFallback);
+    return { bundle, dataRevision, dataRevisionFallback };
   });
 }
 
@@ -254,6 +264,13 @@ export async function importBackup(value: unknown, options: BackupImportOptions 
   const migrated = migrateBackup(value);
 
   return withStorageLock("data-write", async () => {
+    if (typeof options.expectedCurrentDataRevision === "number") {
+      await assertStartTabDataRevisionUnchanged(
+        options.expectedCurrentDataRevision,
+        options.expectedCurrentDataRevisionFallback ?? 0,
+        options.revisionConflictMessage,
+      );
+    }
     const current = await chrome.storage.local.get([...ROLLBACK_KEYS]);
     assertSupportedSchemas(current);
     const currentRules = await readDynamicRulesSnapshot();
