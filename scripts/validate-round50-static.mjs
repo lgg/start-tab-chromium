@@ -13,6 +13,8 @@ const manualQa = await readFile("docs/manual-qa-round50.md", "utf8");
 
 assert.match(validator, /export async function buildLocaleParityReport/);
 assert.match(validator, /export function assertLocaleParity/);
+assert.match(validator, /topLevelObjectKeys/,
+  "Locale validator must inspect raw JSON so JSON.parse cannot hide duplicate keys within one file");
 assert.match(validator, /Duplicate .* locale keys/);
 assert.match(validator, /Missing .* locale keys/);
 assert.match(validator, /Extra .* locale keys/);
@@ -33,6 +35,7 @@ for (const marker of [
   "Missing Russian key must fail locale validation",
   "Extra Russian key must fail locale validation",
   "Duplicate key across locale fragments must fail locale validation",
+  "Duplicate key inside one locale JSON file must fail before JSON.parse can hide it",
   "Malformed or empty locale messages must fail before runtime translation",
   "Translated runtime templates must preserve the source placeholder set",
 ]) {
