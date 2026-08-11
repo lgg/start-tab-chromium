@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
+import path from "node:path";
 
-import { assertSafeBuildOutputFilesystem } from "./build-output-path.mjs";
+import { assertSafeBuildOutputFilesystem, trustedBuildOutputRoot } from "./build-output-path.mjs";
 import { removePathWithinBoundary } from "./path-safety.mjs";
 
 const COMMON_BUNDLE_OUTPUTS = [
@@ -67,8 +68,13 @@ async function prepareOutputPaths(root, temporaryRoot, outdir, relativePaths) {
   await mkdir(outdir, { recursive: true });
   await assertSafeBuildOutputFilesystem(root, temporaryRoot, outdir);
 
+  const trustedRoot = trustedBuildOutputRoot(root, temporaryRoot, outdir);
   for (const relativePath of relativePaths) {
-    await removePathWithinBoundary(outdir, relativePath);
+    // Do not treat the mutable outdir itself as the cleanup boundary. Starting
+    // from the trusted repository/temp root makes removePathWithinBoundary()
+    // inspect outdir as an intermediate path on every removal and reject a
+    // late junction/symlink replacement instead of traversing through it.
+    await removePathWithinBoundary(trustedRoot, path.join(outdir, relativePath));
   }
 }
 
