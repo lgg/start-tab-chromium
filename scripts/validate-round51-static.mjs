@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const nativeTab = await readFile("src/lib/native-new-tab.ts", "utf8");
+const gate = await readFile("src/newtab/newtab-gate.js", "utf8");
+const en = await readFile("src/_locales/en/round7-messages.json", "utf8");
+const ru = await readFile("src/_locales/ru/round7-messages.json", "utf8");
 const fixtures = await readFile("scripts/round51-fixtures.ts", "utf8");
 const runner = await readFile("scripts/run-round51-fixtures.mjs", "utf8");
 const workflow = await readFile(".github/workflows/ci.yml", "utf8");
@@ -36,6 +39,21 @@ assert.match(consumeSource, /value\.expiresAt <= Date\.now\(\)\) return false/,
   "A grant expiring at the current instant must already be invalid");
 assert.doesNotMatch(consumeSource, /storage\.local\.remove/,
   "Consumers must not delete a shared expired grant after a stale read");
+
+assert.match(gate, /const nativeActionGenerations = new WeakMap\(\)/,
+  "Rapid native-tab requests need a per-button result generation guard");
+assert.match(gate, /async function runNative\(button\)/);
+assert.match(gate, /status\.setAttribute\("role", "alert"\)/,
+  "Native-tab failures must be exposed as an accessible visible alert");
+assert.match(gate, /nativeActionGenerations\.get\(button\) !== generation\) return/,
+  "An older failure must not overwrite the visible result of a newer request");
+assert.match(gate, /text\("nativeNewTabFailed", "Couldn't open the browser's native new tab\. Try again\."\)/);
+assert.ok((gate.match(/run\(\(\) => runNative\(/g) ?? []).length >= 2,
+  "Both static and overlay native-new-tab buttons must use visible failure handling");
+for (const catalog of [en, ru]) {
+  assert.match(catalog, /"nativeNewTabFailed"/,
+    "Every supported locale must contain the native-new-tab failure message");
+}
 
 for (const marker of [
   "Expiry before tabs.update settles must fail closed",
@@ -74,10 +92,10 @@ assert.ok(
   "Round 51 must run explicitly after Round 50 and before the self-hosted CI contract",
 );
 
-for (const phrase of ["false success", "expired", "storage lock", "retry"]) {
+for (const phrase of ["false success", "expired", "storage lock", "retry", "visible feedback"]) {
   assert.ok(audit.toLowerCase().includes(phrase), `Round 51 audit is missing: ${phrase}`);
 }
-for (const phrase of ["native new tab", "fallback", "temporary", "rapid"]) {
+for (const phrase of ["native new tab", "fallback", "temporary", "rapid", "alert"]) {
   assert.ok(manualQa.toLowerCase().includes(phrase), `Round 51 manual QA is missing: ${phrase}`);
 }
 
