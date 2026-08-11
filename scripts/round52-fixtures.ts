@@ -229,15 +229,16 @@ assert.deepEqual(remoteBundleFromFrame().storage.blockedSites, ["upload-new.exam
   "A successful Upload must finish with the latest stable local snapshot remotely committed");
 
 // Explicit Browser Sync Restore is destructive and should not silently retry
-// over an edit made after the user's confirmation. It must fail closed and keep
-// that newer edit intact.
+// over an edit made after the user's confirmation. The mutation is injected on
+// the first metadata read itself, so the guard must have been captured before
+// any remote I/O, not merely before the later chunk download.
 resetState();
 const explicitRemoteFrame = await buildRemoteFrame("restore-remote.example", REVISION_BASE + 700);
 syncStorage = explicitRemoteFrame;
 localStorage = localData("restore-old-local.example", REVISION_BASE + 600);
 let injectedExplicitRestoreEdit = false;
 syncGetHook = async (keys) => {
-  if (injectedExplicitRestoreEdit || !Array.isArray(keys) || !keys.some((key) => key.startsWith("startTabSyncChunk"))) return;
+  if (injectedExplicitRestoreEdit || keys !== "startTabSyncMeta") return;
   injectedExplicitRestoreEdit = true;
   localStorage.blockedSites = ["restore-new-local.example"];
   localStorage.startTabDataRevision = { version: 1, updatedAt: REVISION_BASE + 800 };
