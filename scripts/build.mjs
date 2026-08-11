@@ -55,19 +55,11 @@ const commonFiles = [
   [source("shared-ui.css"), output("shared-ui.css")],
 ];
 
-async function validateFinalizationInputs() {
-  await assertValidStaticAssetTrees(root, blockerOnly);
-}
-
-async function writeBundleOutputs(outputFiles) {
-  await staticOutputWriter.writeOutputFiles(outputFiles, bundleOutputPaths(blockerOnly));
-}
-
 async function copyStaticAssets() {
   // Validate every static input before the first static output write. The
-  // lifecycle already performs the same whole-tree preflight before bundle
-  // finalization, and the writer additionally revalidates each concrete source
-  // immediately before its cp/read operation.
+  // lifecycle also performs a whole-tree preflight before bundle finalization,
+  // and the writer additionally revalidates each concrete source immediately
+  // before its cp/read operation.
   await assertValidStaticAssetTrees(root, blockerOnly);
 
   // Static writes are intentionally serialized. A failing Promise.all sibling
@@ -98,6 +90,14 @@ async function copyStaticAssets() {
     manifest.permissions = (manifest.permissions ?? []).filter((permission) => permission !== "identity");
   }
   await staticOutputWriter.writeOne(output("manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+async function validateFinalizationInputs() {
+  await assertValidStaticAssetTrees(root, blockerOnly);
+}
+
+async function writeBundleOutputs(outputFiles) {
+  await staticOutputWriter.writeOutputFiles(outputFiles, bundleOutputPaths(blockerOnly));
 }
 
 const forbiddenProductionInputs = [
