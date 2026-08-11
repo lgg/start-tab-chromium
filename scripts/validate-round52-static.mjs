@@ -52,8 +52,9 @@ assert.match(chromeSync,
 assert.match(chromeSync, /async function restoreParsedSnapshot\(parsed: ParsedMeta, guard: LocalRevisionGuard\)/);
 assert.match(chromeSync, /expectedCurrentDataRevision: guard\.dataRevision/);
 assert.match(chromeSync, /expectedCurrentDataRevisionFallback: guard\.dataRevisionFallback/);
-assert.match(chromeSync, /const guard = await captureLocalRevisionGuard\(\);[\s\S]*restoreChromeSyncBackupInTransaction\(guard\)/,
-  "Explicit Browser Sync Restore must capture a pre-network local revision guard");
+assert.match(chromeSync,
+  /export async function restoreChromeSyncBackup\(\): Promise<void> \{\s*const guard = await captureLocalRevisionGuard\(\);\s*await withStorageLock\("chrome-sync", async \(\) => \{\s*await assertCompatibleSyncMetadata\(\);\s*await restoreChromeSyncBackupInTransaction\(guard\)/,
+  "Explicit Browser Sync Restore must capture its local revision before waiting for the sync lock or performing remote metadata I/O");
 assert.match(chromeSync, /return retryLocalRevisionConflicts\(syncChromeSyncBackupInTransaction\)/,
   "Smart Sync must recalculate its decision after a local revision conflict");
 assert.match(chromeSync, /retryLocalRevisionConflicts\(uploadChromeSyncBackupInTransaction\)/,
@@ -75,6 +76,8 @@ for (const marker of [
 ]) {
   assert.ok(fixtures.includes(marker), `Round 52 fixture is missing: ${marker}`);
 }
+assert.match(fixtures, /keys !== "startTabSyncMeta"/,
+  "Explicit Restore fixture must mutate local data on the first remote metadata read, not only during chunk download");
 assert.match(runner, /entryPoints: \[path\.join\(root, "scripts", "round52-fixtures\.ts"\)\]/);
 assert.match(runner, /target: "node22"/);
 
@@ -96,10 +99,10 @@ assert.ok(
   "Round 52 must run explicitly after Round 51 and before the central CI contract",
 );
 
-for (const phrase of ["lost update", "browser sync", "google drive", "local json", "recovery", "revision", "fail closed", "retry"] ) {
+for (const phrase of ["lost update", "browser sync", "google drive", "local json", "recovery", "revision", "fail closed", "remote metadata", "retry"] ) {
   assert.ok(audit.toLowerCase().includes(phrase), `Round 52 audit is missing: ${phrase}`);
 }
-for (const phrase of ["browser sync", "google drive", "local json", "recovery", "another tab", "restore", "upload"]) {
+for (const phrase of ["browser sync", "google drive", "local json", "recovery", "another tab", "restore", "upload", "metadata"]) {
   assert.ok(manualQa.toLowerCase().includes(phrase), `Round 52 manual QA is missing: ${phrase}`);
 }
 
