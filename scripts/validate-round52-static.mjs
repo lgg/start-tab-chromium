@@ -5,6 +5,7 @@ const revision = await readFile("src/lib/data-revision.ts", "utf8");
 const backup = await readFile("src/lib/backup.ts", "utf8");
 const chromeSync = await readFile("src/lib/chrome-sync.ts", "utf8");
 const google = await readFile("src/lib/google-integration.ts", "utf8");
+const options = await readFile("src/options/options.ts", "utf8");
 const fixtures = await readFile("scripts/round52-fixtures.ts", "utf8");
 const runner = await readFile("scripts/run-round52-fixtures.mjs", "utf8");
 const workflow = await readFile(".github/workflows/ci.yml", "utf8");
@@ -29,6 +30,15 @@ const importGuard = backup.indexOf("assertStartTabDataRevisionUnchanged(", impor
 const recoveryWrite = backup.indexOf("PRE_IMPORT_BACKUP_KEY", importGuard);
 assert.ok(importLock >= 0 && importGuard > importLock && recoveryWrite > importGuard,
   "Backup revision CAS must run under data-write before the recovery snapshot or any destructive import side effect");
+assert.match(backup, /export async function importBackupAfterRead\([\s\S]*const localBeforeRead = await exportBackupSnapshot\(\)[\s\S]*const value = await readBackup\(\)[\s\S]*expectedCurrentDataRevision: localBeforeRead\.dataRevision/,
+  "An asynchronous local backup read must capture revision before reading and CAS it at import");
+assert.match(backup, /export async function restorePreImportBackup\(\)[\s\S]*importBackupAfterRead\(async \(\) =>[\s\S]*chrome\.storage\.local\.get\(PRE_IMPORT_BACKUP_KEY\)/,
+  "Recovery restore must guard the interval between reading recovery data and destructive import");
+assert.match(options, /importBackupAfterRead/);
+assert.match(options, /confirmDataRestore\(\)[\s\S]*runAction\(async \(\) => \{[\s\S]*importBackupAfterRead\([\s\S]*\(\) => readJsonFile\(file\)/,
+  "Local JSON Import must capture its CAS after confirmation but before File.text() is awaited");
+assert.doesNotMatch(options, /importBackup\(await readJsonFile\(file\)\)/,
+  "Options must not retain the unguarded local JSON import path");
 
 assert.match(chromeSync, /const MAX_LOCAL_REVISION_RETRIES = 3/);
 assert.match(chromeSync, /dataRevisionFallback: captured\.dataRevisionFallback/);
@@ -86,10 +96,10 @@ assert.ok(
   "Round 52 must run explicitly after Round 51 and before the central CI contract",
 );
 
-for (const phrase of ["lost update", "browser sync", "google drive", "revision", "fail closed", "retry"] ) {
+for (const phrase of ["lost update", "browser sync", "google drive", "local json", "recovery", "revision", "fail closed", "retry"] ) {
   assert.ok(audit.toLowerCase().includes(phrase), `Round 52 audit is missing: ${phrase}`);
 }
-for (const phrase of ["browser sync", "google drive", "another tab", "restore", "upload"]) {
+for (const phrase of ["browser sync", "google drive", "local json", "recovery", "another tab", "restore", "upload"]) {
   assert.ok(manualQa.toLowerCase().includes(phrase), `Round 52 manual QA is missing: ${phrase}`);
 }
 
