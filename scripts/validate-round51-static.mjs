@@ -5,6 +5,7 @@ const nativeTab = await readFile("src/lib/native-new-tab.ts", "utf8");
 const gate = await readFile("src/newtab/newtab-gate.js", "utf8");
 const en = await readFile("src/_locales/en/round7-messages.json", "utf8");
 const ru = await readFile("src/_locales/ru/round7-messages.json", "utf8");
+const round16Fixtures = await readFile("scripts/round16-fixtures.ts", "utf8");
 const fixtures = await readFile("scripts/round51-fixtures.ts", "utf8");
 const runner = await readFile("scripts/run-round51-fixtures.mjs", "utf8");
 const workflow = await readFile(".github/workflows/ci.yml", "utf8");
@@ -62,6 +63,13 @@ for (const catalog of [en, ru]) {
     "Every supported locale must contain the native-new-tab failure message");
 }
 
+assert.match(round16Fixtures, /consumeNativeBypass = nativeTabApi\.consumeNativeNewTabBypass/,
+  "The historical Round 16 happy path must use the real bypass consumer");
+assert.match(round16Fixtures, /assert\.equal\(await consumeNativeBypass\(tabId\), true/,
+  "Round 16 must no longer model deletion of the bypass key as successful consumption");
+assert.doesNotMatch(round16Fixtures, /if \(consumeBypassOnUpdate\) delete localState\.startTabNativeNewTabBypass/,
+  "Historical fixtures must not preserve the removed false-success contract");
+
 for (const marker of [
   "Expiry before tabs.update settles must fail closed",
   "A disappeared bypass key must not be mistaken for consumption",
@@ -99,7 +107,7 @@ assert.ok(
   "Round 51 must run explicitly after Round 50 and before the self-hosted CI contract",
 );
 
-for (const phrase of ["false success", "expired", "storage lock", "retry", "visible feedback", "automatic language mode"]) {
+for (const phrase of ["false success", "expired", "storage lock", "retry", "visible feedback", "automatic language mode", "round 16"] ) {
   assert.ok(audit.toLowerCase().includes(phrase), `Round 51 audit is missing: ${phrase}`);
 }
 for (const phrase of ["native new tab", "fallback", "temporary", "rapid", "alert"]) {
