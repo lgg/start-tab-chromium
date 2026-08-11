@@ -19,15 +19,17 @@ const NATIVE_NEW_TAB_URLS = [
 
 async function waitForNativeBypassConsumption(
   tabId: number,
-  timeoutMs: number,
+  expiresAt: number,
   pollIntervalMs: number,
 ): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  while (Date.now() < expiresAt) {
     const items = await chrome.storage.local.get(NATIVE_NEW_TAB_BYPASS_KEY);
     const value = items[NATIVE_NEW_TAB_BYPASS_KEY] as NativeNewTabBypass | undefined;
-    if (value?.tabId !== tabId || typeof value.consumedAt === "number") return true;
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    if (value?.tabId !== tabId || value.expiresAt !== expiresAt) return false;
+    if (typeof value.consumedAt === "number") return true;
+    const remainingMs = expiresAt - Date.now();
+    if (remainingMs <= 0) return false;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, remainingMs)));
   }
   return false;
 }
@@ -52,11 +54,12 @@ export async function openNativeNewTab(options: NativeNewTabOpenOptions = {}): P
 
   for (const url of NATIVE_NEW_TAB_URLS) {
     try {
+      const expiresAt = Date.now() + timeoutMs;
       await chrome.storage.local.set({
-        [NATIVE_NEW_TAB_BYPASS_KEY]: { tabId, expiresAt: Date.now() + timeoutMs },
+        [NATIVE_NEW_TAB_BYPASS_KEY]: { tabId, expiresAt },
       });
       await chrome.tabs.update(tabId, { url });
-      if (await waitForNativeBypassConsumption(tabId, timeoutMs, pollIntervalMs)) return;
+      if (await waitForNativeBypassConsumption(tabId, expiresAt, pollIntervalMs)) return;
       failures.push(new Error(`Native new-tab bypass was not consumed for ${url}`));
     } catch (error) {
       failures.push(error);
@@ -88,10 +91,9 @@ export async function consumeNativeNewTabBypass(tabId: number): Promise<boolean>
   const items = await chrome.storage.local.get(NATIVE_NEW_TAB_BYPASS_KEY);
   const value = items[NATIVE_NEW_TAB_BYPASS_KEY] as NativeNewTabBypass | undefined;
   if (typeof value?.tabId !== "number" || typeof value.expiresAt !== "number") return false;
-  if (value.expiresAt < Date.now()) {
-    await chrome.storage.local.remove(NATIVE_NEW_TAB_BYPASS_KEY);
-    return false;
-  }
+  // Consumers never delete an expired global bypass after a separate read. The
+  // opener owns cleanup, so a stale event cannot erase a newer retry's grant.
+  if (value.expiresAt < Date.now()) return false;
   if (value.tabId !== tabId) return false;
   if (typeof value.consumedAt !== "number") {
     await chrome.storage.local.set({
