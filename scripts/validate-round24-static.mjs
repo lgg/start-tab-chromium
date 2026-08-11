@@ -17,10 +17,20 @@ const release = read("docs/release.md");
 const packageJson = JSON.parse(read("package.json"));
 const workflow = read(".github/workflows/ci.yml");
 
+const filesystemGuard = "await assertSafeBuildOutputFilesystem(root, tmpdir(), outdir)";
+const contextCreation = "await esbuild.context(options)";
+const oneShotBuild = "await esbuild.build(options)";
+
 assert.match(build, /assertSafeBuildOutputFilesystem/,
   "Builder must import the filesystem-aware output guard");
-assert.ok(build.indexOf("await assertSafeBuildOutputFilesystem") < build.indexOf("await rm(outdir"),
-  "Filesystem link validation must run before recursive output cleanup");
+assert.ok(
+  build.indexOf(filesystemGuard) >= 0
+    && build.indexOf(filesystemGuard) < build.indexOf(contextCreation)
+    && build.indexOf(filesystemGuard) < build.indexOf(oneShotBuild),
+  "Filesystem link validation must run before either watch context creation or one-shot compilation",
+);
+assert.doesNotMatch(build, /rm\(outdir,\s*\{\s*recursive:\s*true/,
+  "Filesystem safety must not be coupled to broad recursive startup cleanup");
 assert.match(outputGuard, /assertPathContainsNoLinks/,
   "Build output validation must delegate to shared filesystem link inspection");
 assert.match(pathSafety, /lstat/,
