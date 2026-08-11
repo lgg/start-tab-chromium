@@ -384,9 +384,9 @@ async function restoreChromeSyncBackupInTransaction(guard: LocalRevisionGuard): 
   await restoreParsedSnapshot(parsed, guard);
 }
 export async function restoreChromeSyncBackup(): Promise<void> {
+  const guard = await captureLocalRevisionGuard();
   await withStorageLock("chrome-sync", async () => {
     await assertCompatibleSyncMetadata();
-    const guard = await captureLocalRevisionGuard();
     await restoreChromeSyncBackupInTransaction(guard);
   });
 }
