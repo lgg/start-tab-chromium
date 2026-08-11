@@ -5,6 +5,7 @@ const lifecycle = await readFile("scripts/build-output-lifecycle.mjs", "utf8");
 const outputHelper = await readFile("scripts/static-asset-output.mjs", "utf8");
 const staticWatch = await readFile("scripts/static-asset-watch.mjs", "utf8");
 const fixtures = await readFile("scripts/run-round47-fixtures.mjs", "utf8");
+const selfHosted = await readFile("scripts/validate-self-hosted-ci.mjs", "utf8");
 const packageJson = JSON.parse(await readFile("package.json", "utf8"));
 const workflow = await readFile(".github/workflows/ci.yml", "utf8");
 const watchGuide = await readFile("docs/watch-mode.md", "utf8");
@@ -64,6 +65,7 @@ for (const command of [
 ]) {
   assert.ok(packageJson.scripts.test.includes(command), `npm test is missing ${command}`);
   assert.ok(workflow.includes(command), `CI is missing ${command}`);
+  assert.ok(selfHosted.includes(command), `Self-hosted CI contract is missing ${command}`);
 }
 assert.ok(
   workflow.indexOf("node scripts/validate-round46-static.mjs")
@@ -79,7 +81,7 @@ assert.match(watchGuide, /revalidates the build output immediately before static
 assert.match(watchGuide, /links, junctions, and other special filesystem entries are rejected/i);
 assert.match(watchGuide, /reusing the same safe `--outdir` across profiles/i);
 assert.match(audit, /late output-path replacement/i);
-assert.match(audit, /root or nested symlink/i);
+assert.match(audit, /symlink\/junction/i);
 assert.match(audit, /mixed-profile/i);
 assert.match(manualQa, /junction/i);
 assert.match(manualQa, /same `--outdir`/i);
