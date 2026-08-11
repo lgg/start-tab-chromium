@@ -107,9 +107,13 @@ export async function consumeNativeNewTabBypass(tabId: number): Promise<boolean>
     const items = await chrome.storage.local.get(NATIVE_NEW_TAB_BYPASS_KEY);
     const value = items[NATIVE_NEW_TAB_BYPASS_KEY] as NativeNewTabBypass | undefined;
     if (typeof value?.tabId !== "number" || typeof value.expiresAt !== "number") return false;
-    // The opener owns stale-grant cleanup. A consumer must never delete an
-    // expired value after a separate read because that could erase a retry.
-    if (value.expiresAt <= Date.now()) return false;
+    if (value.expiresAt <= Date.now()) {
+      // The read and removal are protected by the same lock used to publish a
+      // retry. A newer grant therefore cannot appear between this stale check
+      // and removal, while expired leases still get cleaned promptly.
+      await chrome.storage.local.remove(NATIVE_NEW_TAB_BYPASS_KEY);
+      return false;
+    }
     if (value.tabId !== tabId) return false;
     if (typeof value.consumedAt !== "number") {
       await chrome.storage.local.set({
