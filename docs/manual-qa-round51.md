@@ -7,5 +7,6 @@ These checks require a real unpacked Chromium extension and are not replaced by 
 3. Repeat while the browser is under load so navigation settles slowly. An expired attempt must fall through to the supported fallback URLs instead of reporting a false success.
 4. If the browser rejects every native-new-tab candidate, confirm the temporary tab is removed and the UI displays the localized failure message next to the triggering button. Screen-reader inspection should expose that status as an alert.
 5. After a visible failure, retry successfully. The stale error status should clear at the start of the new action and remain cleared after success.
-6. Open ordinary new tabs before and after the native-new-tab action. Normal Start Tab interception must continue working; a stale/expired bypass must not suppress an unrelated tab.
-7. Repeat after restarting the browser. A stale storage entry from an older session must not bypass Start Tab, delete a newer grant, or prevent fallback recovery.
+6. With browser UI language set to Russian and Start Tab language set to **Auto**, verify the disabled/Split View gate, untitled-tab fallback, and native-new-tab failure status use Russian rather than English fallback text. Repeat once with explicit Russian and explicit English.
+7. Open ordinary new tabs before and after the native-new-tab action. Normal Start Tab interception must continue working; a stale/expired bypass must not suppress an unrelated tab.
+8. Repeat after restarting the browser. A stale storage entry from an older session must not bypass Start Tab, delete a newer grant, or prevent fallback recovery.
