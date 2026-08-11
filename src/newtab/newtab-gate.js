@@ -13,6 +13,8 @@
   let previousFocus = null;
   let catalogLoadGeneration = 0;
   let applyGeneration = 0;
+  const nativeActionGenerations = new WeakMap();
+  const nativeStatusElements = new WeakMap();
 
   const run = (action) => {
     try { void Promise.resolve(action()).catch(ignore); } catch { ignore(); }
@@ -47,6 +49,37 @@
   }
 
   const openNative = () => workerCommand({ type: "open-native-new-tab" });
+
+  function nativeStatus(button) {
+    const existing = nativeStatusElements.get(button);
+    if (existing?.isConnected) return existing;
+    const status = document.createElement("p");
+    status.hidden = true;
+    status.setAttribute("role", "alert");
+    status.setAttribute("aria-live", "assertive");
+    status.style.cssText = "margin:8px 0;color:#fecaca;font-size:14px";
+    button.after(status);
+    nativeStatusElements.set(button, status);
+    return status;
+  }
+
+  async function runNative(button) {
+    const generation = (nativeActionGenerations.get(button) || 0) + 1;
+    nativeActionGenerations.set(button, generation);
+    const status = nativeStatus(button);
+    status.hidden = true;
+    status.textContent = "";
+    button.setAttribute("aria-busy", "true");
+    try {
+      await openNative();
+    } catch {
+      if (nativeActionGenerations.get(button) !== generation) return;
+      status.textContent = text("nativeNewTabFailed", "Couldn't open the browser's native new tab. Try again.");
+      status.hidden = false;
+    } finally {
+      if (nativeActionGenerations.get(button) === generation) button.removeAttribute("aria-busy");
+    }
+  }
 
   function webTab(tab) {
     const value = typeof tab?.url === "string" ? tab.url.trim() : "";
@@ -143,7 +176,7 @@
     const native = document.createElement("button");
     native.type = "button";
     native.textContent = text("openNativeNewTab", "Open browser new tab");
-    native.addEventListener("click", () => run(openNative));
+    native.addEventListener("click", () => run(() => runNative(native)));
     const settings = document.createElement("button");
     settings.type = "button";
     settings.textContent = text("openSettings", "Open settings");
@@ -201,7 +234,7 @@
 
   async function initGate() {
     const nativeButton = document.getElementById("nativeNewTab");
-    if (nativeButton) nativeButton.addEventListener("click", () => run(openNative));
+    if (nativeButton) nativeButton.addEventListener("click", () => run(() => runNative(nativeButton)));
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
       if (changes[LOCALE_OVERRIDE_KEY]) {
