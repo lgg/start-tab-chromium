@@ -1,4 +1,4 @@
-import { readdir } from "node:fs/promises";
+import { lstat, readdir } from "node:fs/promises";
 import path from "node:path";
 
 export const STATIC_ASSET_WATCH_IMPORT = "start-tab:static-assets";
@@ -8,25 +8,53 @@ function uniqueResolved(paths) {
   return [...new Set(paths.map((value) => path.resolve(value)))].sort((left, right) => left.localeCompare(right));
 }
 
-function isMissingPath(error) {
+function errorCodeIs(error, code) {
   return Boolean(error)
     && typeof error === "object"
     && "code" in error
-    && error.code === "ENOENT";
+    && error.code === code;
 }
 
 async function listRegularTree(directory) {
   const files = [];
   const directories = [];
   const missingDirectories = [];
+  const invalidDirectories = [];
 
   async function visit(current) {
+    let status;
+    try {
+      status = await lstat(current);
+    } catch (error) {
+      if (errorCodeIs(error, "ENOENT")) {
+        missingDirectories.push(current);
+        return;
+      }
+      throw error;
+    }
+
+    // lstat() deliberately does not follow a symbolic link or Windows
+    // junction. Recursive static roots and nested directories must stay real
+    // directories inside the repository instead of silently traversing an
+    // external tree.
+    if (!status.isDirectory()) {
+      invalidDirectories.push(current);
+      return;
+    }
+
     let entries;
     try {
       entries = await readdir(current, { withFileTypes: true });
     } catch (error) {
-      if (isMissingPath(error)) {
+      if (errorCodeIs(error, "ENOENT")) {
         missingDirectories.push(current);
+        return;
+      }
+      // The directory may have been replaced with a file/link after lstat().
+      // Keep the failure structured so the already-watched parent can recover
+      // when the correct directory is restored.
+      if (errorCodeIs(error, "ENOTDIR")) {
+        invalidDirectories.push(current);
         return;
       }
       throw error;
@@ -47,7 +75,7 @@ async function listRegularTree(directory) {
   }
 
   await visit(directory);
-  return { files, directories, missingDirectories };
+  return { files, directories, missingDirectories, invalidDirectories };
 }
 
 export function explicitStaticAssetSources(root, blockerOnly = false) {
@@ -81,6 +109,7 @@ export async function collectStaticAssetWatchInputs(root, blockerOnly = false) {
   const recursiveFiles = trees.flatMap((tree) => tree.files);
   const traversedDirectories = trees.flatMap((tree) => tree.directories);
   const missingDirectories = uniqueResolved(trees.flatMap((tree) => tree.missingDirectories));
+  const invalidDirectories = uniqueResolved(trees.flatMap((tree) => tree.invalidDirectories));
   const watchFiles = uniqueResolved([
     ...explicitStaticAssetSources(root, blockerOnly),
     ...recursiveFiles,
@@ -90,7 +119,7 @@ export async function collectStaticAssetWatchInputs(root, blockerOnly = false) {
     ...traversedDirectories,
     ...watchFiles.map((file) => path.dirname(file)),
   ]);
-  return { watchFiles, watchDirs, missingDirectories };
+  return { watchFiles, watchDirs, missingDirectories, invalidDirectories };
 }
 
 export function createStaticAssetWatchPlugin(root, blockerOnly = false) {
@@ -103,18 +132,20 @@ export function createStaticAssetWatchPlugin(root, blockerOnly = false) {
       }));
       build.onLoad({ filter: /.*/, namespace: STATIC_ASSET_WATCH_NAMESPACE }, async () => {
         const inputs = await collectStaticAssetWatchInputs(root, blockerOnly);
+        const errors = [
+          ...inputs.missingDirectories.map((directory) => ({
+            text: `Required static asset directory is missing: ${directory}`,
+          })),
+          ...inputs.invalidDirectories.map((directory) => ({
+            text: `Required static asset path must be a real directory, not a file, symbolic link, or junction: ${directory}`,
+          })),
+        ];
         return {
           contents: "",
           loader: "js",
           watchFiles: inputs.watchFiles,
           watchDirs: inputs.watchDirs,
-          ...(inputs.missingDirectories.length > 0
-            ? {
-                errors: inputs.missingDirectories.map((directory) => ({
-                  text: `Required static asset directory is missing: ${directory}`,
-                })),
-              }
-            : {}),
+          ...(errors.length > 0 ? { errors } : {}),
         };
       });
     },
