@@ -50,7 +50,7 @@ export function createStaticOutputWriter({
   const resolvedOutdir = path.resolve(outdir);
 
   async function guard() {
-    await assertSafe(root, temporaryRoot, resolvedOutdir);
+    await assertSafe(root, temporaryRoot, outdir);
   }
 
   async function copyOne(from, to, options) {
