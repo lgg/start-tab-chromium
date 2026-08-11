@@ -17,6 +17,12 @@ async function writeCatalog(root, locale, file, value) {
   await writeFile(target, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
+async function writeRawCatalog(root, locale, file, source) {
+  const target = path.join(root, locale, file);
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(target, source, "utf8");
+}
+
 async function scenario(name, setup) {
   const root = path.join(temporary, name);
   await setup(root);
@@ -65,6 +71,15 @@ try {
   assert.deepEqual(duplicate.duplicateSourceKeys, ["one"]);
   assert.throws(() => assertLocaleParity(duplicate), /Duplicate en locale keys: one/,
     "Duplicate key across locale fragments must fail locale validation");
+
+  const duplicateInFile = await scenario("duplicate-in-file", async (root) => {
+    await writeRawCatalog(root, "en", "messages.json",
+      '{"one":{"message":"First"},"one":{"message":"Second"}}\n');
+    await writeCatalog(root, "ru", "messages.json", messages({ one: "Один" }));
+  });
+  assert.deepEqual(duplicateInFile.duplicateSourceKeys, ["one"]);
+  assert.throws(() => assertLocaleParity(duplicateInFile), /Duplicate en locale keys: one/,
+    "Duplicate key inside one locale JSON file must fail before JSON.parse can hide it");
 
   const malformed = await scenario("malformed", async (root) => {
     await writeCatalog(root, "en", "messages.json", {
