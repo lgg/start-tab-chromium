@@ -520,3 +520,51 @@ assert.ok(newerRemoteArrived);
 assert.equal(syncSetCount, 0, "A changed remote decision must be recalculated before upload");
 assert.deepEqual(localStorage.blockedSites, ["newest-remote.example"]);
 console.log("Round 55 exact legacy revision and remote decision fixtures passed");
+
+const settingsApi61 = await import("../src/lib/start-page-settings.js");
+const runtimeApi61 = await import("../src/lib/start-page-runtime.js");
+resetState();
+const revision61 = REVISION_BASE + 3000;
+const beforeRestore61 = settingsApi61.normalizeStartPageSettings({
+  schemaVersion: 4, updatedAt: revision61,
+  layout: { mode: "free", blocks: [{ id: "note-61", type: "note", title: "Old note", updatedAt: revision61 }] },
+  themes: { selectedThemeId: "theme-61", customThemes: [{ id: "theme-61", name: "Old theme", updatedAt: revision61 }] },
+});
+const beforeRuntime61 = runtimeApi61.normalizeRuntimeState({
+  version: 2, updatedAt: revision61, notes: { "note-61": "old content" },
+}, beforeRestore61);
+localStorage = {
+  startPageSettings: clone(beforeRestore61),
+  startPageRuntimeState: clone(beforeRuntime61),
+  startTabDataRevision: { version: 1, updatedAt: revision61 },
+};
+const incoming61 = backup.migrateBackup({
+  app: "Start Tab", version: 4, exportedAt: new Date().toISOString(),
+  storage: {
+    startPageSettings: {
+      ...beforeRestore61,
+      layout: { ...beforeRestore61.layout, blocks: beforeRestore61.layout.blocks.map((block) => ({ ...block, title: "Restored note" })) },
+      themes: { ...beforeRestore61.themes, customThemes: beforeRestore61.themes.customThemes.map((theme) => ({ ...theme, name: "Restored theme" })) },
+    },
+    startPageRuntimeState: { ...beforeRuntime61, notes: { "note-61": "restored content" } },
+  },
+});
+await backup.importBackup(incoming61);
+const afterRestore61 = await settingsApi61.getStartPageSettings();
+const afterRuntime61 = await runtimeApi61.getStartPageRuntimeState();
+assert.ok(afterRestore61.updatedAt > revision61, "A restore must never reuse a previous local settings revision");
+assert.ok(afterRuntime61.updatedAt > revision61, "A restore must invalidate stale runtime snapshots");
+assert.ok(afterRestore61.layout.blocks[0]!.updatedAt > revision61);
+assert.ok(afterRestore61.themes.customThemes[0]!.updatedAt > revision61);
+assert.equal(afterRestore61.layout.blocks[0]!.title, "Restored note");
+assert.equal(afterRuntime61.notes["note-61"], "restored content");
+await assert.rejects(() => settingsApi61.updateBlockInstance("note-61", (block) => ({ ...block, title: "Stale" }), revision61), /changed in another extension context/);
+await assert.rejects(() => settingsApi61.updateCustomTheme(beforeRestore61.themes.customThemes[0]!, revision61), /changed in another extension context/);
+await assert.rejects(() => runtimeApi61.replaceStartPageSettingsWithRuntime(beforeRestore61, revision61, revision61), /changed in another extension context/);
+assert.equal(chromeSync.canonicalBackupContent(await backup.exportBackup()), chromeSync.canonicalBackupContent(incoming61),
+  "Local restore tokens must not alter semantic Browser Sync checksums");
+const firstRestoredRevision61 = afterRestore61.updatedAt;
+await backup.importBackup(incoming61);
+assert.ok((await settingsApi61.getStartPageSettings()).updatedAt > firstRestoredRevision61,
+  "Restoring the same file twice must still invalidate old optimistic edit tokens");
+console.log("Round 61 restored local revision regressions passed");

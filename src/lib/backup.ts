@@ -13,6 +13,8 @@ import {
   readStartTabDataRevisionSnapshot,
 } from "./data-revision.js";
 import { runIndependentEffects } from "./independent-effects.js";
+import { restampRestoredState } from "./backup-restore-revisions.js";
+import type { StartPageSettings, StartPageRuntimeState } from "./start-page-types.js";
 import { withStorageLock } from "./storage-lock.js";
 import { FOCUS_STATS_KEY, isFutureFocusStatsSchema, normalizeFocusStats } from "./focus-stats.js";
 import {
@@ -278,9 +280,20 @@ export async function importBackup(value: unknown, options: BackupImportOptions 
     assertSupportedSchemas(current);
     const currentRules = await readDynamicRulesSnapshot();
     const currentAlarms = await readClockAlarmSnapshot();
-    const next = { ...migrated.storage };
-    const removals = keysAbsentFrom(next, SNAPSHOT_KEYS);
     const recovery = currentSchema(normalizedStorage(current, "local-recovery"), new Date().toISOString(), backupId());
+    const restored = restampRestoredState(
+      migrated.storage[START_PAGE_SETTINGS_KEY] as StartPageSettings,
+      migrated.storage[START_PAGE_RUNTIME_KEY] as StartPageRuntimeState,
+      recovery.storage[START_PAGE_SETTINGS_KEY] as StartPageSettings,
+      recovery.storage[START_PAGE_RUNTIME_KEY] as StartPageRuntimeState,
+      current[DATA_REVISION_KEY],
+    );
+    const next: Record<string, unknown> = {
+      ...migrated.storage,
+      [START_PAGE_SETTINGS_KEY]: restored.settings,
+      [START_PAGE_RUNTIME_KEY]: restored.runtime,
+    };
+    const removals = keysAbsentFrom(next, SNAPSHOT_KEYS);
     await chrome.storage.local.set({ [PRE_IMPORT_BACKUP_KEY]: recovery });
 
     try {
@@ -288,7 +301,7 @@ export async function importBackup(value: unknown, options: BackupImportOptions 
       if (removals.length > 0) await chrome.storage.local.remove(removals);
       await syncRulesInCurrentTransaction();
       await reconcileClockAlarmsForRuntime(next[START_PAGE_RUNTIME_KEY] as ReturnType<typeof normalizeRuntimeState>);
-      await markStartTabDataChanged(options.dataRevisionAt);
+      await markStartTabDataChanged(Math.max(restored.revision, options.dataRevisionAt ?? restored.revision));
     } catch (error) {
       try {
         await runIndependentEffects([

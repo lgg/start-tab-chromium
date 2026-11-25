@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 
 const revision = await readFile("src/lib/data-revision.ts", "utf8");
 const backup = await readFile("src/lib/backup.ts", "utf8");
+const restoredRevisions = await readFile("src/lib/backup-restore-revisions.ts", "utf8");
 const chromeSync = await readFile("src/lib/chrome-sync.ts", "utf8");
 const google = await readFile("src/lib/google-integration.ts", "utf8");
 const options = await readFile("src/options/options.ts", "utf8");
@@ -29,6 +30,9 @@ assert.match(backup, /expectedCurrentStoredDataRevision: localBeforeRead\.stored
 assert.match(backup, /options\.expectedCurrentStoredDataRevision/);
 const importLock = backup.indexOf('return withStorageLock("data-write"');
 const importGuard = backup.indexOf("assertStartTabDataRevisionUnchanged(", importLock);
+assert.match(backup, /const restored = restampRestoredState\([\s\S]*current\[DATA_REVISION_KEY\][\s\S]*\[START_PAGE_SETTINGS_KEY\]: restored\.settings/);
+assert.match(restoredRevisions, /Math\.max\(now, floor \+ 1\)/);
+assert.match(restoredRevisions, /Number\.isSafeInteger\(revision\)/);
 const recoveryWrite = backup.indexOf("PRE_IMPORT_BACKUP_KEY", importGuard);
 assert.ok(importLock >= 0 && importGuard > importLock && recoveryWrite > importGuard,
   "Backup revision CAS must run under data-write before the recovery snapshot or any destructive import side effect");
