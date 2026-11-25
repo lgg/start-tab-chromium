@@ -16,7 +16,7 @@ import { TaskFormSessions, type TaskFormSession } from "./task-submission-gate.j
 import { NoteDraft } from "./note-draft.js";
 import { hiddenDraftIds } from "./protected-page-drafts.js";
 import type { HiddenTextDraft } from "./hidden-text-drafts.js";
-import { refreshAfterAcknowledgedRuntimeWrite } from "./runtime-mutation-recovery.js";
+import { refreshAfterAcknowledgedRuntimeWrite, settleClockMutation } from "./runtime-mutation-recovery.js";
 
 const clockRequests = new ClockRequestGate();
 
@@ -26,7 +26,6 @@ async function refreshClock(
 ): Promise<void> {
   context.runtime = await getStartPageRuntimeState(context.settings);
   if (!ownValue(context.runtime.clocks, block.id)) context.runtime.clocks[block.id] = defaultClockForBlock(block);
-  context.requestRender();
 }
 
 export function renderClock(
@@ -47,14 +46,15 @@ export function renderClock(
     if (!lease) return;
     update();
     try {
-      await sendMessage({ type: "clock-action", instanceId: block.id, action });
+      await settleClockMutation(
+        async () => { await sendMessage({ type: "clock-action", instanceId: block.id, action }); },
+        async () => { await refreshClock(block, context); },
+        (error) => context.reportError(new Error(context.i18n.t("runtimeSavedRefreshFailed"), { cause: error })),
+      );
     } finally {
-      try {
-        await refreshClock(block, context);
-      } finally {
-        clockRequests.finish(lease);
-        if (!disposed) update();
-      }
+      clockRequests.finish(lease);
+      context.requestRender();
+      if (!disposed) update();
     }
   };
 
@@ -70,14 +70,15 @@ export function renderClock(
     if (!lease) return;
     update();
     try {
-      await sendMessage({ type: "complete-clock", instanceId: block.id, token });
+      await settleClockMutation(
+        async () => { await sendMessage({ type: "complete-clock", instanceId: block.id, token }); },
+        async () => { await refreshClock(block, context); },
+        (error) => context.reportError(new Error(context.i18n.t("runtimeSavedRefreshFailed"), { cause: error })),
+      );
     } finally {
-      try {
-        await refreshClock(block, context);
-      } finally {
-        clockRequests.finish(lease);
-        if (!disposed) update();
-      }
+      clockRequests.finish(lease);
+      context.requestRender();
+      if (!disposed) update();
     }
   };
 
