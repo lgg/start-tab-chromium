@@ -108,7 +108,8 @@ function calendarEvent(payload: CalendarEventPayload): GoogleCalendarEvent {
     title: payload.summary?.trim() ?? "",
     start: typeof payload.start?.dateTime === "string" ? payload.start.dateTime : typeof payload.start?.date === "string" ? payload.start.date : "",
     end: typeof payload.end?.dateTime === "string" ? payload.end.dateTime : typeof payload.end?.date === "string" ? payload.end.date : "",
-    allDay: typeof payload.start?.date === "string" && typeof payload.start.dateTime !== "string",
+    allDay: Boolean(typeof payload.start?.date === "string" && payload.start.date
+      && !(typeof payload.start.dateTime === "string" && payload.start.dateTime)),
   };
 }
 
