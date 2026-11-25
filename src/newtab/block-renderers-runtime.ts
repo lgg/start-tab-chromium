@@ -89,7 +89,7 @@ export function renderClock(
     if (block.type === "pomodoro") phase.textContent = context.i18n.t(clock.phase === "break" ? "pomodoroBreak" : "pomodoroWork");
     if (clock.running && block.type !== "stopwatch" && value <= 0 && clock.completionToken
       && clockRequests.canComplete(block.id, clock.completionToken)) {
-      void requestCompletion(clock.completionToken).catch(context.reportError);
+      void requestCompletion(clock.completionToken).catch((error: unknown) => context.reportError(error));
     }
   };
 
