@@ -216,3 +216,5 @@ assert.match(runtimeRenderer, /if \(ack\.notificationFailed\) context\.reportErr
 for (const locale108 of ["en", "ru"]) {
   assert.ok(JSON.parse(read("src/_locales/" + locale108 + "/round7-messages.json")).clockCompletedNotificationFailed.message);
 }
+
+assert.match(settings, /export function createDefaultStartPageSettings[\s\S]*return withBlockTimestamps\(null, normalizeStartPageSettings\(undefined\), now\)/);

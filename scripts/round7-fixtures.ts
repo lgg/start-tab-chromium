@@ -507,7 +507,16 @@ assert.equal(Object.prototype.hasOwnProperty.call(localState, "startPageOnboardi
 assert.equal(alarmState.size, 0);
 assert.equal((localState[revisionApi.DATA_REVISION_KEY] as { version: number }).version, revisionApi.DATA_REVISION_SCHEMA_VERSION, "Explicit full reset may replace future revision metadata");
 assert.ok((localState[revisionApi.DATA_REVISION_KEY] as { updatedAt: number }).updatedAt > futureDataRevision.updatedAt, "Explicit full reset must preserve monotonic ordering when replacing future revision metadata");
-assert.equal((await settingsApi.getStartPageSettings()).schemaVersion, settingsApi.START_PAGE_SCHEMA_VERSION);
+const committedReset115 = structuredClone(localState);
+const canonicalReset115 = await settingsApi.getStartPageSettings();
+assert.equal(canonicalReset115.schemaVersion, settingsApi.START_PAGE_SCHEMA_VERSION);
+// Chrome storage serializes dictionaries as plain objects; compare the
+// serialized content without treating null-prototype dictionaries as edits.
+assert.deepEqual(structuredClone(canonicalReset115), committedReset115.startPageSettings, "Reset must commit an already normalized layout");
+assert.deepEqual(localState, committedReset115, "The first settings read after reset must not create an extra migration or revision");
+const directDefault115 = settingsApi.createDefaultStartPageSettings(12345);
+assert.deepEqual(settingsApi.normalizeStartPageSettings(directDefault115), directDefault115, "Explicit default settings must be idempotent under normalization");
+console.log("Round 115 canonical reset regressions passed");
 
 console.log("Round 7 fixtures passed");
 

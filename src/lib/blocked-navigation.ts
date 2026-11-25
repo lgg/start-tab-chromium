@@ -35,6 +35,48 @@ export function isBlockedPageNavigation(url: string, blockedPageUrl: string): bo
   } catch { return false; }
 }
 
+interface BlockedPageSender {
+  url?: string;
+  frameId?: number;
+  documentLifecycle?: string;
+  tab?: { id?: number };
+}
+interface BlockedPageTab { id?: number; url?: string; pendingUrl?: string }
+
+function matchesBlockedPageHost(url: string | undefined, page: string, host: string): boolean {
+  if (!url || !isBlockedPageNavigation(url, page)) return false;
+  const sites = new URL(url).searchParams.getAll("site");
+  return sites.length === 1 && sites[0] === host;
+}
+
+/** A previous document's asynchronous request must not retrieve the
+ * destination of a later navigation. Check the live tab on both sides of
+ * the queued registry lookup; deny subframes and inactive documents. */
+export async function readBlockedDestinationForSender(
+  sender: BlockedPageSender,
+  page: string,
+  host: string,
+  getTab: (id: number) => Promise<BlockedPageTab>,
+  lookup: (id: number, host: string) => Promise<string | null>,
+): Promise<string | null> {
+  const id = sender.tab?.id;
+  if (!validTabId(id) || sender.frameId !== 0
+    || (sender.documentLifecycle !== undefined && sender.documentLifecycle !== "active")
+    || !matchesBlockedPageHost(sender.url, page, host)) return null;
+  const isCurrent = async (): Promise<boolean> => {
+    const tab = await getTab(id);
+    return tab.id === id && matchesBlockedPageHost(tab.url, page, host)
+      && (!tab.pendingUrl || matchesBlockedPageHost(tab.pendingUrl, page, host));
+  };
+  try {
+    if (!await isCurrent()) return null;
+    const destination = await lookup(id, host);
+    return destination && await isCurrent() ? destination : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Keep the exact blocked destination per tab in session storage. Reads wait
  * for the corresponding navigation event even when the blocked page loads
  * before its asynchronous host lookup has settled. No entry is backed up. */
