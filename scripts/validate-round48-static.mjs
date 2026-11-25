@@ -22,12 +22,12 @@ assert.match(build, /await staticOutputWriter\.writeOne\(output\("manifest\.json
 assert.doesNotMatch(build, /Promise\.all\(commonFiles/,
   "Static file batches must not reject while sibling copies are still running");
 
-assert.match(finalization, /async function guard\(\)[\s\S]*assertSafe\(root, temporaryRoot, outdir\)/,
+assert.match(finalization, /async function guard\(destination\)[\s\S]*assertSafe\(root, temporaryRoot, outdir\)/,
   "Every static writer operation must own a fresh output guard");
-assert.match(finalization, /async function copyOne[\s\S]*await guard\(\);[\s\S]*await copyFile/);
+assert.match(finalization, /async function copyOne[\s\S]*await guard\(destination\);[\s\S]*await copyFile/);
 assert.match(finalization, /async function copyBatch\(entries\)[\s\S]*for \(const entry of entries\)[\s\S]*await copyOne/,
   "Static copy batches must settle sequentially before exposing failures");
-assert.match(finalization, /async function writeOne[\s\S]*await guard\(\);[\s\S]*await writeFileValue/);
+assert.match(finalization, /async function writeOne[\s\S]*await guard\(destination\);[\s\S]*await writeFileValue/);
 
 assert.match(watchHelper, /async function inspectExplicitStaticFiles\(files\)/);
 assert.match(watchHelper, /const status = await lstat\(file\)/);
