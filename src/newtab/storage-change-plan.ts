@@ -23,7 +23,7 @@ export function planStartPageStorageChange(
   const announceIgnoredSettings = hasUnsavedSettings && changes.settings;
   return {
     announceIgnoredSettings,
-    refreshState: changes.runtime || changes.focusStats || (changes.settings && !hasUnsavedSettings),
+    refreshState: changes.runtime || changes.focusStats || changes.settings,
   };
 }
 

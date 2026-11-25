@@ -105,7 +105,8 @@ export function renderClock(
 interface NoteSession {
   draft: NoteDraft;
   timer: number | undefined;
-  save: (value: string, expectedValue: string) => Promise<void>;
+  save: (value: string, expectedValue: string) => Promise<number | undefined>;
+  requestRefresh: () => void;
   reportError: (error: unknown) => void;
   view?: () => void;
   resolving: boolean;
@@ -137,8 +138,9 @@ async function flushNoteSave(session: NoteSession): Promise<void> {
   if (!attempt) return;
   session.view?.();
   try {
-    await session.save(attempt.value, attempt.expectedValue);
-    session.draft.succeed(attempt);
+    const revision = await session.save(attempt.value, attempt.expectedValue);
+    session.draft.succeed(attempt, revision);
+    session.requestRefresh();
   } catch (error) {
     session.draft.fail(attempt);
     session.reportError(error);
@@ -156,22 +158,24 @@ export function renderNote(
   context: BlockRenderContext,
 ): void {
   const canonicalValue = ownValue(context.runtime.notes, block.id) ?? "";
-  const save = (value: string, expectedValue: string): Promise<void> => context.setRuntime({
+  const save = (value: string, expectedValue: string): Promise<number | undefined> => context.setRuntime({
     kind: "note",
     instanceId: block.id,
     value,
     expectedValue,
   });
   const session: NoteSession = noteSessions.get(block.id) ?? {
-    draft: new NoteDraft(canonicalValue),
+    draft: new NoteDraft(canonicalValue, context.runtime.updatedAt),
     timer: undefined,
     save,
+    requestRefresh: context.requestRender,
     reportError: context.reportError,
     resolving: false,
   };
   noteSessions.set(block.id, session);
-  session.draft.observeCanonical(canonicalValue);
+  session.draft.observeCanonical(canonicalValue, context.runtime.updatedAt);
   session.save = save;
+  session.requestRefresh = context.requestRender;
   session.reportError = context.reportError;
 
   const textarea = element("textarea", "note");
@@ -194,11 +198,12 @@ export function renderNote(
       const current = ownValue(currentRuntime.notes, block.id) ?? "";
       if (discard) {
         if (!window.confirm(context.i18n.t("noteDraftDiscardConfirm"))) return;
-        session.draft.discard(current);
+        session.draft.discard(current, currentRuntime.updatedAt);
+        session.requestRefresh();
       } else {
         if (current !== session.draft.expectedValue
           && !window.confirm(context.i18n.t("noteDraftOverwriteConfirm"))) return;
-        session.draft.rebaseForRetry(current);
+        session.draft.rebaseForRetry(current, currentRuntime.updatedAt);
       }
       session.view?.();
       if (!discard) await flushNoteSave(session);
@@ -221,14 +226,15 @@ export function renderNote(
     status.hidden = !session.draft.failed;
     retry.disabled = session.resolving;
     discard.disabled = session.resolving;
-    // Failed drafts remain visible but must not masquerade as canonical state
-    // or hide subsequent external storage events.
-    if (!session.draft.failed) context.runtime.notes[block.id] = session.draft.value;
+    // The textarea is a draft, not the canonical runtime used to compare
+    // storage events. Freeze editing while an explicit resolution is pending.
+    textarea.readOnly = session.resolving;
   };
   session.view = update;
   update();
 
   textarea.addEventListener("input", () => {
+    if (session.resolving || session.view !== update) return;
     session.draft.edit(textarea.value.slice(0, MAX_NOTE_LENGTH));
     update();
     scheduleNoteSave(session);

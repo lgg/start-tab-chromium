@@ -119,6 +119,7 @@ export class LayoutEditor {
   }
 
   replaceSavedSettings(settings: StartPageSettings): void {
+    if (jsonContentEqual(this.saved, settings)) return;
     const refreshDraft = shouldRefreshLayoutDraft(this.active, this.dirty, this.savePending) && !this.isPointerActive;
     this.saved = cloneSettings(settings);
     if (refreshDraft) {

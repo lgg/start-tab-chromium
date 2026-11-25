@@ -8,7 +8,7 @@ assert.deepEqual(mixed, { announceIgnoredSettings: true, refreshState: true },
   "Runtime updates in a mixed storage event must not be lost behind an unsaved layout draft");
 assert.deepEqual(
   planStartPageStorageChange(true, { settings: true, runtime: false, focusStats: false }),
-  { announceIgnoredSettings: true, refreshState: false },
+  { announceIgnoredSettings: true, refreshState: true },
   "A settings-only event must preserve an unsaved layout draft",
 );
 assert.deepEqual(

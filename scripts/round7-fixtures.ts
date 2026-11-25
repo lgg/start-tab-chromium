@@ -179,7 +179,9 @@ const noteBlock = persistedSettings.layout.blocks.find((block) => block.type ===
 const tasksBlock = persistedSettings.layout.blocks.find((block) => block.type === "localTasks");
 const linksBlock = persistedSettings.layout.blocks.find((block) => block.type === "links");
 assert.ok(noteBlock && tasksBlock && linksBlock);
-assert.deepEqual(await workerMessage({ type: "runtime-note", instanceId: noteBlock.id, value: "first", expectedValue: "" }), { ok: true });
+const noteAck73 = await workerMessage({ type: "runtime-note", instanceId: noteBlock.id, value: "first", expectedValue: "" }) as { ok: boolean; runtimeUpdatedAt?: number };
+assert.equal(noteAck73.ok, true);
+assert.equal(noteAck73.runtimeUpdatedAt, (await runtimeApi.getStartPageRuntimeState()).updatedAt, "Note acknowledgement must identify its committed runtime revision");
 const staleNoteAck = await workerMessage({ type: "runtime-note", instanceId: noteBlock.id, value: "stale", expectedValue: "" });
 assert.equal(staleNoteAck.ok, false);
 assert.equal((await runtimeApi.getStartPageRuntimeState()).notes[noteBlock.id], "first");

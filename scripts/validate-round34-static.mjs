@@ -31,9 +31,9 @@ assert.match(newtab, /!isFutureRuntimeSchema\(runtimeChange\.newValue\)/,
   "Future runtime schemas must never be silently normalized while suppressing refresh");
 
 assert.match(notes, /const noteSessions = new Map<string, NoteSession>\(\)/);
-assert.match(notes, /session\.draft\.observeCanonical\(canonicalValue\)/);
-assert.match(notes, /await session\.save\(attempt\.value, attempt\.expectedValue\)[\s\S]*session\.draft\.succeed\(attempt\)[\s\S]*session\.draft\.fail\(attempt\)/);
-assert.match(notes, /current !== session\.draft\.expectedValue[\s\S]*noteDraftOverwriteConfirm[\s\S]*rebaseForRetry\(current\)/);
+assert.match(notes, /session\.draft\.observeCanonical\(canonicalValue, context\.runtime\.updatedAt\)/);
+assert.match(notes, /await session\.save\(attempt\.value, attempt\.expectedValue\)[\s\S]*session\.draft\.succeed\(attempt, revision\)[\s\S]*session\.draft\.fail\(attempt\)/);
+assert.match(notes, /current !== session\.draft\.expectedValue[\s\S]*noteDraftOverwriteConfirm[\s\S]*rebaseForRetry\(current, currentRuntime\.updatedAt\)/);
 assert.match(noteDraft, /if \(!this\.hasUnsaved\)/);
 assert.match(noteDraft, /this\.baseline = attempt\.value/);
 assert.match(newtab, /!editor\.hasUnsavedChanges && !hasUnsavedNoteDrafts\(\)/);
@@ -84,3 +84,9 @@ for (const command of ["node scripts/run-round34-fixtures.mjs", "node scripts/va
 }
 
 console.log("Round 34 static validation passed");
+
+assert.doesNotMatch(notes, /context\.runtime\.notes\[block\.id\] = session\.draft\.value/);
+assert.match(notes, /textarea\.readOnly = session\.resolving/);
+assert.match(noteDraft, /revision < this\.canonical\.revision/);
+assert.match(newtab, /const next = refreshJob\.catch\(\(\) => undefined\)\.then/);
+assert.match(newtab, /const latestSettings = await getStartPageSettings\(\);[\s\S]*editor\.replaceSavedSettings\(savedSettings\)/);

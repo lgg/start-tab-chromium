@@ -81,7 +81,8 @@ let runtime: StartPageRuntimeState;
 let editor: LayoutEditor;
 let renderCleanups: Array<() => void> = [];
 let disposed = false;
-let runtimeMutationJob: Promise<void> = Promise.resolve();
+let runtimeMutationJob: Promise<unknown> = Promise.resolve();
+let refreshJob: Promise<void> = Promise.resolve();
 let onboardingOpening = false;
 let onboardingFinishing = false;
 let onboardingPreviousFocus: HTMLElement | null = null;
@@ -257,16 +258,15 @@ function render(): void {
     settings,
     runtime,
     setRuntime: async (mutation) => {
-      const operation = async (): Promise<void> => {
+      const operation = async (): Promise<number | undefined> => {
         switch (mutation.kind) {
           case "note":
-            await sendMessage({
+            return (await sendMessage({
               type: "runtime-note",
               instanceId: mutation.instanceId,
               value: mutation.value,
               expectedValue: mutation.expectedValue,
-            });
-            break;
+            })).runtimeUpdatedAt;
           case "tasks":
             await sendMessage({
               type: "runtime-tasks",
@@ -288,9 +288,9 @@ function render(): void {
       const next = runtimeMutationJob.catch(() => undefined).then(operation);
       runtimeMutationJob = next;
       try {
-        await next;
+        return await next;
       } catch (error) {
-        await recoverRuntimeMutation(error, {
+        return await recoverRuntimeMutation(error, {
           refresh: refreshState,
           announceConflict: () => announce(i18n.t("runtimeMutationConflict")),
           queueRender,
@@ -344,12 +344,21 @@ function queueStateRefresh(): void {
   renderScheduler.queueRefresh();
 }
 
-async function refreshState(): Promise<void> {
-  if (!editor.hasUnsavedChanges) {
-    savedSettings = await getStartPageSettings();
-    editor.replaceSavedSettings(savedSettings);
-  }
-  runtime = await getStartPageRuntimeState(editor.settings);
+function refreshState(): Promise<void> {
+  const next = refreshJob.catch(() => undefined).then(async () => {
+    if (disposed) return;
+    const latestSettings = await getStartPageSettings();
+    // Even a dirty editor needs the latest saved baseline for Cancel.
+    // LayoutEditor preserves its draft and original CAS token independently.
+    if (!disposed && latestSettings.updatedAt >= savedSettings.updatedAt) {
+      savedSettings = latestSettings;
+      editor.replaceSavedSettings(savedSettings);
+    }
+    const latestRuntime = await getStartPageRuntimeState(editor.settings);
+    if (!disposed && latestRuntime.updatedAt >= runtime.updatedAt) runtime = latestRuntime;
+  });
+  refreshJob = next;
+  return next;
 }
 
 async function onboardingState(): Promise<boolean> {
@@ -538,10 +547,7 @@ async function init(): Promise<void> {
     onSaved: (settings) => {
       savedSettings = settings;
       announce(i18n.t("layoutSaved"));
-      runUiTask(async () => {
-        runtime = await getStartPageRuntimeState(settings);
-        queueRender();
-      });
+      queueStateRefresh();
     },
     onError: reportUiError,
   });
