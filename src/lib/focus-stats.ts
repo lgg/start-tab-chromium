@@ -48,9 +48,22 @@ function emptyStats(): FocusStats {
     processedClockCompletions: createDictionary<number>(),
   };
 }
-function dayKey(date = new Date()): string { return date.toISOString().slice(0, 10); }
+// Keep counters JSON-safe and retain exact integer increments up to the
+// representable ceiling. Durations/minutes may be fractional.
+const MAX_STAT_VALUE = Number.MAX_SAFE_INTEGER;
+const MAX_EVENT_TIMESTAMP = 253_402_300_799_999; // 9999-12-31 UTC
+function eventTimestamp(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    && value <= MAX_EVENT_TIMESTAMP ? value : 0;
+}
+function dayKey(occurredAt: number): string {
+  if (!Number.isFinite(occurredAt) || occurredAt < 0 || occurredAt > MAX_EVENT_TIMESTAMP) {
+    throw new Error("Focus statistics event timestamp is outside the supported range");
+  }
+  return new Date(occurredAt).toISOString().slice(0, 10);
+}
 function ensureDay(stats: FocusStats, occurredAt = Date.now()): CountSet {
-  const key = dayKey(new Date(occurredAt));
+  const key = dayKey(occurredAt);
   const existing = ownValue(stats.byDay, key);
   if (existing) return existing;
   const created = { ...EMPTY_COUNTS };
@@ -66,7 +79,8 @@ function ensureDomain(stats: FocusStats, host: string): DomainStats {
 }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function nonNegativeNumber(value: unknown, fallback = 0): number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallback;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.min(MAX_STAT_VALUE, value) : fallback;
 }
 function normalizeCounts(value: unknown): CountSet {
   if (!isRecord(value)) return { ...EMPTY_COUNTS };
@@ -85,7 +99,7 @@ function normalizeDomainStats(value: unknown): DomainStats {
   return {
     blockHits: nonNegativeNumber(value.blockHits), avoidedVisits: nonNegativeNumber(value.avoidedVisits),
     estimatedMinutesSaved: nonNegativeNumber(value.estimatedMinutesSaved),
-    unblocksAfterCountdown: nonNegativeNumber(value.unblocksAfterCountdown), lastAvoidedAt: nonNegativeNumber(value.lastAvoidedAt),
+    unblocksAfterCountdown: nonNegativeNumber(value.unblocksAfterCountdown), lastAvoidedAt: eventTimestamp(value.lastAvoidedAt),
   };
 }
 
@@ -109,7 +123,7 @@ export function normalizeFocusStats(value: unknown): FocusStats {
   if (isRecord(value.byDomain)) for (const [host, domainStats] of Object.entries(value.byDomain)) if (host) stats.byDomain[host] = normalizeDomainStats(domainStats);
   if (isRecord(value.processedClockCompletions)) {
     const entries = Object.entries(value.processedClockCompletions)
-      .flatMap(([token, completedAt]) => typeof token === "string" && token.length <= 520 ? [[token, nonNegativeNumber(completedAt)] as const] : [])
+      .flatMap(([token, completedAt]) => typeof token === "string" && token.length <= 520 ? [[token, eventTimestamp(completedAt)] as const] : [])
       .filter((entry) => entry[1] > 0).sort((left, right) => right[1] - left[1]).slice(0, 512);
     const completions = createDictionary<number>();
     for (const [token, completedAt] of entries) completions[token] = completedAt;
@@ -139,15 +153,13 @@ async function mutateStats(mutator: (stats: FocusStats) => void): Promise<void> 
     await writeStatsInTransaction(stats);
   });
 }
+function addStat(left: number, right: number): number {
+  return Math.min(MAX_STAT_VALUE, nonNegativeNumber(left) + nonNegativeNumber(right));
+}
 function addToCounts(counts: CountSet, patch: Partial<CountSet>): void {
-  counts.blockHits += patch.blockHits ?? 0;
-  counts.avoidedVisits += patch.avoidedVisits ?? 0;
-  counts.estimatedMinutesSaved += patch.estimatedMinutesSaved ?? 0;
-  counts.unblocksAfterCountdown += patch.unblocksAfterCountdown ?? 0;
-  counts.focusSessionsStarted += patch.focusSessionsStarted ?? 0;
-  counts.focusSessionsCompleted += patch.focusSessionsCompleted ?? 0;
-  counts.focusSessionsInterrupted += patch.focusSessionsInterrupted ?? 0;
-  counts.focusTimeMs += patch.focusTimeMs ?? 0;
+  for (const key of Object.keys(EMPTY_COUNTS) as Array<keyof CountSet>) {
+    counts[key] = addStat(counts[key], patch[key] ?? 0);
+  }
 }
 
 export interface FocusClockStatsPatch {
@@ -161,7 +173,7 @@ export interface FocusClockStatsPatch {
 function normalizedFocusTimes(values: readonly number[] | undefined): number[] {
   return (values ?? [])
     .filter((value) => typeof value === "number" && Number.isFinite(value) && value > 0)
-    .map((value) => Math.max(0, value));
+    .map((value) => nonNegativeNumber(value));
 }
 
 function applyFocusClockStatsPatch(stats: FocusStats, patch: FocusClockStatsPatch): boolean {
@@ -171,28 +183,31 @@ function applyFocusClockStatsPatch(stats: FocusStats, patch: FocusClockStatsPatc
   if (completionId && ownValue(stats.processedClockCompletions, completionId)) return false;
 
   const startedSessions = typeof patch.startedSessions === "number" && Number.isFinite(patch.startedSessions)
-    ? Math.max(0, Math.round(patch.startedSessions))
+    ? nonNegativeNumber(Math.round(patch.startedSessions))
     : 0;
   const completedFocusTimeMs = typeof patch.completedFocusTimeMs === "number"
     && Number.isFinite(patch.completedFocusTimeMs)
     && patch.completedFocusTimeMs > 0
-    ? Math.max(0, patch.completedFocusTimeMs)
+    ? nonNegativeNumber(patch.completedFocusTimeMs)
     : 0;
   const interrupted = normalizedFocusTimes(patch.interruptedFocusTimesMs);
-  const interruptedFocusTimeMs = interrupted.reduce((total, value) => total + value, 0);
+  const interruptedFocusTimeMs = interrupted.reduce(addStat, 0);
   if (startedSessions === 0 && completedFocusTimeMs === 0 && interrupted.length === 0) return false;
 
+  const occurredAt = patch.occurredAt ?? Date.now();
+  // Validate the timestamp before changing any totals or completion tokens.
+  const day = ensureDay(stats, occurredAt);
   const countsPatch: Partial<CountSet> = {
     focusSessionsStarted: startedSessions,
     focusSessionsCompleted: completedFocusTimeMs > 0 ? 1 : 0,
     focusSessionsInterrupted: interrupted.length,
-    focusTimeMs: completedFocusTimeMs + interruptedFocusTimeMs,
+    focusTimeMs: addStat(completedFocusTimeMs, interruptedFocusTimeMs),
   };
   addToCounts(stats.totals, countsPatch);
-  addToCounts(ensureDay(stats, patch.occurredAt), countsPatch);
+  addToCounts(day, countsPatch);
 
   if (completionId) {
-    stats.processedClockCompletions[completionId] = Math.max(1, patch.occurredAt ?? Date.now());
+    stats.processedClockCompletions[completionId] = Math.max(1, occurredAt);
     const newest = Object.entries(stats.processedClockCompletions)
       .sort((left, right) => right[1] - left[1])
       .slice(0, 512);
@@ -229,18 +244,19 @@ export async function recordBlockedNavigation(host: string): Promise<void> {
     const now = Date.now();
     const dedupeMs = Math.max(1, settings.focusStats.avoidedVisitDedupeSeconds) * 1000;
     const stats = await readStats(true);
-    const day = ensureDay(stats);
+    const day = ensureDay(stats, now);
     const domain = ensureDomain(stats, host);
-    const isAvoidedVisit = now - domain.lastAvoidedAt >= dedupeMs;
+    const isAvoidedVisit = domain.lastAvoidedAt === 0 || now < domain.lastAvoidedAt
+      || now - domain.lastAvoidedAt >= dedupeMs;
     addToCounts(stats.totals, { blockHits: 1 });
     addToCounts(day, { blockHits: 1 });
-    domain.blockHits += 1;
+    domain.blockHits = addStat(domain.blockHits, 1);
     if (isAvoidedVisit) {
       const minutes = domainMinutes(host, settings);
       addToCounts(stats.totals, { avoidedVisits: 1, estimatedMinutesSaved: minutes });
       addToCounts(day, { avoidedVisits: 1, estimatedMinutesSaved: minutes });
-      domain.avoidedVisits += 1;
-      domain.estimatedMinutesSaved += minutes;
+      domain.avoidedVisits = addStat(domain.avoidedVisits, 1);
+      domain.estimatedMinutesSaved = addStat(domain.estimatedMinutesSaved, minutes);
       domain.lastAvoidedAt = now;
     }
     await writeStatsInTransaction(stats);
@@ -252,7 +268,7 @@ export async function recordUnblockAfterCountdown(host: string): Promise<void> {
     const domain = ensureDomain(stats, host);
     addToCounts(stats.totals, { unblocksAfterCountdown: 1 });
     addToCounts(day, { unblocksAfterCountdown: 1 });
-    domain.unblocksAfterCountdown += 1;
+    domain.unblocksAfterCountdown = addStat(domain.unblocksAfterCountdown, 1);
   });
 }
 export async function recordFocusSessionStarted(): Promise<void> {

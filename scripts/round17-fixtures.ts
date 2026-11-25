@@ -271,3 +271,41 @@ try {
   Date.now = originalNow71;
 }
 console.log("Round 71 queued clock timing regressions passed");
+
+const ceiling75 = Number.MAX_SAFE_INTEGER;
+localState.focusStats = {
+  version: 1,
+  totals: { focusTimeMs: 1e308, focusSessionsStarted: 1e308, blockHits: 1e308 },
+  byDay: { "1970-01-01": { focusTimeMs: 1e308 } },
+  byDomain: { "clock.example": { blockHits: 1e308, lastAvoidedAt: 99_000_000 } },
+  processedClockCompletions: { invalid: 1e308 },
+};
+let bounded75 = await focusApi.getFocusStats();
+assert.equal(bounded75.totals.focusTimeMs, ceiling75);
+assert.equal(bounded75.processedClockCompletions.invalid, undefined);
+await focusApi.applyFocusClockStatsPatchInExistingTransaction({
+  startedSessions: 1e308, completedFocusTimeMs: 1e308,
+  interruptedFocusTimesMs: [1e308, 1e308], completionId: "bounded", occurredAt: 1000,
+});
+bounded75 = await focusApi.getFocusStats();
+assert.equal(bounded75.totals.focusTimeMs, ceiling75);
+assert.equal(bounded75.byDay["1970-01-01"]?.focusTimeMs, ceiling75);
+assert.equal(bounded75.totals.focusSessionsStarted, ceiling75);
+assert.equal(JSON.parse(JSON.stringify(bounded75)).totals.focusTimeMs, ceiling75, "Persisted focus statistics must remain JSON-safe after extreme inputs");
+const beforeInvalid75 = structuredClone(localState.focusStats);
+await assert.rejects(() => focusApi.applyFocusClockStatsPatchInExistingTransaction({
+  startedSessions: 1, occurredAt: Number.NaN,
+}), /timestamp is outside/);
+assert.deepEqual(localState.focusStats, beforeInvalid75, "Invalid event times must not partially mutate stored statistics");
+const wall75 = Date.now;
+try {
+  Date.now = () => 10_000;
+  await focusApi.recordBlockedNavigation("clock.example");
+  await focusApi.recordBlockedNavigation("clock.example");
+  await focusApi.recordBlockedNavigation("first.example");
+  const afterClockRollback75 = await focusApi.getFocusStats();
+  assert.equal(afterClockRollback75.byDomain["clock.example"]?.blockHits, ceiling75);
+  assert.equal(afterClockRollback75.byDomain["clock.example"]?.avoidedVisits, 1, "Clock rollback must not suppress future avoidance counting indefinitely");
+  assert.equal(afterClockRollback75.byDomain["first.example"]?.avoidedVisits, 1, "First visit must count even near the start of the time range");
+} finally { Date.now = wall75; }
+console.log("Round 75 finite focus statistics and clock rollback regressions passed");
