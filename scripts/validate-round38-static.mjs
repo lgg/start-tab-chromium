@@ -90,3 +90,10 @@ for (const phrase of ["locale catalogs", "fail closed", "stale writes", "setting
 }
 
 console.log("Round 38 static validation passed");
+
+const locale110 = read("src/lib/i18n.ts");
+assert.match(locale110, /return loadI18nForPreference\(await withStorageLock\("data-write", getLocalePreference\)\)/);
+assert.match(options, /async function reloadState\(preserveGeneral = false\)[\s\S]*const nextI18n = !i18n \|\| \(!preserveGeneral && i18n\.preference !== nextLocale\)[\s\S]*await loadI18nForPreference\(nextLocale\)[\s\S]*settings = nextSettings[\s\S]*i18n = nextI18n/);
+assert.match(options, /async function init\(\): Promise<void> \{\s*await reloadState\(\);\s*render\(\);/);
+assert.match(options, /await reloadState\(savingGeneral \|\| Boolean\(generalDraft\?\.state\.isDirty\(generalDraft\.signature\(\)\)\)\)/);
+assert.doesNotMatch(options, /location\.reload\(\)/, "Options must rebuild from the committed locale without dropping the page");

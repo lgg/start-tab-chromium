@@ -39,8 +39,12 @@ assert.match(integrations, /recentHistory[\s\S]*visibleWebUrlItems\(items, maxRe
 assert.match(integrations, /browserPinnedTabs[\s\S]*visibleWebUrlItems\(tabs\)/);
 
 assert.match(options, /const localeChanged = locale\.value !== baseLocale/);
-assert.match(options, /if \(localeChanged\) \{[\s\S]*if \(!settingsChanged\) await setLocalePreference\(preference, baseLocale\);[\s\S]*location\.reload\(\)/,
-  "Switching back to automatic locale detection must apply immediately");
+assert.match(options, /if \(localeChanged\) \{[\s\S]*if \(!settingsChanged\) await setLocalePreference\(preference, baseLocale\);[\s\S]*draftState\.acknowledge\(signature\(\)\)/,
+  "Explicit and automatic locale selection must commit before acknowledging the draft");
+assert.match(options, /await reloadState\(\);\s*render\(\);[\s\S]*actionGuard\.markRefreshed\(\)/,
+  "Successful Options mutations must reload the committed view immediately");
+assert.match(options, /await loadI18nForPreference\(nextLocale\)/,
+  "Options must apply the committed language, including Auto, during refresh");
 assert.doesNotMatch(options, /locale\.value !== "auto"\) location\.reload/);
 
 assert.match(editor, /function providersEditor\([\s\S]*onChange: \(providers: SearchProvider\[\]\) => void/,

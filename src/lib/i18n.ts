@@ -109,7 +109,12 @@ export function renderTemplate(template: string, replacements: Record<string, st
 }
 
 export async function loadI18n(): Promise<I18n & { preference: LocalePreference }> {
-  const preference = await withStorageLock("data-write", getLocalePreference);
+  return loadI18nForPreference(await withStorageLock("data-write", getLocalePreference));
+}
+
+/** Use the preference captured with a committed view snapshot rather than
+ * independently reading storage and mixing two different generations. */
+export async function loadI18nForPreference(preference: LocalePreference): Promise<I18n & { preference: LocalePreference }> {
   const preferredLocale = detectLocale(preference);
   const defaultCatalog = await loadCatalog(DEFAULT_LOCALE);
   const { locale, catalog } = await mergeCatalogs(preferredLocale, defaultCatalog);
