@@ -15,7 +15,7 @@ export type ClockAction = "toggle" | "reset";
 export type Message =
   | { type: "block"; host: string }
   | { type: "unblock"; host: string }
-  | { type: "clear" }
+  | { type: "clear"; expectedSites: string[] }
   | { type: "replace-blocked-sites"; sites: string[] }
   | { type: "open-native-new-tab" }
   | { type: "reset-start-page" }
@@ -60,6 +60,9 @@ export function isMessage(value: unknown): value is Message {
     case "record-unblock":
       return typeof value.host === "string" && value.host.length <= 2048;
     case "clear":
+      return Array.isArray(value.expectedSites)
+        && value.expectedSites.length <= MAX_BLOCKED_SITES
+        && value.expectedSites.every((site) => typeof site === "string" && site.length > 0 && site.length <= 2048);
     case "open-native-new-tab":
     case "reset-start-page":
     case "reset-clocks":

@@ -677,8 +677,9 @@ function renderBlocker(): HTMLElement {
   const clear = button(i18n.t("clearBlocklist"), "button button--danger");
   clear.disabled = blockedSites.length === 0;
   clear.addEventListener("click", () => {
+    const expectedSites = [...blockedSites];
     if (!window.confirm(i18n.t("clearBlocklistConfirm"))) return;
-    void runAction(clearAll, i18n.t("blocklistCleared"));
+    void runAction(() => clearAll(expectedSites), i18n.t("blocklistCleared"));
   });
   item.body.append(form, list, actionRow(clear));
   return item.root;

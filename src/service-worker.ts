@@ -171,7 +171,7 @@ async function handle(message: Message): Promise<HandlerResult | void> {
   switch (message.type) {
     case "block": await blockHost(message.host); break;
     case "unblock": return { changed: await unblockHost(message.host) };
-    case "clear": await clearAll(); break;
+    case "clear": await clearAll(message.expectedSites); break;
     case "replace-blocked-sites": await replaceBlockedSites(message.sites); break;
     case "open-native-new-tab": await runNativeTabJob(openNativeNewTab); break;
     case "reset-start-page": await runRuntimeJob(async () => { await resetStartPageData(); }); break;

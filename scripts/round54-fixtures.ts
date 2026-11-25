@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   normalizeStartPageSettings,
+  getStartPageSettings,
   updateBlockInstance,
   updateCustomTheme,
 } from "../src/lib/start-page-settings.js";
@@ -90,8 +91,39 @@ try {
   const saved = normalizeStartPageSettings(stored.startPageSettings);
   assert.equal(saved.layout.blocks[0]!.title, "New note");
   assert.equal(saved.themes.customThemes[0]!.name, "New theme");
+
+  // An older/partially normalized snapshot can have future edit tokens
+  // after system time changes. Migration must not reset them to Date.now().
+  stored.startPageSettings = {
+    schemaVersion: 4, updatedAt: fixed + 20,
+    layout: { mode: "free", blocks: [{ type: "note", id: "migration-note", updatedAt: fixed + 40 }] },
+    themes: { selectedThemeId: "migration-theme", customThemes: [{ id: "migration-theme", name: "Theme", updatedAt: fixed + 50 }] },
+  };
+  const migrated = await getStartPageSettings();
+  assert.ok(migrated.updatedAt > fixed + 50, "Migration revision must exceed all previous edit tokens");
+  assert.equal(migrated.layout.blocks[0]!.updatedAt, migrated.updatedAt);
+  assert.equal(migrated.themes.customThemes[0]!.updatedAt, migrated.updatedAt);
+  assert.deepEqual(await getStartPageSettings(), migrated, "Repeated normalized reads must not advance migration tokens");
+  await assert.rejects(() => updateBlockInstance("migration-note", (block) => block, fixed + 40), /changed in another extension context/);
 } finally {
   Date.now = originalNow;
   Reflect.deleteProperty(globalThis, "chrome");
 }
 console.log("Round 54 stable entity identity and monotonic revision fixtures passed");
+
+const taskSettings = normalizeStartPageSettings({ schemaVersion: 4, layout: { mode: "free", blocks: [{ id: "tasks", type: "localTasks" }] } });
+const taskData = normalizeRuntimeState({ version: 2, tasks: { tasks: [
+  { id: "duplicate", title: "first" },
+  { id: "duplicate", title: "second" },
+  { id: "duplicate-2", title: "reserved" },
+  { id: longId, title: "long first" },
+  { id: longId, title: "long duplicate" },
+  { id: reserved, title: "long reserved" },
+] } }, taskSettings);
+assert.deepEqual(taskData.tasks.tasks!.map((task) => task.id), ["duplicate", "duplicate-3", "duplicate-2", longId, longId.slice(0, 158) + "-3", reserved]);
+assert.deepEqual(normalizeRuntimeState(taskData, taskSettings), taskData);
+const generatedTaskId = normalizeRuntimeState({ version: 2, tasks: { tasks: [{ title: "missing ID" }] } }, taskSettings).tasks.tasks![0]!.id;
+const explicitCollision = normalizeRuntimeState({ version: 2, tasks: { tasks: [{ title: "missing ID" }, { id: generatedTaskId, title: "explicit ID" }] } }, taskSettings);
+assert.notEqual(explicitCollision.tasks.tasks![0]!.id, generatedTaskId);
+assert.equal(explicitCollision.tasks.tasks![1]!.id, generatedTaskId);
+console.log("Round 64 task identity and migration revision regressions passed");
