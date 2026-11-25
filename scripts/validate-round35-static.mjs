@@ -199,3 +199,13 @@ assert.match(newtab, /runUiTask\(reconcileCommittedLocale\)/);
 const init102 = newtab.slice(newtab.indexOf("async function init()"));
 assert.match(init102, /chrome\.storage\.onChanged\.addListener\(handleStorageChange\)[\s\S]*await refreshState\(\);[\s\S]*await reconcileCommittedLocale\(\)[\s\S]*render\(\);/,
   "Subscribe before the startup state and locale catch-up so initialization cannot miss earlier committed changes");
+
+const commands105 = read("src/newtab/block-renderers-integrations.ts");
+const commandGate105 = read("src/newtab/command-action-gate.ts");
+assert.match(commands105, /const destructiveCommands = new CommandActionGate\(\)/);
+assert.match(commands105, /if \(!button\.isConnected\) return;[\s\S]*destructiveCommands\.run/);
+assert.match(commands105, /context\.registerCleanup\(unsubscribe\)/);
+assert.match(commands105, /resetCommandButton\("reset-clocks"/);
+assert.match(commands105, /resetCommandButton\("reset-stats"/);
+assert.doesNotMatch(commands105, /getStartPageRuntimeState/);
+assert.match(commandGate105, /await mutate\(\);\s*\} finally \{[\s\S]*refresh\(\);/);
