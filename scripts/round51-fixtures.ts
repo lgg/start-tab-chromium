@@ -13,6 +13,9 @@ let updateHandler: UpdateHandler = async () => undefined;
 let updatedUrls: string[] = [];
 let removedTabs: number[] = [];
 let nextTabId = 51;
+let liveUrl99 = "about:blank";
+let pendingUrl99: string | undefined;
+let inaccessible99 = false;
 let storageSetHook: ((items: Record<string, unknown>) => Promise<void>) | null = null;
 let storageRemoveHook: ((keys: string | string[]) => Promise<void>) | null = null;
 
@@ -22,6 +25,9 @@ function resetState(): void {
   updatedUrls = [];
   removedTabs = [];
   nextTabId = 51;
+  liveUrl99 = "about:blank";
+  pendingUrl99 = undefined;
+  inaccessible99 = false;
   storageSetHook = null;
   storageRemoveHook = null;
 }
@@ -48,11 +54,16 @@ const mockChrome = {
   storage: { local: localStorageMock },
   tabs: {
     async create(): Promise<chrome.tabs.Tab> {
-      return { id: nextTabId } as chrome.tabs.Tab;
+      return { id: nextTabId, url: liveUrl99 } as chrome.tabs.Tab;
+    },
+    async get(tabId: number): Promise<chrome.tabs.Tab> {
+      if (inaccessible99) throw new Error("Tab unavailable");
+      return { id: tabId, url: liveUrl99, pendingUrl: pendingUrl99 } as chrome.tabs.Tab;
     },
     async update(tabId: number, properties: chrome.tabs.UpdateProperties): Promise<chrome.tabs.Tab> {
       const url = properties.url ?? "";
       updatedUrls.push(url);
+      liveUrl99 = url;
       await updateHandler(tabId, url);
       return { id: tabId, url } as chrome.tabs.Tab;
     },
@@ -196,3 +207,35 @@ assert.equal(finalBypass.expiresAt, grantExpiries[1],
 assert.equal(typeof finalBypass.consumedAt, "number");
 
 console.log("Round 51 native new-tab fixtures passed");
+
+resetState();
+updateHandler = async () => {
+  liveUrl99 = "https://example.com/user-page";
+  delete storage[NATIVE_NEW_TAB_BYPASS_KEY];
+};
+await assert.rejects(openNativeNewTab({ consumptionTimeoutMs: 20, pollIntervalMs: 1 }), /browser rejected/);
+assert.equal(updatedUrls.length, 1, "A user-owned destination must not be overwritten by a fallback");
+assert.deepEqual(removedTabs, [], "A user-owned tab must never be closed by cleanup");
+
+resetState();
+storageSetHook = async () => { pendingUrl99 = "https://example.com/pending"; };
+await assert.rejects(openNativeNewTab({ consumptionTimeoutMs: 20, pollIntervalMs: 1 }), /browser rejected/);
+assert.equal(updatedUrls.length, 0, "A user navigation during bypass publication must win");
+assert.deepEqual(removedTabs, []);
+assert.equal(storage[NATIVE_NEW_TAB_BYPASS_KEY], undefined);
+
+resetState();
+updateHandler = async () => {
+  inaccessible99 = true;
+  delete storage[NATIVE_NEW_TAB_BYPASS_KEY];
+};
+await assert.rejects(openNativeNewTab({ consumptionTimeoutMs: 20, pollIntervalMs: 1 }), /browser rejected/);
+assert.equal(updatedUrls.length, 1);
+assert.deepEqual(removedTabs, [], "An inaccessible tab is not known to be temporary");
+
+resetState();
+updateHandler = async () => undefined;
+storageRemoveHook = async () => { liveUrl99 = "https://example.com/late"; };
+await assert.rejects(openNativeNewTab({ consumptionTimeoutMs: 20, pollIntervalMs: 1 }), /browser rejected/);
+assert.deepEqual(removedTabs, [], "A late user navigation during grant cleanup must be preserved");
+console.log("Round 99 native tab ownership regressions passed");

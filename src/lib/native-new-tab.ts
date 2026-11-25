@@ -58,6 +58,18 @@ async function removeOwnedBypass(tabId: number): Promise<void> {
   });
 }
 
+/** Only a tab whose live and pending URLs belong to this attempt may be
+ * navigated or removed. Failure to inspect the tab is not proof of ownership. */
+async function stillOwnsTemporaryTab(tabId: number, attempted: ReadonlySet<string>): Promise<boolean> {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const urls = [tab.url, tab.pendingUrl].filter((url): url is string => typeof url === "string" && url.length > 0);
+    return tab.id === tabId && urls.length > 0 && urls.every((url) => attempted.has(url));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Open the browser-owned new-tab page without leaving an orphan about:blank tab
  * when every browser-specific URL is rejected or bypass consumption times out.
@@ -69,10 +81,16 @@ export async function openNativeNewTab(options: NativeNewTabOpenOptions = {}): P
   if (typeof tab.id !== "number") throw new Error("The browser did not return a tab id");
   const tabId = tab.id;
   const failures: unknown[] = [];
+  const attempted = new Set(["about:blank"]);
 
   for (const url of NATIVE_NEW_TAB_URLS) {
+    if (!await stillOwnsTemporaryTab(tabId, attempted)) break;
     try {
       const expiresAt = await writeOwnedBypass(tabId, timeoutMs);
+      // The grant write can wait behind another consumer. Recheck after it,
+      // before issuing a browser navigation that could replace user content.
+      if (!await stillOwnsTemporaryTab(tabId, attempted)) break;
+      attempted.add(url);
       await chrome.tabs.update(tabId, { url });
       if (await waitForNativeBypassConsumption(tabId, expiresAt, pollIntervalMs)) return;
       failures.push(new Error(`Native new-tab bypass was not consumed for ${url}`));
@@ -89,7 +107,7 @@ export async function openNativeNewTab(options: NativeNewTabOpenOptions = {}): P
     cleanupErrors.push(error);
   }
   try {
-    await chrome.tabs.remove(tabId);
+    if (await stillOwnsTemporaryTab(tabId, attempted)) await chrome.tabs.remove(tabId);
   } catch (error) {
     cleanupErrors.push(error);
   }

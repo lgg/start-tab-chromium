@@ -131,3 +131,6 @@ assert.match(chromeSync, /snapshot\.contentChecksum !== restoredChecksum/);
 
 assert.match(google, /Google Calendar event listing did not advance/);
 assert.match(google, /Google Calendar event listing exceeded the safe pagination limit/);
+
+assert.match(google, /nextPageToken,incompleteSearch,files\(id,name,modifiedTime\)/);
+assert.match(google, /if \(payload\.incompleteSearch !== undefined && payload\.incompleteSearch !== false\)[\s\S]*throw new Error\("Google Drive backup search is incomplete/);

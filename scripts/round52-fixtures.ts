@@ -640,3 +640,43 @@ try {
   globalThis.fetch = originalFetch;
 }
 console.log("Round 95 complete calendar pagination regressions passed");
+
+resetState();
+localStorage = localData("drive-incomplete.example", REVISION_BASE + 10000);
+const before100 = clone(localStorage);
+let requests100 = 0;
+try {
+  for (const payload100 of [
+    { files: [], incompleteSearch: true },
+    { files: [{ id: "older", name: "start-tab-backup.json" }], incompleteSearch: true },
+    { files: [], incompleteSearch: "invalid" },
+    { files: [], nextPageToken: " " },
+  ]) {
+    globalThis.fetch = async (input, init) => {
+      requests100++;
+      const url = new URL(String(input));
+      assert.equal(init?.method, undefined, "An incomplete search must not create or overwrite a backup");
+      assert.ok(url.searchParams.get("fields")?.includes("incompleteSearch"));
+      assert.equal(url.searchParams.get("spaces"), "appDataFolder", "Incomplete search must not download an arbitrary backup");
+      return Response.json(payload100);
+    };
+    await assert.rejects(() => google.uploadDriveBackup(), /incomplete|did not advance/);
+    await assert.rejects(() => google.restoreDriveBackup(), /incomplete|did not advance/);
+    assert.deepEqual(localStorage, before100, "Incomplete Drive results must not change local data or recovery state");
+  }
+  assert.equal(requests100, 8, "Every incomplete listing must fail before a second request");
+  requests100 = 0;
+  globalThis.fetch = async (input, init) => {
+    requests100++;
+    const url = new URL(String(input));
+    if (url.searchParams.get("spaces") === "appDataFolder") {
+      return Response.json({ files: [{ id: "complete", name: "start-tab-backup.json" }], incompleteSearch: false });
+    }
+    assert.equal(init?.method, "PATCH");
+    assert.match(url.pathname, /\/complete$/);
+    return Response.json({ id: "complete" });
+  };
+  await google.uploadDriveBackup();
+  assert.equal(requests100, 2, "A complete listing must still permit a normal backup upload");
+} finally { globalThis.fetch = originalFetch; }
+console.log("Round 100 Google Drive incomplete search regressions passed");
