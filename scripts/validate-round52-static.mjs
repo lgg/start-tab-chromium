@@ -78,7 +78,7 @@ assert.match(chromeSync, /storedDataRevision: captured\.storedDataRevision/);
 assert.match(chromeSync, /expectedCurrentStoredDataRevision: guard\.storedDataRevision/);
 assert.match(chromeSync, /assertStartTabDataRevisionUnchanged\(guard\.dataRevision, guard\.dataRevisionFallback, message, guard\.storedDataRevision\)/);
 assert.match(chromeSync, /withStorageLock\("data-write",[\s\S]*if \(meta\) await writeLocalMeta\(meta\)/);
-assert.match(chromeSync, /expectedRemote !== undefined && !parsedMetaEqual\(await readRemoteMeta\(\), expectedRemote\)/);
+assert.match(chromeSync, /else if \(expectedRemote !== undefined\) \{\s*if \(!parsedMetaEqual\(await readRemoteMeta\(\), expectedRemote\)\) throw new ChromeSyncRemoteConflictError\(\)/);
 assert.match(google, /expectedCurrentStoredDataRevision: localBeforeNetwork\.storedDataRevision/);
 assert.match(google, /snapshot\.storedDataRevision\)\)/);
 

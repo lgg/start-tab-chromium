@@ -26,8 +26,10 @@ assert.match(round14Fixtures, /forced asynchronous alarm rejection/,
   "The fixture suite must inject an asynchronously rejected alarm creation");
 assert.match(newtabSource, /recoverRuntimeMutation\(error/,
   "Runtime mutations must use failure-safe canonical state recovery");
-assert.match(serviceWorkerSource, /runIndependentEffects\(effects/,
-  "Clock completion effects must fail independently");
+assert.match(serviceWorkerSource, /const result = await completeClockInstance[\s\S]*try \{[\s\S]*await chrome\.notifications\.create[\s\S]*catch \(error\) \{[\s\S]*return \{ notificationFailed: true \}/,
+  "Optional notification errors must not invalidate committed clock completion");
+assert.match(serviceWorkerSource, /await runIndependentEffects\(\[/,
+  "Independent startup repair effects must still be attempted");
 assert.match(effectsSource, /for \(const effect of effects\)/,
   "Every independent completion effect must be attempted");
 assert.match(effectsSource, /new AggregateError/,

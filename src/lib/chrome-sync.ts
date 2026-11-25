@@ -362,8 +362,12 @@ async function writeRemoteSnapshot(
     assertCompatibleSyncMeta(current[META_KEY], "remote");
     if (parseMeta(current[META_KEY]) !== null) throw new ChromeSyncRemoteConflictError();
     assertEmptyRemoteFrame(current);
-  } else if (expectedRemote !== undefined && !parsedMetaEqual(await readRemoteMeta(), expectedRemote)) {
-    throw new ChromeSyncRemoteConflictError();
+  } else if (expectedRemote !== undefined) {
+    if (!parsedMetaEqual(await readRemoteMeta(), expectedRemote)) throw new ChromeSyncRemoteConflictError();
+  } else {
+    // Explicit Upload may replace a damaged/older frame, but not future
+    // metadata that arrived after the initial full-frame compatibility check.
+    await readRemoteMeta();
   }
   await chrome.storage.sync.set(payload);
   const committed = await readRemoteMeta();
@@ -447,7 +451,17 @@ async function restoreParsedSnapshot(parsed: ParsedMeta, guard: LocalRevisionGua
 }
 async function restoreChromeSyncBackupInTransaction(guard: LocalRevisionGuard): Promise<void> {
   const parsed = await readRemoteMeta();
-  if (!parsed) throw new Error("No Start Tab backup found in chrome.storage.sync");
+  if (!parsed) {
+    const current = await chrome.storage.sync.get(null);
+    assertCompatibleSyncMeta(current[META_KEY], "remote");
+    if (parseMeta(current[META_KEY])) {
+      throw new Error("Chrome sync backup changed while restore was being prepared; retry restore");
+    }
+    // Unlike explicit upload, restore cannot use an incomplete frame.
+    // Distinguish missing data from existing damaged/partly replicated data.
+    assertEmptyRemoteFrame(current);
+    throw new Error("No Start Tab backup found in chrome.storage.sync");
+  }
   await restoreParsedSnapshot(parsed, guard);
 }
 export async function restoreChromeSyncBackup(): Promise<void> {
