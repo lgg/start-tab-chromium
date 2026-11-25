@@ -225,9 +225,34 @@ function currentSchema(storage: Record<string, unknown>, exportedAt: string, sna
   };
 }
 
+/** Do not convert a truncated or unrelated payload into a destructive
+ * default-state restore. Legacy partial backups are still accepted when
+ * they contain actual recognized data; absent optional fields stay valid. */
+function assertBackupPayload(storage: Record<string, unknown>): void {
+  const arrayKeys = ["blockedSites", LEGACY_BLOCKED_SITES_KEY];
+  const objectKeys = [START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY, FOCUS_STATS_KEY];
+  if (![...arrayKeys, ...objectKeys].some((key) => Object.hasOwn(storage, key))) {
+    throw new Error("Start Tab backup contains no recognized data sections");
+  }
+  for (const key of arrayKeys) {
+    if (Object.hasOwn(storage, key) && !Array.isArray(storage[key])) {
+      throw new Error(`Invalid Start Tab backup section: ${key}`);
+    }
+    if (Array.isArray(storage[key]) && !(storage[key] as unknown[]).every((item) => typeof item === "string")) {
+      throw new Error(`Invalid Start Tab backup section: ${key}`);
+    }
+  }
+  for (const key of objectKeys) {
+    if (Object.hasOwn(storage, key) && !isRecord(storage[key])) {
+      throw new Error(`Invalid Start Tab backup section: ${key}`);
+    }
+  }
+}
+
 export function migrateBackup(value: unknown): BackupBundle {
   if (!isBackupLike(value)) throw new Error("Invalid Start Tab backup file");
   assertSupportedSchemas(value.storage);
+  assertBackupPayload(value.storage);
   return currentSchema(
     normalizedStorage(value.storage),
     value.exportedAt,
