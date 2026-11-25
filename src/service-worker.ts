@@ -83,6 +83,7 @@ interface HandlerResult {
   blockedUrl?: string;
   savedTasks?: LocalTask[];
   savedLinkPage?: number;
+  notificationFailed?: true;
 }
 
 type ClockBlock = Extract<BlockInstance, { type: "timer" | "stopwatch" | "pomodoro" }>;
@@ -198,7 +199,7 @@ async function handle(message: Message, sender: chrome.runtime.MessageSender): P
       )),
     };
     case "clock-action": await runRuntimeJob(() => performClockAction(message.instanceId, message.action)); break;
-    case "complete-clock": await runRuntimeJob(() => finishClockCompletion(message.instanceId, message.token)); break;
+    case "complete-clock": return runRuntimeJob(() => finishClockCompletion(message.instanceId, message.token));
     case "reset-clocks": await runRuntimeJob(resetAllClocks); break;
     case "runtime-note": return { runtimeUpdatedAt: await runRuntimeJob(() => updateRuntimeNote(message.instanceId, message.value, message.expectedValue)) };
     case "runtime-tasks": return runRuntimeJob(() => updateRuntimeTasks(message.instanceId, message.tasks, message.expectedTasks));
@@ -334,24 +335,27 @@ async function finishClockAlarm(instanceId: string, token: string): Promise<void
   await rearmClockAlarmIfPending(instanceId, token, 100);
 }
 
-async function finishClockCompletion(instanceId: string, token: string): Promise<void> {
+async function finishClockCompletion(instanceId: string, token: string): Promise<HandlerResult | void> {
   const result = await completeClockInstance(instanceId, token);
   // completeClockInstance performs the same durable scheduleClockAlarm reconciliation atomically.
   if (!result.completed || !result.block || !result.clock) return;
   const block = result.block;
-  const effects: Array<() => Promise<void>> = [];
-  if (result.notify) {
-    const messageKey = block.type === "pomodoro" ? "pomodoroDone" : "timerDone";
-    effects.push(async () => {
-      await chrome.notifications.create(`start-tab-clock-${instanceId}-${token}`, {
-        type: "basic",
-        iconUrl: "icons/icon.128.png",
-        title: blockUsesDefaultTitle(block) ? await workerMessage(blockTitleKey(block.type)) : block.title,
-        message: await workerMessage(messageKey),
-      });
+  if (!result.notify) return;
+  const messageKey = block.type === "pomodoro" ? "pomodoroDone" : "timerDone";
+  try {
+    await chrome.notifications.create(`start-tab-clock-${instanceId}-${token}`, {
+      type: "basic",
+      iconUrl: "icons/icon.128.png",
+      title: blockUsesDefaultTitle(block) ? await workerMessage(blockTitleKey(block.type)) : block.title,
+      message: await workerMessage(messageKey),
     });
+  } catch (error) {
+    // Runtime, statistics and next-phase alarms have already committed.
+    // Never report a failed clock mutation or retry its completion solely
+    // because the optional notification could not be delivered.
+    console.warn("Start Tab clock completed, but its notification failed", error);
+    return { notificationFailed: true };
   }
-  await runIndependentEffects(effects, "Clock completed but one or more secondary effects failed");
 }
 
 async function workerMessage(key: string): Promise<string> {

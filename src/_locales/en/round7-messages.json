@@ -106,5 +106,8 @@
   },
   "popupLanguageSavedRefreshFailed": {
     "message": "Language saved, but the popup could not refresh. Reopen the popup."
+  },
+  "clockCompletedNotificationFailed": {
+    "message": "The clock completed, but its notification could not be delivered."
   }
 }

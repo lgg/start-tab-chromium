@@ -71,7 +71,10 @@ export function renderClock(
     update();
     try {
       await settleClockMutation(
-        async () => { await sendMessage({ type: "complete-clock", instanceId: block.id, token }); },
+        async () => {
+          const ack = await sendMessage({ type: "complete-clock", instanceId: block.id, token });
+          if (ack.notificationFailed) context.reportError(new Error(context.i18n.t("clockCompletedNotificationFailed")));
+        },
         async () => { await refreshClock(block, context); },
         (error) => context.reportError(new Error(context.i18n.t("runtimeSavedRefreshFailed"), { cause: error })),
       );
