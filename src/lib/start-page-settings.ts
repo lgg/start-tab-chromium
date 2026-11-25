@@ -218,7 +218,19 @@ export async function getStartPageSettings(): Promise<StartPageSettings> {
     const { settings, report } = normalizeStartPageSettingsWithReport(currentRaw);
     if (isFutureStartPageSchema(currentRaw)) return settings;
     if (jsonContentEqual(currentRaw, settings)) return settings;
-    const stamped = withBlockTimestamps(null, settings, Date.now());
+    // Migration changes the persisted snapshot even when the wall clock
+    // moved backward. Invalidate every old entity token monotonically.
+    const floor = Math.max(settings.updatedAt,
+      ...settings.layout.blocks.map((block) => block.updatedAt),
+      ...settings.themes.customThemes.map((theme) => theme.updatedAt));
+    const migratedAt = nextEntityRevision(floor);
+    const stamped = withBlockTimestamps(null, {
+      ...settings,
+      themes: {
+        ...settings.themes,
+        customThemes: settings.themes.customThemes.map((theme) => ({ ...theme, updatedAt: migratedAt })),
+      },
+    }, migratedAt);
     await persistSettingsInTransaction(stamped, report);
     return stamped;
   });
@@ -268,7 +280,7 @@ export function prepareStartPageSettingsWrite(
   }
   assertStartPageSettingsCapacity(value);
   const validation = validateStartPageSettings(value);
-  const stamped = withBlockTimestamps(previous, validation.value, Math.max(Date.now(), previous.updatedAt + 1));
+  const stamped = withBlockTimestamps(previous, validation.value, nextEntityRevision(previous.updatedAt));
   return { settings: stamped, issues: validation.issues };
 }
 

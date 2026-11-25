@@ -3,6 +3,7 @@ import { cloneDictionary, createDictionary, ownValue } from "./dictionary.js";
 import { runIndependentEffects } from "./independent-effects.js";
 import { jsonContentEqual } from "./json-content.js";
 import { withStorageLock } from "./storage-lock.js";
+import { uniqueEntityId } from "./start-page-validation-primitives.js";
 import { MAX_LOCAL_TASKS_PER_INSTANCE, MAX_NOTE_LENGTH } from "./platform-limits.js";
 import { sendMessage } from "./messages.js";
 import {
@@ -151,19 +152,22 @@ function normalizeTask(value: unknown, index: number): LocalTask | null {
 
 function normalizeTaskList(value: unknown): LocalTask[] {
   if (!Array.isArray(value)) return [];
-  const seen = new Set<string>();
-  return value.slice(0, MAX_LOCAL_TASKS_PER_INSTANCE).flatMap((item, index) => {
+  const candidates = value.slice(0, MAX_LOCAL_TASKS_PER_INSTANCE).flatMap((item, index) => {
     const task = normalizeTask(item, index);
     if (!task) return [];
-    const baseId = task.id;
-    let id = baseId;
-    let suffix = 2;
-    while (seen.has(id)) {
-      id = `${baseId.slice(0, Math.max(1, 160 - String(suffix).length - 1))}-${suffix}`;
-      suffix += 1;
-    }
+    const explicit = isRecord(item) && typeof item.id === "string" && item.id.trim().length > 0;
+    return [{ task, explicit }];
+  });
+  const seen = new Set<string>();
+  const reserved = new Set(candidates.map(({ task }) => task.id));
+  const explicitIds = new Set(candidates.filter(({ explicit }) => explicit).map(({ task }) => task.id));
+  return candidates.map(({ task, explicit }) => {
+    // A generated ID must not take an explicitly supplied later task ID.
+    const occupied = !explicit && explicitIds.has(task.id)
+      ? new Set([...seen, task.id]) : seen;
+    const id = uniqueEntityId(task.id, occupied, reserved);
     seen.add(id);
-    return [{ ...task, id }];
+    return { ...task, id };
   });
 }
 

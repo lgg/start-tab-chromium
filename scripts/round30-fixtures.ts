@@ -194,3 +194,24 @@ try {
 }
 
 console.log("Round 30 fixtures passed");
+
+const { isMessage } = await import("../src/lib/messages.js");
+assert.equal(isMessage({ type: "clear" }), false, "A stale or malformed page message must not perform an unconditional clear");
+assert.equal(isMessage({ type: "clear", expectedSites: ["a.example"] }), true);
+assert.equal(isMessage({ type: "clear", expectedSites: [123] }), false);
+resetState();
+storage = { blockedSites: ["a.example"], startTabDataRevision: { version: 1, updatedAt: 10 } };
+await blocklist.syncRules();
+const confirmedSites = await blocklist.getBlockedSites();
+await blocklist.blockHost("b.example");
+const beforeClear = clone(storage);
+const beforeClearRules = clone(dynamicRules);
+const beforeClearUpdates = dynamicRuleUpdates;
+await assert.rejects(() => blocklist.clearAll(confirmedSites), /blocklist changed in another extension context/);
+assert.deepEqual(storage, beforeClear, "A rejected clear must preserve newly added sites and their revision");
+assert.deepEqual(dynamicRules, beforeClearRules, "A rejected clear must leave enforced rules untouched");
+assert.equal(dynamicRuleUpdates, beforeClearUpdates);
+await blocklist.clearAll(["b.example", "a.example"]);
+assert.deepEqual(storage.blockedSites, []);
+assert.equal(dynamicRules.length, 0);
+console.log("Round 63 guarded blocklist clear regressions passed");

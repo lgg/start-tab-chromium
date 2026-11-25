@@ -3,7 +3,7 @@
  * from the blocklist. Mutations are routed through the service worker.
  */
 
-import { blockedSiteForUrl, hostFromUrl } from "../lib/blocklist.js";
+import { blockedSiteForUrl, getBlockedSites, hostFromUrl } from "../lib/blocklist.js";
 import {
   getLocalePreference,
   loadI18n,
@@ -149,7 +149,9 @@ async function clearBlocklist(): Promise<void> {
   if (actionPending) return;
   setActionPending(true);
   try {
-    if (await sendAction({ type: "clear" })) await render();
+    const expectedSites = await getBlockedSites();
+    if (!window.confirm(i18n.t("clearBlocklistConfirm"))) return;
+    if (await sendAction({ type: "clear", expectedSites })) await render();
   } catch (error) {
     showError(error);
   } finally {
@@ -176,7 +178,7 @@ async function changeLanguage(): Promise<void> {
 }
 
 clearEl.addEventListener("click", () => {
-  if (actionPending || !window.confirm(i18n.t("clearBlocklistConfirm"))) return;
+  if (actionPending) return;
   void clearBlocklist();
 });
 

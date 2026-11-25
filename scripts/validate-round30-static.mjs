@@ -68,3 +68,13 @@ for (const command of ["node scripts/run-round30-fixtures.mjs", "node scripts/va
 }
 
 console.log("Round 30 static validation passed");
+
+const clearMessages = read("src/lib/messages.ts");
+const clearWorker = read("src/service-worker.ts");
+const clearPopup = read("src/popup/popup.ts");
+const clearOptions = read("src/options/options.ts");
+assert.match(clearMessages, /case "clear":[\s\S]*Array\.isArray\(value\.expectedSites\)/);
+assert.match(clearWorker, /case "clear": await clearAll\(message\.expectedSites\)/);
+assert.match(blocklist, /runMutation\(\(\) => applyBlocklistMutation\(\(current\) => \{[\s\S]*!storedSitesEqual\(current\.sites, expected\)/);
+assert.match(clearPopup, /const expectedSites = await getBlockedSites\(\);[\s\S]*clearBlocklistConfirm[\s\S]*sendAction\(\{ type: "clear", expectedSites \}\)/);
+assert.match(clearOptions, /const expectedSites = \[\.\.\.blockedSites\];[\s\S]*clearBlocklistConfirm[\s\S]*clearAll\(expectedSites\)/);

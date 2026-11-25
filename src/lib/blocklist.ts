@@ -663,11 +663,20 @@ export async function unblockHost(host: string): Promise<boolean> {
   });
 }
 
-export async function clearAll(): Promise<void> {
+export async function clearAll(expectedSites?: readonly string[]): Promise<void> {
+  const expected = expectedSites === undefined ? undefined : normalizeBlockedSites(expectedSites);
   if (isPageContext()) {
-    await sendMessage({ type: "clear" });
+    if (!expected) throw new Error("Clearing the blocklist requires a confirmed site snapshot");
+    await sendMessage({ type: "clear", expectedSites: expected });
     return;
   }
   await migrateLegacyStorage();
-  await runMutation(() => applyBlocklistMutation(() => ({ sites: [], lastBlockedUrls: null })));
+  await runMutation(() => applyBlocklistMutation((current) => {
+    // Validate the user-confirmed snapshot under the same lock as the
+    // destructive DNR/storage change. Newly added sites must not be erased.
+    if (expected && !storedSitesEqual(current.sites, expected)) {
+      throw new Error("Start Tab blocklist changed in another extension context; review it before clearing");
+    }
+    return { sites: [], lastBlockedUrls: null };
+  }));
 }
