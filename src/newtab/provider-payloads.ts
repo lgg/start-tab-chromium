@@ -1,3 +1,6 @@
+import { validDateOnly } from "../lib/date-validation.js";
+export { validDateOnly } from "../lib/date-validation.js";
+
 export interface IpResult { ip: string; country: string }
 export interface WeatherDay { date: string; min: number; max: number; code: number }
 export interface WeatherResult {
@@ -15,11 +18,6 @@ function finite(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-export function validDateOnly(value: unknown): value is string {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const date = new Date(value + "T12:00:00Z");
-  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
-}
 
 function validIp(value: unknown): value is string {
   if (typeof value !== "string" || value.length > 45) return false;

@@ -80,12 +80,11 @@ async function mergeCatalogs(locale: SupportedLocale, defaultCatalog: LocaleCata
   }
 }
 
-function renderTemplate(template: string, replacements: Record<string, string | number>): string {
-  let result = template;
-  for (const [key, value] of Object.entries(replacements)) {
-    result = result.split(`{${key}}`).join(String(value));
-  }
-  return result;
+export function renderTemplate(template: string, replacements: Record<string, string | number>): string {
+  // Replace placeholders in the source template only. Inserted user text
+  // must remain literal even when it contains another placeholder.
+  return template.replace(/\{([A-Za-z0-9_]+)\}/g, (placeholder, key: string) =>
+    Object.hasOwn(replacements, key) ? String(replacements[key]) : placeholder);
 }
 
 export async function loadI18n(): Promise<I18n> {

@@ -100,3 +100,43 @@ assert.equal(requestedCalendarUrls[0]?.searchParams.has("pageToken"), false);
 assert.equal(requestedCalendarUrls[1]?.searchParams.get("pageToken"), "round21-page-2");
 
 console.log("Round 21 fixtures passed");
+
+const { renderTemplate } = await import("../src/lib/i18n.js");
+const { validCalendarDateTime } = await import("../src/lib/date-validation.js");
+assert.equal(renderTemplate("{title} / {count}", { title: "Literal {count}", count: 3 }), "Literal {count} / 3");
+assert.equal(renderTemplate("{count} {count} {missing}", { count: 0 }), "0 0 {missing}");
+assert.equal(renderTemplate("{constructor}", {}), "{constructor}");
+assert.equal(renderTemplate("{title}", { title: "$&" }), "$&");
+assert.equal(validCalendarDateTime("2024-02-29T12:00:00+01:00"), true);
+assert.equal(validCalendarDateTime("2025-02-29T12:00:00Z"), false);
+assert.equal(validCalendarDateTime("2026-11-25T24:00:00Z"), false);
+assert.equal(validCalendarDateTime("2026-11-25"), false);
+
+const good = { id: "first", summary: "First", start: { dateTime: "2030-01-01T10:00:00Z" }, end: { dateTime: "2030-01-01T11:00:00Z" } };
+const allDay = { id: "second", summary: "Second", start: { date: "2030-01-02" }, end: { date: "2030-01-03" } };
+const invalid = [
+  { ...good, id: "cancelled", status: "cancelled" },
+  { ...good, id: "invalid-date", start: { dateTime: "2030-02-31T10:00:00Z" } },
+  { ...good, id: "missing-end", end: undefined },
+  { ...good, id: "reversed", end: { dateTime: "2030-01-01T09:00:00Z" } },
+  { ...good, id: "" },
+  { ...allDay, id: "empty-day", end: allDay.start },
+  { ...allDay, id: "mixed", end: good.end },
+];
+let calls72 = 0;
+Object.defineProperty(globalThis, "fetch", {
+  configurable: true,
+  value: async (input: string | URL | Request): Promise<Response> => {
+    calls72++;
+    const url = new URL(typeof input === "string" || input instanceof URL ? input.toString() : input.url);
+    return Response.json(url.searchParams.get("pageToken")
+      ? { items: [good, ...invalid, allDay] }
+      : { items: [...invalid, good], nextPageToken: "page-two" });
+  },
+});
+const cleanEvents = await listCalendarEvents("primary", 2);
+assert.deepEqual(cleanEvents.map((event) => event.id), ["first", "second"],
+  "Invalid, cancelled and duplicate events must not consume the configured display limit");
+assert.equal(cleanEvents[1]?.allDay, true);
+assert.equal(calls72, 2);
+console.log("Round 72 calendar payload and template interpolation regressions passed");
