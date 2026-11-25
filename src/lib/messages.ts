@@ -28,10 +28,11 @@ export type Message =
   | { type: "runtime-tasks"; instanceId: string; tasks: LocalTask[]; expectedTasks: LocalTask[] }
   | { type: "runtime-link-page"; instanceId: string; page: number; expectedPage: number }
   | { type: "delete-instance-runtime"; instanceId: string; expectedBlockUpdatedAt: number; expectedRuntimeUpdatedAt: number }
+  | { type: "blocked-original-url"; host: string }
   | { type: "record-unblock"; host: string }
   | { type: "reset-stats" };
 
-export interface Ack { ok: boolean; error?: string; changed?: boolean; runtimeUpdatedAt?: number; savedSettings?: StartPageSettings }
+export interface Ack { ok: boolean; error?: string; changed?: boolean; runtimeUpdatedAt?: number; savedSettings?: StartPageSettings; blockedUrl?: string }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -59,6 +60,7 @@ export function isMessage(value: unknown): value is Message {
     case "block":
     case "unblock":
     case "record-unblock":
+    case "blocked-original-url":
       return typeof value.host === "string" && value.host.length <= 2048;
     case "clear":
       return Array.isArray(value.expectedSites)
