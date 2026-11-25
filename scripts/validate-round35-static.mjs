@@ -142,3 +142,12 @@ for (const command of ["node scripts/run-round35-fixtures.mjs", "node scripts/va
 }
 
 console.log("Round 35 static validation passed");
+
+assert.match(options, /generalDraft\.state\.mayReplace\(/);
+assert.match(options, /window\.addEventListener\("beforeunload"[\s\S]*generalDraft\?\.state\.isDirty/);
+assert.match(options, /render\(savingGeneral\)/);
+assert.match(options, /preserveGeneral && generalDraft \? generalDraft\.root : renderGeneral\(\)/);
+assert.match(options, /expectedSettingsUpdatedAt: baseSettings\.updatedAt/);
+assert.match(options, /expectedRuntimeUpdatedAt: baseRuntimeUpdatedAt/);
+assert.match(options, /createCustomThemeDraft\(settings,[\s\S]*saveNewCustomTheme\(edited\)/);
+assert.match(options, /const nextSettings = await getStartPageSettings\(\);[\s\S]*const nextSites = await getBlockedSites\(\);[\s\S]*settings = nextSettings/);
