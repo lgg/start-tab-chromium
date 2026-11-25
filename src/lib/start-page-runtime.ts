@@ -3,7 +3,7 @@ import { cloneDictionary, createDictionary, ownValue } from "./dictionary.js";
 import { runIndependentEffects } from "./independent-effects.js";
 import { jsonContentEqual } from "./json-content.js";
 import { isStartPageOnboardingComplete, START_PAGE_ONBOARDING_KEY } from "../newtab/onboarding-state.js";
-import { assertLocalePreference, LOCALE_OVERRIDE_KEY, writeLocalePreferenceInExistingTransaction, type LocaleChange } from "./i18n.js";
+import { assertLocalePreference, localePreferenceFromStored, LOCALE_OVERRIDE_KEY, writeLocalePreferenceInExistingTransaction, type LocaleChange, type LocalePreference } from "./i18n.js";
 import { withStorageLock } from "./storage-lock.js";
 import { uniqueEntityId } from "./start-page-validation-primitives.js";
 import { MAX_LOCAL_TASKS_PER_INSTANCE, MAX_NOTE_LENGTH } from "./platform-limits.js";
@@ -306,11 +306,11 @@ async function persistRuntimeInTransaction(
 
 /** Read a coherent committed page snapshot. Storage change events are only
  * hints: a multi-step mutation can publish intermediate values and roll back. */
-export async function getStartPageViewSnapshot(): Promise<{ settings: StartPageSettings; runtime: StartPageRuntimeState }> {
+export async function getStartPageViewSnapshot(): Promise<{ settings: StartPageSettings; runtime: StartPageRuntimeState; localePreference: LocalePreference }> {
   // Perform any settings migration before taking the non-reentrant lock.
   await getStartPageSettings();
   return withStorageLock("data-write", async () => {
-    const stored = await chrome.storage.local.get([START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
+    const stored = await chrome.storage.local.get([START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY, LOCALE_OVERRIDE_KEY]);
     const rawSettings = stored[START_PAGE_SETTINGS_KEY];
     const rawRuntime = stored[START_PAGE_RUNTIME_KEY];
     const settings = normalizeStartPageSettings(rawSettings);
@@ -319,7 +319,7 @@ export async function getStartPageViewSnapshot(): Promise<{ settings: StartPageS
       || jsonContentEqual(rawRuntime, normalized)
       ? normalized
       : await persistRuntimeInTransaction(normalized, settings, true, null, stored[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined);
-    return { settings, runtime };
+    return { settings, runtime, localePreference: localePreferenceFromStored(stored[LOCALE_OVERRIDE_KEY]) };
   });
 }
 

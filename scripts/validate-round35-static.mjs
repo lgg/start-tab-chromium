@@ -157,12 +157,16 @@ console.log("Round 35 static validation passed");
 
 assert.match(options, /generalDraft\.state\.mayReplace\(/);
 assert.match(options, /window\.addEventListener\("beforeunload"[\s\S]*generalDraft\?\.state\.isDirty/);
-assert.match(options, /render\(savingGeneral\)/);
+assert.match(options, /render\(savingGeneral \|\| Boolean\(generalDraft\?\.state\.isDirty\(generalDraft\.signature\(\)\)\)\)/,
+  "A failed unrelated action must retain a dirty General draft");
 assert.match(options, /preserveGeneral && generalDraft \? generalDraft\.root : renderGeneral\(\)/);
 assert.match(options, /expectedSettingsUpdatedAt: baseSettings\.updatedAt/);
 assert.match(options, /expectedRuntimeUpdatedAt: baseRuntimeUpdatedAt/);
 assert.match(options, /createCustomThemeDraft\(settings,[\s\S]*saveNewCustomTheme\(edited\)/);
-assert.match(options, /const \{ settings: nextSettings, runtime: nextRuntime \} = await getStartPageViewSnapshot\(\);[\s\S]*const nextSites = await getBlockedSites\(\);[\s\S]*settings = nextSettings/);
+assert.match(options, /const \{ settings: nextSettings, runtime: nextRuntime, localePreference: nextLocale \} = await getStartPageViewSnapshot\(\);[\s\S]*const nextSites = await getBlockedSites\(\);[\s\S]*settings = nextSettings/);
+assert.doesNotMatch(options, /await getLocalePreference\(\)/, "Options must not independently read the locale after releasing the layout lock");
+assert.match(runtime, /const stored = await chrome\.storage\.local\.get\(\[START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY, LOCALE_OVERRIDE_KEY\]\)/);
+assert.match(runtime, /return \{ settings, runtime, localePreference: localePreferenceFromStored\(stored\[LOCALE_OVERRIDE_KEY\]\) \}/);
 
 const themeEditor69 = read("src/lib/theme-editor.ts");
 const formCache69 = read("src/lib/form-panel-cache.ts");
