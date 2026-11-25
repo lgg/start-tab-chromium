@@ -187,8 +187,8 @@ async function handle(message: Message): Promise<HandlerResult | void> {
     case "complete-clock": await runRuntimeJob(() => finishClockCompletion(message.instanceId, message.token)); break;
     case "reset-clocks": await runRuntimeJob(resetAllClocks); break;
     case "runtime-note": return { runtimeUpdatedAt: await runRuntimeJob(() => updateRuntimeNote(message.instanceId, message.value, message.expectedValue)) };
-    case "runtime-tasks": await runRuntimeJob(() => updateRuntimeTasks(message.instanceId, message.tasks, message.expectedTasks)); break;
-    case "runtime-link-page": await runRuntimeJob(() => updateRuntimeLinkPage(message.instanceId, message.page, message.expectedPage)); break;
+    case "runtime-tasks": return { runtimeUpdatedAt: await runRuntimeJob(() => updateRuntimeTasks(message.instanceId, message.tasks, message.expectedTasks)) };
+    case "runtime-link-page": return { runtimeUpdatedAt: await runRuntimeJob(() => updateRuntimeLinkPage(message.instanceId, message.page, message.expectedPage)) };
     case "delete-instance-runtime": await runRuntimeJob(() => deleteInstanceRuntime(
       message.instanceId,
       message.expectedBlockUpdatedAt,
@@ -216,8 +216,8 @@ async function updateRuntimeNote(instanceId: string, value: string, expectedValu
   return saved.updatedAt;
 }
 
-async function updateRuntimeTasks(instanceId: string, tasks: LocalTask[], expectedTasks: LocalTask[]): Promise<void> {
-  await updateStartPageRuntimeState((runtime, settings) => {
+async function updateRuntimeTasks(instanceId: string, tasks: LocalTask[], expectedTasks: LocalTask[]): Promise<number> {
+  const saved = await updateStartPageRuntimeState((runtime, settings) => {
     assertRuntimeMutationTarget(settings, instanceId, "tasks");
     const current = ownValue(runtime.tasks, instanceId) ?? [];
     if (!sameTasks(current, expectedTasks)) {
@@ -226,10 +226,11 @@ async function updateRuntimeTasks(instanceId: string, tasks: LocalTask[], expect
     runtime.tasks[instanceId] = structuredClone(tasks);
     return runtime;
   });
+  return saved.updatedAt;
 }
 
-async function updateRuntimeLinkPage(instanceId: string, page: number, expectedPage: number): Promise<void> {
-  await updateStartPageRuntimeState((runtime, settings) => {
+async function updateRuntimeLinkPage(instanceId: string, page: number, expectedPage: number): Promise<number> {
+  const saved = await updateStartPageRuntimeState((runtime, settings) => {
     assertRuntimeMutationTarget(settings, instanceId, "linkPage");
     const current = ownValue(runtime.linkPages, instanceId) ?? 0;
     if (current !== expectedPage) {
@@ -238,6 +239,7 @@ async function updateRuntimeLinkPage(instanceId: string, page: number, expectedP
     runtime.linkPages[instanceId] = Math.min(10_000, Math.max(0, Math.round(page)));
     return runtime;
   });
+  return saved.updatedAt;
 }
 
 async function performClockAction(instanceId: string, action: ClockAction): Promise<void> {

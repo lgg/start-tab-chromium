@@ -1,3 +1,6 @@
+import type { LocalTask } from "../lib/start-page-types.js";
+import { VersionedWidgetValue } from "./versioned-widget-value.js";
+
 /** Keep an in-flight Add Task action from duplicating an entry or clearing
  * the next draft the user typed while the worker acknowledged the first one. */
 export class TaskSubmissionGate {
@@ -20,6 +23,7 @@ export class TaskSubmissionGate {
 
 /** A task form's input and outstanding submission survive DOM replacement. */
 export class TaskFormSession extends TaskSubmissionGate {
+  readonly committed = new VersionedWidgetValue<LocalTask[]>();
   draft = "";
   view: (() => void) | undefined;
   acknowledge(submittedDraft: string): void {

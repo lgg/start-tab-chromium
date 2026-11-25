@@ -186,11 +186,15 @@ const staleNoteAck = await workerMessage({ type: "runtime-note", instanceId: not
 assert.equal(staleNoteAck.ok, false);
 assert.equal((await runtimeApi.getStartPageRuntimeState()).notes[noteBlock.id], "first");
 const task = { id: "task-1", title: "Keep", done: false, createdAt: 1, updatedAt: 1 };
-assert.deepEqual(await workerMessage({ type: "runtime-tasks", instanceId: tasksBlock.id, tasks: [task], expectedTasks: [] }), { ok: true });
+const ack76Tasks = await workerMessage({ type: "runtime-tasks", instanceId: tasksBlock.id, tasks: [task], expectedTasks: [] }) as { ok: boolean; runtimeUpdatedAt?: number };
+assert.equal(ack76Tasks.ok, true);
+assert.equal(ack76Tasks.runtimeUpdatedAt, (await runtimeApi.getStartPageRuntimeState()).updatedAt);
 const staleTasksAck = await workerMessage({ type: "runtime-tasks", instanceId: tasksBlock.id, tasks: [], expectedTasks: [] });
 assert.equal(staleTasksAck.ok, false);
 assert.equal((await runtimeApi.getStartPageRuntimeState()).tasks[tasksBlock.id]?.[0]?.title, "Keep");
-assert.deepEqual(await workerMessage({ type: "runtime-link-page", instanceId: linksBlock.id, page: 1, expectedPage: 0 }), { ok: true });
+const ack76Page = await workerMessage({ type: "runtime-link-page", instanceId: linksBlock.id, page: 1, expectedPage: 0 }) as { ok: boolean; runtimeUpdatedAt?: number };
+assert.equal(ack76Page.ok, true);
+assert.equal(ack76Page.runtimeUpdatedAt, (await runtimeApi.getStartPageRuntimeState()).updatedAt);
 const stalePageAck = await workerMessage({ type: "runtime-link-page", instanceId: linksBlock.id, page: 2, expectedPage: 0 });
 assert.equal(stalePageAck.ok, false);
 assert.equal((await runtimeApi.getStartPageRuntimeState()).linkPages[linksBlock.id], 1);

@@ -5,6 +5,8 @@ import { actionButton, element } from "./block-renderer-common.js";
 import type { BlockRenderContext } from "./block-renderer-types.js";
 import { WidgetRequestCache } from "./widget-request-cache.js";
 import { WidgetTextDrafts } from "./widget-text-drafts.js";
+import { WidgetWriteSession } from "./versioned-widget-value.js";
+import { getStartPageViewSnapshot } from "../lib/start-page-runtime.js";
 import { parseIpPayload, type IpResult } from "./provider-payloads.js";
 import { fetchWidgetJson } from "./widget-network.js";
 
@@ -165,6 +167,14 @@ function linkTile(item: StartLink): HTMLAnchorElement {
   return anchor;
 }
 
+const linkPageSessions = new Map<string, WidgetWriteSession<number>>();
+
+export function pruneLinkPages(retained: ReadonlySet<string>): void {
+  for (const [id, session] of linkPageSessions) {
+    if (!retained.has(id) && !session.pending) linkPageSessions.delete(id);
+  }
+}
+
 export function renderLinkCollection(
   block: Extract<BlockInstance, { type: "links" | "startPinned" }>,
   container: HTMLElement,
@@ -177,23 +187,44 @@ export function renderLinkCollection(
   container.style.setProperty("--link-icon-size", `${config.iconSize}px`);
   const perPage = Math.max(1, config.columns * config.rows);
   const totalPages = Math.max(1, Math.ceil(config.items.length / perPage));
-  let page = Math.min(ownValue(context.runtime.linkPages, block.id) ?? 0, totalPages - 1);
+  const session = linkPageSessions.get(block.id) ?? new WidgetWriteSession<number>();
+  linkPageSessions.set(block.id, session);
+  session.committed.observe(ownValue(context.runtime.linkPages, block.id) ?? 0, context.runtime.updatedAt);
+  const page = (): number => Math.min(session.committed.get(0), totalPages - 1);
   const list = element("div", `links links--${config.pageDirection}`);
   const pager = element("div", "pager");
-  const changePage = async (nextPage: number): Promise<void> => {
-    const expectedPage = ownValue(context.runtime.linkPages, block.id) ?? 0;
-    page = nextPage;
-    context.runtime.linkPages[block.id] = page;
-    await context.setRuntime({ kind: "linkPage", instanceId: block.id, page, expectedPage });
+  const changePage = async (offset: number): Promise<void> => {
+    if (session.view !== draw || !session.begin()) return;
+    const expectedPage = session.committed.get(0);
+    const nextPage = (page() + offset + totalPages) % totalPages;
     draw();
+    try {
+      const revision = await context.setRuntime({ kind: "linkPage", instanceId: block.id, page: nextPage, expectedPage });
+      if (revision !== undefined) session.committed.observe(nextPage, revision);
+      else {
+        const { runtime } = await getStartPageViewSnapshot();
+        session.committed.observe(ownValue(runtime.linkPages, block.id) ?? 0, runtime.updatedAt);
+      }
+    } finally {
+      session.finish();
+      session.view?.();
+      context.requestRender();
+    }
   };
-  const previous = actionButton(context.i18n.t("previousPage"), () => changePage((page - 1 + totalPages) % totalPages), "button button--secondary");
-  const next = actionButton(context.i18n.t("nextPage"), () => changePage((page + 1) % totalPages), "button button--secondary");
+  const previous = actionButton(context.i18n.t("previousPage"), () => changePage(-1), "button button--secondary", context.reportError);
+  const next = actionButton(context.i18n.t("nextPage"), () => changePage(1), "button button--secondary", context.reportError);
   const label = element("span", "pager__label");
   const draw = (): void => {
-    list.replaceChildren(...pageItems(config.items, page, perPage).map(linkTile));
-    label.textContent = context.i18n.t("pageCounter", { page: page + 1, pages: totalPages });
+    const current = page();
+    previous.disabled = session.pending;
+    next.disabled = session.pending;
+    list.replaceChildren(...pageItems(config.items, current, perPage).map(linkTile));
+    label.textContent = context.i18n.t("pageCounter", { page: current + 1, pages: totalPages });
   };
+  session.view = draw;
+  context.registerCleanup(() => {
+    if (session.view === draw) session.view = undefined;
+  });
   draw();
   container.append(list);
   if (totalPages > 1) {
