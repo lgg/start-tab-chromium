@@ -5,6 +5,7 @@ interface AlarmState { name: string; scheduledTime: number; periodInMinutes?: nu
 const alarmState = new Map<string, AlarmState>();
 let failClearName: string | null = null;
 let nextTabId = 40;
+const nativeUrls99 = new Map<number, string>();
 const removedTabs: number[] = [];
 const updatedUrls: string[] = [];
 let rejectNativeUpdates = false;
@@ -60,11 +61,16 @@ const chromeMock = {
   tabs: {
     async create(): Promise<chrome.tabs.Tab> {
       nextTabId += 1;
-      return { id: nextTabId } as chrome.tabs.Tab;
+      nativeUrls99.set(nextTabId, "about:blank");
+      return { id: nextTabId, url: "about:blank" } as chrome.tabs.Tab;
+    },
+    async get(tabId: number): Promise<chrome.tabs.Tab> {
+      return { id: tabId, url: nativeUrls99.get(tabId) } as chrome.tabs.Tab;
     },
     async update(tabId: number, update: chrome.tabs.UpdateProperties): Promise<chrome.tabs.Tab> {
       updatedUrls.push(String(update.url ?? ""));
       if (rejectNativeUpdates) throw new Error(`forced native URL rejection for ${update.url ?? ""}`);
+      nativeUrls99.set(tabId, update.url ?? "about:blank");
       if (consumeBypassOnUpdate) {
         if (!consumeNativeBypass) throw new Error("Native bypass consumer is not initialized");
         assert.equal(await consumeNativeBypass(tabId), true,
