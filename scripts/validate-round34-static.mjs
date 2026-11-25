@@ -95,3 +95,9 @@ const snapshotSource74 = read("src/lib/start-page-runtime.ts");
 const scheduler74 = read("src/newtab/render-scheduler.ts");
 assert.match(snapshotSource74, /export async function getStartPageViewSnapshot[\s\S]*withStorageLock\("data-write",[\s\S]*chrome\.storage\.local\.get\(\[START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY\]\)/);
 assert.match(scheduler74, /forceRender \|\| changed !== false/);
+
+const datePattern77 = read("src/newtab/date-pattern.ts");
+assert.match(datePattern77, /hourCycle: "h23"/);
+assert.match(datePattern77, /return pattern\.replace\(/);
+assert.match(staticWidgets, /const formatParts = createDatePartsFormatter[\s\S]*const parts = formatParts\(new Date\(\)\)/);
+assert.match(staticWidgets, /const url = buildSearchUrl\(provider\.urlTemplate, query\)/);

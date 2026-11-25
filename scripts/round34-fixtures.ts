@@ -239,3 +239,19 @@ assert.equal(ack73.value, "new", "A successful save must survive an old render b
 ack73.observeCanonical("fresh", 12);
 assert.equal(ack73.value, "fresh");
 console.log("Round 73 note revision regressions passed");
+
+const { createDatePartsFormatter, formatDateParts } = await import("../src/newtab/date-pattern.js");
+const { buildSearchUrl } = await import("../src/lib/start-page-validation-primitives.js");
+const date77 = new Date("2026-01-01T00:05:06Z");
+const parts77 = createDatePartsFormatter("fi-FI", "UTC")(date77);
+assert.equal(parts77.hour, "00");
+assert.equal(formatDateParts("MMMM HH:mm:ss", parts77), `${parts77.month} 00:05:06`, "Localized month names must not be interpreted as format tokens");
+assert.equal(formatDateParts("MMMM mm dddd ss", { month: "tammikuu", minute: "05", weekday: "ss:mm", second: "06" }), "tammikuu 05 ss:mm 06");
+const midnight77 = createDatePartsFormatter("en-US", "UTC")(date77);
+assert.equal(formatDateParts("HH:mm", midnight77), "00:05");
+assert.equal(buildSearchUrl("https://example.com/?q={query}&again={query}", "a&b #?"), "https://example.com/?q=a%26b%20%23%3F&again=a%26b%20%23%3F");
+assert.equal(buildSearchUrl("https://example.com/?q={query}", "\uD800"), "https://example.com/?q=%EF%BF%BD");
+assert.equal(buildSearchUrl("https://{query}.example.com/", "invalid hostname"), null);
+assert.equal(buildSearchUrl("javascript:{query}", "alert(1)"), null);
+assert.equal(buildSearchUrl("https://example.com/", "ignored"), null);
+console.log("Round 77 localized date formatting and search URL regressions passed");

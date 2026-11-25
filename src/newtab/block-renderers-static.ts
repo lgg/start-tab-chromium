@@ -1,4 +1,6 @@
 import { ownValue } from "../lib/dictionary.js";
+import { buildSearchUrl } from "../lib/start-page-validation-primitives.js";
+import { createDatePartsFormatter, formatDateParts } from "./date-pattern.js";
 import type { I18n } from "../lib/i18n.js";
 import type { BlockInstance, StartLink } from "../lib/start-page-settings.js";
 import { actionButton, element } from "./block-renderer-common.js";
@@ -28,38 +30,6 @@ function localeFor(block: Extract<BlockInstance, { type: "dateTime" }>, i18n: I1
   return safeLocale(block.config.locale, i18n.locale);
 }
 
-function dateParts(date: Date, timeZone: string, locale: string): Record<string, string> {
-  const dateFormatter = new Intl.DateTimeFormat(locale, {
-    timeZone: timeZone || undefined,
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
-  const parts = dateFormatter.formatToParts(date);
-  return Object.fromEntries(parts.map((part) => [part.type, part.value]));
-}
-
-function formatPattern(date: Date, pattern: string, timeZone: string, locale: string): string {
-  const parts = dateParts(date, timeZone, locale);
-  const replacements: Record<string, string> = {
-    dddd: parts.weekday ?? "",
-    YYYY: parts.year ?? "",
-    MMMM: parts.month ?? "",
-    DD: parts.day ?? "",
-    HH: parts.hour === "24" ? "00" : parts.hour ?? "",
-    mm: parts.minute ?? "",
-    ss: parts.second ?? "",
-  };
-  return Object.entries(replacements)
-    .sort(([left], [right]) => right.length - left.length)
-    .reduce((result, [token, replacement]) => result.split(token).join(replacement), pattern);
-}
-
 export function renderDateTime(
   block: Extract<BlockInstance, { type: "dateTime" }>,
   container: HTMLElement,
@@ -68,11 +38,11 @@ export function renderDateTime(
   const time = element("div", "date-time__time");
   const date = element("div", "date-time__date");
   time.style.fontSize = `${block.config.timeFontSize}px`;
+  const formatParts = createDatePartsFormatter(localeFor(block, context.i18n), block.config.timeZone);
   const update = (): void => {
-    const now = new Date();
-    const locale = localeFor(block, context.i18n);
-    if (block.config.mode !== "date") time.textContent = formatPattern(now, block.config.timeFormat, block.config.timeZone, locale);
-    if (block.config.mode !== "time") date.textContent = formatPattern(now, block.config.dateFormat, block.config.timeZone, locale);
+    const parts = formatParts(new Date());
+    if (block.config.mode !== "date") time.textContent = formatDateParts(block.config.timeFormat, parts);
+    if (block.config.mode !== "time") date.textContent = formatDateParts(block.config.dateFormat, parts);
   };
   if (block.config.mode !== "date") container.append(time);
   if (block.config.mode !== "time") container.append(date);
@@ -111,7 +81,16 @@ export function renderSearch(
     const provider = block.config.providers.find((candidate) => candidate.id === block.config.provider)
       ?? block.config.providers[0];
     if (!provider) return;
-    location.href = provider.urlTemplate.split("{query}").join(encodeURIComponent(query));
+    const url = buildSearchUrl(provider.urlTemplate, query);
+    if (!url) {
+      context.reportError(new Error(context.i18n.t("validationInvalidSearchProvider")));
+      return;
+    }
+    try {
+      location.href = url;
+    } catch (error) {
+      context.reportError(error);
+    }
   });
   container.append(form);
 }
