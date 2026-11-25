@@ -14,6 +14,7 @@ import {
 } from "./data-revision.js";
 import { runIndependentEffects } from "./independent-effects.js";
 import { restampRestoredState } from "./backup-restore-revisions.js";
+import type { SyncMeta } from "./chrome-sync.js";
 import type { StartPageSettings, StartPageRuntimeState } from "./start-page-types.js";
 import { withStorageLock } from "./storage-lock.js";
 import { FOCUS_STATS_KEY, isFutureFocusStatsSchema, normalizeFocusStats } from "./focus-stats.js";
@@ -41,6 +42,7 @@ import {
 
 export const BACKUP_VERSION = 4;
 export const PRE_IMPORT_BACKUP_KEY = "startTabPreImportBackup";
+export const LOCAL_SYNC_META_KEY = "startTabLocalSyncMeta";
 
 const LEGACY_BLOCKED_SITES_KEY = "blocked";
 const STORAGE_KEYS = [
@@ -54,7 +56,7 @@ const STORAGE_KEYS = [
 ] as const;
 
 const SNAPSHOT_KEYS = [...STORAGE_KEYS, LEGACY_BLOCKED_SITES_KEY, LEGACY_INSTANCE_RUNTIME_KEY] as const;
-const ROLLBACK_KEYS = [...SNAPSHOT_KEYS, PRE_IMPORT_BACKUP_KEY, DATA_REVISION_KEY] as const;
+const ROLLBACK_KEYS = [...SNAPSHOT_KEYS, PRE_IMPORT_BACKUP_KEY, DATA_REVISION_KEY, LOCAL_SYNC_META_KEY] as const;
 
 export type BackupStorageKey = (typeof STORAGE_KEYS)[number];
 
@@ -76,6 +78,8 @@ export interface BackupImportOptions {
   expectedCurrentDataRevisionFallback?: number;
   expectedCurrentStoredDataRevision?: number | null;
   revisionConflictMessage?: string;
+  /** Internal Browser Sync baseline; never read from imported JSON. */
+  syncBaseline?: SyncMeta;
 }
 
 export interface ExportedBackupSnapshot {
@@ -294,14 +298,16 @@ export async function importBackup(value: unknown, options: BackupImportOptions 
       [START_PAGE_RUNTIME_KEY]: restored.runtime,
     };
     const removals = keysAbsentFrom(next, SNAPSHOT_KEYS);
-    await chrome.storage.local.set({ [PRE_IMPORT_BACKUP_KEY]: recovery });
-
     try {
+      await chrome.storage.local.set({ [PRE_IMPORT_BACKUP_KEY]: recovery });
       await chrome.storage.local.set(next);
       if (removals.length > 0) await chrome.storage.local.remove(removals);
       await syncRulesInCurrentTransaction();
       await reconcileClockAlarmsForRuntime(next[START_PAGE_RUNTIME_KEY] as ReturnType<typeof normalizeRuntimeState>);
       await markStartTabDataChanged(Math.max(restored.revision, options.dataRevisionAt ?? restored.revision));
+      if (options.syncBaseline) {
+        await chrome.storage.local.set({ [LOCAL_SYNC_META_KEY]: options.syncBaseline });
+      }
     } catch (error) {
       try {
         await runIndependentEffects([
