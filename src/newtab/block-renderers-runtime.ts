@@ -15,6 +15,7 @@ import { ClockRequestGate } from "./clock-request-gate.js";
 import { TaskFormSessions, type TaskFormSession } from "./task-submission-gate.js";
 import { NoteDraft } from "./note-draft.js";
 import { hiddenDraftIds } from "./protected-page-drafts.js";
+import type { HiddenTextDraft } from "./hidden-text-drafts.js";
 
 const clockRequests = new ClockRequestGate();
 
@@ -311,6 +312,14 @@ export function pruneTaskForms(retained: ReadonlySet<string>): void {
   taskForms.prune(retained);
 }
 
+export function hiddenTaskDrafts(visible: ReadonlySet<string>): HiddenTextDraft[] {
+  return taskForms.hidden(visible).map(([id, session]) => {
+    const snapshot = session.snapshotDraft();
+    return { kind: "task", title: session.title, value: snapshot.value, pending: session.pending,
+      discard: () => taskForms.discard(id, session, snapshot) };
+  });
+}
+
 function cloneTasks(tasks: readonly LocalTask[]): LocalTask[] {
   return tasks.map((task) => ({ ...task }));
 }
@@ -379,6 +388,7 @@ export function renderLocalTasks(
   add.type = "submit";
   const list = element("div", "task-list");
   const submissions = taskForms.get(block.id);
+  submissions.title = blockUsesDefaultTitle(block) ? context.i18n.t(blockTitleKey(block.type)) : block.title;
   submissions.committed.observe(ownValue(context.runtime.tasks, block.id) ?? [], context.runtime.updatedAt);
   input.dataset.widgetDraft = `task:${block.id}`;
   input.value = submissions.draft;

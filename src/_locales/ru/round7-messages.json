@@ -85,5 +85,17 @@
   },
   "layoutSavedRefreshFailed": {
     "message": "Макет сохранён, но не удалось загрузить последнее состояние. Страница обновит сохранённые данные; повторять сохранение не нужно."
+  },
+  "hiddenWidgetTextDrafts": {
+    "message": "Неотправленный текст скрытых виджетов"
+  },
+  "hiddenTaskDraft": {
+    "message": "Черновик задачи"
+  },
+  "hiddenSearchDraft": {
+    "message": "Черновик поиска"
+  },
+  "hiddenWidgetDiscardConfirm": {
+    "message": "Удалить этот неотправленный текст?"
   }
 }

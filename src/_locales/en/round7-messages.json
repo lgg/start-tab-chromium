@@ -85,5 +85,17 @@
   },
   "layoutSavedRefreshFailed": {
     "message": "Layout saved, but the latest view could not be loaded. The page will refresh its saved state; do not repeat the save."
+  },
+  "hiddenWidgetTextDrafts": {
+    "message": "Unsubmitted text from hidden widgets"
+  },
+  "hiddenTaskDraft": {
+    "message": "Task draft"
+  },
+  "hiddenSearchDraft": {
+    "message": "Search draft"
+  },
+  "hiddenWidgetDiscardConfirm": {
+    "message": "Discard this unsubmitted text?"
   }
 }

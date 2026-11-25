@@ -2,7 +2,8 @@ import { ownValue } from "../lib/dictionary.js";
 import { buildSearchUrl } from "../lib/start-page-validation-primitives.js";
 import { createDatePartsFormatter, formatDateParts } from "./date-pattern.js";
 import type { I18n } from "../lib/i18n.js";
-import type { BlockInstance, StartLink } from "../lib/start-page-settings.js";
+import { blockTitleKey, blockUsesDefaultTitle, type BlockInstance, type StartLink } from "../lib/start-page-settings.js";
+import type { HiddenTextDraft } from "./hidden-text-drafts.js";
 import { actionButton, element } from "./block-renderer-common.js";
 import type { BlockRenderContext } from "./block-renderer-types.js";
 import { WidgetRequestCache } from "./widget-request-cache.js";
@@ -57,8 +58,11 @@ export function hasSearchDrafts(): boolean {
   return searchDrafts.hasDrafts();
 }
 
-export function pruneSearchDrafts(retained: ReadonlySet<string>): void {
-  searchDrafts.prune(retained);
+export function hiddenSearchDrafts(visible: ReadonlySet<string>): HiddenTextDraft[] {
+  return searchDrafts.hidden(visible).map(([id, draft]) => ({
+    kind: "search", title: draft.title, value: draft.value, pending: false,
+    discard: () => searchDrafts.discard(id, draft.value),
+  }));
 }
 
 export function renderSearch(
@@ -71,7 +75,11 @@ export function renderSearch(
   input.type = "search";
   input.dataset.widgetDraft = `search:${block.id}`;
   input.value = searchDrafts.get(block.id);
-  input.addEventListener("input", () => searchDrafts.set(block.id, input.value));
+  const title = blockUsesDefaultTitle(block) ? context.i18n.t(blockTitleKey(block.type)) : block.title;
+  searchDrafts.set(block.id, input.value, title);
+  input.addEventListener("input", () => {
+    if (form.isConnected) searchDrafts.set(block.id, input.value, title);
+  });
   input.placeholder = block.config.placeholder || context.i18n.t("searchPlaceholder");
   input.autocomplete = "off";
   input.setAttribute("aria-label", context.i18n.t("searchPlaceholder"));
@@ -80,6 +88,7 @@ export function renderSearch(
   form.append(input, submit);
   form.addEventListener("submit", (event) => {
     event.preventDefault();
+    if (!form.isConnected) return;
     const query = input.value.trim();
     if (!query) return;
     const provider = block.config.providers.find((candidate) => candidate.id === block.config.provider)
