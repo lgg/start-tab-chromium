@@ -79,6 +79,7 @@ import {
 } from "../lib/start-page-settings.js";
 import { editTheme } from "../lib/theme-editor.js";
 import { OptionsActionGuard } from "./action-guard.js";
+import { parseNumberField } from "../lib/form-panel-cache.js";
 import { GeneralFormDraft } from "./general-form-draft.js";
 import { restoreDeferredSectionAnchor } from "./deferred-section.js";
 
@@ -161,9 +162,7 @@ async function readJsonFile(file: File): Promise<unknown> {
 }
 
 function readNumber(input: HTMLInputElement, fallback: number): number {
-  if (!input.value.trim()) return fallback;
-  const parsed = Number(input.value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  return parseNumberField(input.value, fallback);
 }
 
 function confirmDataRestore(): boolean {

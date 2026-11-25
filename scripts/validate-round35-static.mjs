@@ -155,3 +155,12 @@ assert.match(options, /expectedSettingsUpdatedAt: baseSettings\.updatedAt/);
 assert.match(options, /expectedRuntimeUpdatedAt: baseRuntimeUpdatedAt/);
 assert.match(options, /createCustomThemeDraft\(settings,[\s\S]*saveNewCustomTheme\(edited\)/);
 assert.match(options, /const nextSettings = await getStartPageSettings\(\);[\s\S]*const nextSites = await getBlockedSites\(\);[\s\S]*settings = nextSettings/);
+
+const themeEditor69 = read("src/lib/theme-editor.ts");
+const formCache69 = read("src/lib/form-panel-cache.ts");
+assert.match(themeEditor69, /backgroundPanels\.show\(kind\.value, dynamic, createBackgroundPanel\)/);
+assert.match(themeEditor69, /effectPanels\.show\(effect\.value, effectFields, createEffectPanel\)/);
+assert.match(formCache69, /host\.replaceChildren\(\.\.\.existing\.nodes\)/);
+for (const source of [editor, themeEditor69, options]) {
+  assert.match(source, /return parseNumberField\(input\.value, fallback\)/);
+}
