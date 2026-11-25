@@ -33,6 +33,8 @@ import {
   isBlockType,
   isRecord,
   normalizeDomainMinutes,
+  normalizeEntityId,
+  uniqueEntityId,
   oneOf,
   stringValue,
   timestampValue,
@@ -44,15 +46,11 @@ const LAYOUT_ZONES: readonly LayoutZone[] = ["contained", "full"];
 const SETTINGS_VISIBILITY = ["always", "hover"] as const;
 const SETTINGS_HOVER_AREAS = ["top", "top-right", "right"] as const;
 
-function normalizeBlockId(value: unknown, type: BlockType, seen: Set<string>): string {
-  const requested = trimmedString(value, type, 160).replace(/[^a-zA-Z0-9_.:-]/g, "-") || type;
-  if (!seen.has(requested)) return requested;
-  let suffix = 2;
-  while (seen.has(`${requested}-${suffix}`)) suffix += 1;
-  return `${requested}-${suffix}`;
+function normalizeBlockId(value: unknown, type: BlockType, seen: Set<string>, reserved: ReadonlySet<string>): string {
+  return uniqueEntityId(normalizeEntityId(value, type), seen, reserved);
 }
 
-function normalizeBlock(value: unknown, index: number, root: Record<string, unknown>, columns: number, zone: LayoutZone, seenIds: Set<string>, seenSingletons: Set<BlockType>, issues: ValidationIssue[], migrationIssues: MigrationIssue[]): BlockInstance | null {
+function normalizeBlock(value: unknown, index: number, root: Record<string, unknown>, columns: number, zone: LayoutZone, seenIds: Set<string>, reservedIds: ReadonlySet<string>, seenSingletons: Set<BlockType>, issues: ValidationIssue[], migrationIssues: MigrationIssue[]): BlockInstance | null {
   if (!isRecord(value) || !isBlockType(value.type)) {
     migrationIssues.push({ path: `layout.blocks[${index}]`, reason: "Unknown or missing block type" });
     issues.push({ path: `layout.blocks[${index}]`, messageKey: "validationUnknownBlock" });
@@ -65,7 +63,7 @@ function normalizeBlock(value: unknown, index: number, root: Record<string, unkn
     return null;
   }
   const descriptor = blockDescriptor(type);
-  const id = normalizeBlockId(value.id, type, seenIds);
+  const id = normalizeBlockId(value.id, type, seenIds, reservedIds);
   const minimumWidth = Math.min(descriptor.minGridWidth, columns);
   const width = finiteInteger(value.width, Math.min(descriptor.defaultGridWidth, columns), minimumWidth, columns);
   const height = finiteInteger(value.height, descriptor.defaultGridHeight, descriptor.minGridHeight, MAX_GRID_BLOCK_HEIGHT);
@@ -103,9 +101,11 @@ function normalizeBlock(value: unknown, index: number, root: Record<string, unkn
 function normalizeBlocks(value: unknown, root: Record<string, unknown>, columns: number, zone: LayoutZone, mode: LayoutMode, issues: ValidationIssue[], migrationIssues: MigrationIssue[]): BlockInstance[] {
   const source = Array.isArray(value) ? value.slice(0, MAX_START_PAGE_BLOCKS) : cloneBlocks(DEFAULT_LAYOUT_BLOCKS);
   const seenIds = new Set<string>();
+  const reservedIds = new Set(source.flatMap((candidate) => isRecord(candidate) && isBlockType(candidate.type)
+    ? [normalizeEntityId(candidate.id, candidate.type)] : []));
   const seenSingletons = new Set<BlockType>();
   const blocks = source.flatMap((candidate, index) => {
-    const block = normalizeBlock(candidate, index, root, columns, zone, seenIds, seenSingletons, issues, migrationIssues);
+    const block = normalizeBlock(candidate, index, root, columns, zone, seenIds, reservedIds, seenSingletons, issues, migrationIssues);
     return block ? [block] : [];
   }).map((block, order) => ({ ...block, order }));
   return mode === "grid" ? placeGridBlocks(blocks, columns) : blocks;
@@ -132,7 +132,7 @@ export function normalizeStartPageSettingsWithReport(value: unknown): { settings
   const customThemes = normalizeCustomThemes(themes.customThemes, issues);
   const migratedLegacyTheme = fromVersion < START_PAGE_SCHEMA_VERSION ? migrateLegacyTheme(value, issues) : null;
   if (migratedLegacyTheme && !customThemes.some((theme) => theme.id === migratedLegacyTheme.id)) customThemes.push(migratedLegacyTheme);
-  const requestedThemeId = trimmedString(themes.selectedThemeId, migratedLegacyTheme?.id ?? DEFAULT_SETTINGS.themes.selectedThemeId, 160);
+  const requestedThemeId = normalizeEntityId(themes.selectedThemeId, migratedLegacyTheme?.id ?? DEFAULT_SETTINGS.themes.selectedThemeId);
   const selectedThemeId = getBuiltInTheme(requestedThemeId) || customThemes.some((theme) => theme.id === requestedThemeId) ? requestedThemeId : DEFAULT_SETTINGS.themes.selectedThemeId;
   const settings: StartPageSettings = {
     schemaVersion: START_PAGE_SCHEMA_VERSION,

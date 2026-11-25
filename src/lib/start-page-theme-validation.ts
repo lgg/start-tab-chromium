@@ -1,7 +1,7 @@
 import { BUILT_IN_THEMES, cloneTheme } from "./start-page-defaults.js";
 import { MAX_CUSTOM_THEMES } from "./platform-limits.js";
 import { THEME_SCHEMA_VERSION, type AnimatedEffectConfig, type BackgroundTile, type StartPageTheme, type ThemeBundle, type ValidationIssue, type ValidationResult } from "./start-page-types.js";
-import { booleanValue, finiteNumber, isRecord, oneOf, safeCssToken, safeGradient, safeWebUrl, stringValue, timestampValue, trimmedString } from "./start-page-validation-primitives.js";
+import { booleanValue, finiteNumber, isRecord, normalizeEntityId, uniqueEntityId, oneOf, safeCssToken, safeGradient, safeWebUrl, stringValue, timestampValue, trimmedString } from "./start-page-validation-primitives.js";
 
 const EFFECT_IDS = ["animated-gradient", "aurora", "mesh", "spotlight", "noise", "matrix", "cyberpunk"] as const;
 
@@ -50,7 +50,7 @@ export function normalizeTheme(value: unknown, fallback: StartPageTheme, path = 
   const tokens = isRecord(value.tokens) ? value.tokens : {};
   return {
     schemaVersion: THEME_SCHEMA_VERSION,
-    id: trimmedString(value.id, fallback.id, 160).replace(/[^a-zA-Z0-9_.:-]/g, "-") || fallback.id,
+    id: normalizeEntityId(value.id, fallback.id),
     name: trimmedString(value.name, fallback.name, 160) || fallback.name,
     builtIn: booleanValue(value.builtIn, fallback.builtIn),
     background: normalizeBackground(value.background, fallback.background, `${path}.background`, issues),
@@ -64,23 +64,22 @@ export function normalizeTheme(value: unknown, fallback: StartPageTheme, path = 
 
 export function normalizeCustomThemes(value: unknown, issues: ValidationIssue[]): StartPageTheme[] {
   if (!Array.isArray(value)) return [];
-  const result: StartPageTheme[] = [];
-  const seen = new Set(BUILT_IN_THEMES.map((theme) => theme.id));
-  for (const [index, item] of value.slice(0, MAX_CUSTOM_THEMES).entries()) {
+  const candidates = value.slice(0, MAX_CUSTOM_THEMES).map((item, index) => {
     const fallback = cloneTheme(BUILT_IN_THEMES[0]!);
     fallback.id = `custom-theme-${index + 1}`;
     fallback.name = `Custom theme ${index + 1}`;
     fallback.builtIn = false;
     const theme = normalizeTheme(item, fallback, `themes.customThemes[${index}]`, issues);
     theme.builtIn = false;
-    let id = theme.id;
-    let suffix = 2;
-    while (seen.has(id)) id = `${theme.id}-${suffix++}`;
-    theme.id = id;
-    seen.add(id);
-    result.push(theme);
+    return theme;
+  });
+  const reserved = new Set(candidates.map((theme) => theme.id));
+  const seen = new Set(BUILT_IN_THEMES.map((theme) => theme.id));
+  for (const theme of candidates) {
+    theme.id = uniqueEntityId(theme.id, seen, reserved);
+    seen.add(theme.id);
   }
-  return result;
+  return candidates;
 }
 
 export function migrateLegacyTheme(root: Record<string, unknown>, _issues: ValidationIssue[]): StartPageTheme | null {

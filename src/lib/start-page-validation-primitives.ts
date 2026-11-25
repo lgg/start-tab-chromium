@@ -17,13 +17,39 @@ export function trimmedString(value: unknown, fallback: string, maxLength = 500)
   return stringValue(value, fallback, maxLength).trim();
 }
 
+// Older releases could append a numeric suffix after the 160-character
+// limit. Preserve already-persisted generated IDs to keep runtime references.
+const ENTITY_ID_LIMIT = 160;
+const LEGACY_ENTITY_ID_LIMIT = 165;
+
+export function normalizeEntityId(value: unknown, fallback: string): string {
+  const input = typeof value === "string" ? value.trim() : fallback;
+  const legacyGenerated = input.length > ENTITY_ID_LIMIT
+    && input.length <= LEGACY_ENTITY_ID_LIMIT
+    && /^[a-zA-Z0-9_.:-]+-(?:[2-9]|[1-9]\d{1,3})$/.test(input)
+    && input.lastIndexOf("-") <= ENTITY_ID_LIMIT;
+  return input.slice(0, legacyGenerated ? LEGACY_ENTITY_ID_LIMIT : ENTITY_ID_LIMIT)
+    .replace(/[^a-zA-Z0-9_.:-]/g, "-") || fallback;
+}
+
+/** Generated IDs must fit the normal limit and must not steal a later
+ * explicitly requested ID from a different existing entity. */
+export function uniqueEntityId(base: string, used: ReadonlySet<string>, reserved: ReadonlySet<string>): string {
+  if (!used.has(base)) return base;
+  for (let suffix = 2; ; suffix += 1) {
+    const ending = "-" + suffix;
+    const candidate = base.slice(0, ENTITY_ID_LIMIT - ending.length) + ending;
+    if (!used.has(candidate) && !reserved.has(candidate)) return candidate;
+  }
+}
+
 export function booleanValue(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
 export function finiteNumber(value: unknown, fallback: number, min: number, max: number): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
-  return Math.min(max, Math.max(min, value));
+  const candidate = typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  return Math.min(max, Math.max(min, candidate));
 }
 
 export function finiteInteger(value: unknown, fallback: number, min: number, max: number): number {
