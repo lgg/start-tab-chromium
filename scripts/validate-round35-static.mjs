@@ -209,3 +209,10 @@ assert.match(commands105, /resetCommandButton\("reset-clocks"/);
 assert.match(commands105, /resetCommandButton\("reset-stats"/);
 assert.doesNotMatch(commands105, /getStartPageRuntimeState/);
 assert.match(commandGate105, /await mutate\(\);\s*\} finally \{[\s\S]*refresh\(\);/);
+
+assert.match(worker, /case "complete-clock": return runRuntimeJob\(\(\) => finishClockCompletion/);
+assert.match(worker, /const result = await completeClockInstance[\s\S]*catch \(error\) \{[\s\S]*return \{ notificationFailed: true \}/);
+assert.match(runtimeRenderer, /if \(ack\.notificationFailed\) context\.reportError\(new Error\(context\.i18n\.t\("clockCompletedNotificationFailed"\)\)\)/);
+for (const locale108 of ["en", "ru"]) {
+  assert.ok(JSON.parse(read("src/_locales/" + locale108 + "/round7-messages.json")).clockCompletedNotificationFailed.message);
+}

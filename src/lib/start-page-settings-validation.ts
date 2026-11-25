@@ -17,7 +17,6 @@ import {
   DEFAULT_SETTINGS,
   blockDescriptor,
   cloneBlocks,
-  cloneSettings,
   getBuiltInTheme,
   isSingletonBlockType,
 } from "./start-page-defaults.js";
@@ -113,7 +112,11 @@ function normalizeBlocks(value: unknown, root: Record<string, unknown>, columns:
 
 export function normalizeStartPageSettingsWithReport(value: unknown): { settings: StartPageSettings; report: MigrationReport; validation: ValidationIssue[] } {
   if (!isRecord(value)) {
-    return { settings: cloneSettings(DEFAULT_SETTINGS), report: { fromVersion: 0, toVersion: START_PAGE_SCHEMA_VERSION, migratedBlocks: DEFAULT_SETTINGS.layout.blocks.length, skippedBlocks: 0, issues: [] }, validation: [] };
+    // Built-in defaults must pass through the same placement/configuration
+    // pipeline as imported settings. Otherwise the first restore of a fresh
+    // backup can change its content checksum without any user edit.
+    const normalized = normalizeStartPageSettingsWithReport(DEFAULT_SETTINGS);
+    return { ...normalized, report: { ...normalized.report, fromVersion: 0 } };
   }
   const issues: ValidationIssue[] = [];
   const migrationIssues: MigrationIssue[] = [];

@@ -106,5 +106,8 @@
   },
   "popupLanguageSavedRefreshFailed": {
     "message": "Язык сохранён, но не удалось обновить меню. Откройте меню расширения заново."
+  },
+  "clockCompletedNotificationFailed": {
+    "message": "Таймер завершён, но не удалось показать уведомление."
   }
 }

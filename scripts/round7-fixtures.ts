@@ -16,6 +16,8 @@ function setAlarm(name: string, scheduledTime = Date.now() + 60_000, periodInMin
 }
 let dynamicRules: chrome.declarativeNetRequest.Rule[] = [];
 let failNextDnrUpdate = false;
+let failNotification108 = false;
+let notificationCalls108 = 0;
 let failSetAfterApplyForKey: string | null = null;
 let failAlarmCreateAfterApplyForName: string | null = null;
 let pauseNextBackupSnapshotRead = false;
@@ -129,7 +131,11 @@ const chromeMock = {
     async update(): Promise<chrome.tabs.Tab> { return { id: 99, index: 0, pinned: false, highlighted: false, active: true, incognito: false, selected: true, discarded: false, autoDiscardable: true, groupId: -1, windowId: 1 }; },
   },
   webNavigation: { onBeforeNavigate: eventTarget() },
-  notifications: { async create(): Promise<string> { return "notification"; } },
+  notifications: { async create(): Promise<string> {
+    notificationCalls108++;
+    if (failNotification108) throw new Error("forced notification failure");
+    return "notification";
+  } },
   i18n: { getMessage(key: string): string { return key; } },
 } as unknown as typeof chrome;
 Object.defineProperty(globalThis, "chrome", { value: chromeMock, configurable: true });
@@ -791,3 +797,31 @@ alarmListeners[0]!({ name: alarm98, scheduledTime: Date.now() });
 await drain98();
 assert.equal(alarmState.has(alarm98), false, "A duplicate stale alarm must not resurrect a completed countdown");
 console.log("Round 98 consumed clock alarm retry regressions passed");
+
+const snapshot108 = await runtimeApi.getStartPageViewSnapshot();
+const settings108 = settingsApi.cloneSettings(snapshot108.settings);
+const timer108 = settingsApi.createBlockInstance("timer", { id: "round108-timer" });
+assert.equal(timer108.type, "timer");
+timer108.config.notifyOnComplete = true;
+settings108.layout.blocks.push(timer108);
+await settingsApi.setStartPageSettings(settings108);
+await workerMessage({ type: "clock-action", instanceId: timer108.id, action: "start" });
+const runtime108 = await runtimeApi.getStartPageRuntimeState();
+const clock108 = runtime108.clocks[timer108.id]!;
+const token108 = clock108.completionToken!;
+clock108.targetAt = Date.now() - 1000;
+clock108.startedAt = clock108.targetAt - clock108.durationMs;
+await runtimeApi.setStartPageRuntimeState(runtime108);
+const callsBefore108 = notificationCalls108;
+failNotification108 = true;
+try {
+  assert.deepEqual(await workerMessage({ type: "complete-clock", instanceId: timer108.id, token: token108 }),
+    { ok: true, notificationFailed: true }, "Notification failure must acknowledge committed clock completion separately");
+  const completed108 = (await runtimeApi.getStartPageRuntimeState()).clocks[timer108.id]!;
+  assert.equal(completed108.running, false);
+  assert.equal(completed108.lastCompletedToken, token108);
+  assert.equal(alarmState.has(runtimeApi.clockAlarmName(timer108.id, token108)), false);
+  assert.deepEqual(await workerMessage({ type: "complete-clock", instanceId: timer108.id, token: token108 }), { ok: true });
+  assert.equal(notificationCalls108, callsBefore108 + 1, "A duplicate completed token must not retry notification delivery");
+} finally { failNotification108 = false; }
+console.log("Round 108 committed clock notification failure regressions passed");

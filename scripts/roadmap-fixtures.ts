@@ -51,6 +51,8 @@ function unique(values: readonly string[]): boolean {
 }
 
 const clean = normalizeStartPageSettings(undefined);
+assert.deepEqual(normalizeStartPageSettings(clean), clean, "Clean-install settings must already be normalized");
+assert.deepEqual(clean, normalizeStartPageSettings(DEFAULT_SETTINGS), "Missing and explicitly supplied defaults must have identical canonical content");
 assert.equal(clean.schemaVersion, START_PAGE_SCHEMA_VERSION);
 assert.ok(clean.layout.blocks.length > 0);
 assert.ok(unique(clean.layout.blocks.map((block) => block.id)), "Clean-install block IDs must be unique");
