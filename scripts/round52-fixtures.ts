@@ -711,3 +711,42 @@ assert.deepEqual(old104.storage.blockedSites, ["legacy.example"], "Legacy partia
 const actual104 = await backup.exportBackup();
 assert.doesNotThrow(() => backup.migrateBackup(actual104));
 console.log("Round 104 malformed backup section regressions passed");
+
+resetState();
+localStorage = localData("keep-local-114.example", REVISION_BASE + 13_000);
+const before114 = clone(localStorage);
+for (const storage114 of [
+  { startPageSettings: { layout: null } },
+  { startPageSettings: { layout: { blocks: "truncated" } } },
+  { startPageSettings: { layout: { blocks: [null] } } },
+  { startPageSettings: { themes: { customThemes: {} } } },
+  { startPageRuntimeState: { clocks: { timer: null } } },
+  { startPageRuntimeState: { notes: { "note-main": ["not text"] } } },
+  { startPageRuntimeState: { tasks: [] } },
+  { startPageRuntimeState: { tasks: { "localTasks-main": {} } } },
+  { startPageRuntimeState: { tasks: { "localTasks-main": [null] } } },
+  { startPageRuntimeState: { linkPages: { "links-main": "2" } } },
+  { startPageRuntimeState: { localTasks: {} } },
+  { startTabInstanceState: { localTasks: [] } },
+  { focusStats: { version: 1, byDay: [] } },
+  { focusStats: { version: 1, byDomain: { "example.com": null } } },
+]) {
+  const candidate114 = { ...header104, storage: storage114 };
+  assert.throws(() => backup.migrateBackup(candidate114), /Invalid Start Tab backup section/);
+  await assert.rejects(() => backup.importBackup(candidate114), /Invalid Start Tab backup section/);
+  assert.deepEqual(localStorage, before114);
+  assert.deepEqual(dynamicRules, []);
+  assert.equal(alarms.size, 0);
+}
+assert.doesNotThrow(() => backup.migrateBackup({ ...header104, version: 3, storage: {
+  startPageRuntimeState: { localTasks: [{ id: "legacy", title: "Legacy", done: false }] },
+  startTabInstanceState: { localTasks: { "localTasks-main": [] } },
+} }));
+assert.doesNotThrow(() => backup.migrateBackup({ ...header104, storage: {
+  startPageSettings: { layout: { blocks: [] }, themes: { customThemes: [] } },
+  startPageRuntimeState: { notes: {}, clocks: {}, tasks: {}, linkPages: {} },
+  focusStats: { version: 1, totals: {}, byDay: {}, byDomain: {} },
+} }));
+const actual114 = await backup.exportBackup();
+assert.doesNotThrow(() => backup.migrateBackup(actual114));
+console.log("Round 114 nested backup collection regressions passed");
