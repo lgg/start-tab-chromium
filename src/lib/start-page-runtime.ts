@@ -2,6 +2,7 @@ import { commitStorageMutationWithRevision, DATA_REVISION_KEY, markStartTabDataC
 import { cloneDictionary, createDictionary, ownValue } from "./dictionary.js";
 import { runIndependentEffects } from "./independent-effects.js";
 import { jsonContentEqual } from "./json-content.js";
+import { isStartPageOnboardingComplete, START_PAGE_ONBOARDING_KEY } from "../newtab/onboarding-state.js";
 import { assertLocalePreference, LOCALE_OVERRIDE_KEY, writeLocalePreferenceInExistingTransaction, type LocaleChange } from "./i18n.js";
 import { withStorageLock } from "./storage-lock.js";
 import { uniqueEntityId } from "./start-page-validation-primitives.js";
@@ -38,7 +39,7 @@ export const START_PAGE_RUNTIME_KEY = "startPageRuntimeState";
 export const LEGACY_INSTANCE_RUNTIME_KEY = "startTabInstanceState";
 export const CLOCK_ALARM_PREFIX = "start-tab-clock:";
 
-const ONBOARDING_KEY = "startPageOnboarding";
+const ONBOARDING_KEY = START_PAGE_ONBOARDING_KEY;
 const RUNTIME_STORAGE_KEYS = [
   START_PAGE_RUNTIME_KEY,
   LEGACY_INSTANCE_RUNTIME_KEY,
@@ -589,6 +590,7 @@ export async function replaceStartPageSettingsWithRuntime(
   expectedSettingsUpdatedAt: number,
   expectedRuntimeUpdatedAt: number,
   localeChange?: LocaleChange,
+  completeOnboarding = false,
 ): Promise<StartPageSettings> {
   return withStorageLock("data-write", async () => {
     const items = await chrome.storage.local.get([
@@ -596,7 +598,12 @@ export async function replaceStartPageSettingsWithRuntime(
       START_PAGE_RUNTIME_KEY,
       LEGACY_INSTANCE_RUNTIME_KEY,
       ...(localeChange ? [LOCALE_OVERRIDE_KEY] : []),
+      ...(completeOnboarding ? [ONBOARDING_KEY] : []),
+      DATA_REVISION_KEY,
     ]);
+    if (completeOnboarding && isStartPageOnboardingComplete(items[ONBOARDING_KEY])) {
+      throw new Error("Start Tab onboarding already completed in another extension context");
+    }
     if (localeChange) assertLocalePreference(items[LOCALE_OVERRIDE_KEY], localeChange.expected);
     const prepared = prepareStartPageSettingsWrite(
       value,
@@ -621,12 +628,14 @@ export async function replaceStartPageSettingsWithRuntime(
     const prunedRuntime = normalizeRuntimeState(previousRuntime, prepared.settings);
     const runtime: StartPageRuntimeState = {
       ...prunedRuntime,
-      updatedAt: nextRuntimeRevision(previousRuntime.updatedAt),
+      updatedAt: nextRuntimeRevision(previousRuntime.updatedAt === 0
+        ? Math.max(previousSettings.updatedAt, rawRevisionFloor(items[DATA_REVISION_KEY]))
+        : previousRuntime.updatedAt),
     };
     const previousAlarms = await readClockAlarmSnapshot();
     try {
       await commitStorageMutationWithRevision(
-        [START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY, ...(localeChange ? [LOCALE_OVERRIDE_KEY] : [])],
+        [START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY, ...(localeChange ? [LOCALE_OVERRIDE_KEY] : []), ...(completeOnboarding ? [ONBOARDING_KEY] : [])],
         async () => {
           await chrome.storage.local.set({
             [START_PAGE_SETTINGS_KEY]: prepared.settings,
@@ -635,6 +644,7 @@ export async function replaceStartPageSettingsWithRuntime(
           await chrome.storage.local.remove(LEGACY_INSTANCE_RUNTIME_KEY);
           await reconcileClockAlarmsForRuntime(runtime);
           if (localeChange) await writeLocalePreferenceInExistingTransaction(localeChange.preference);
+          if (completeOnboarding) await chrome.storage.local.set({ [ONBOARDING_KEY]: { onboarded: true } });
         },
         Math.max(prepared.settings.updatedAt, runtime.updatedAt),
       );

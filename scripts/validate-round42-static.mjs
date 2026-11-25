@@ -25,7 +25,7 @@ assert.ok(
   newtab.indexOf("if (await onboardingState())") < newtab.indexOf("settingsWithLayoutPreset(savedSettings, presetId)"),
   "The latest onboarding state must be checked before a preset can be applied",
 );
-assert.match(newtab, /onboardingStorageAction\(changes\[START_PAGE_ONBOARDING_KEY\]\)/);
+assert.match(newtab, /const complete = await onboardingState\(\);[\s\S]*onboardingStorageAction\(\{ newValue: \{ onboarded: complete \} \}\)/);
 assert.match(newtab, /onboardingAction === "dismiss"[\s\S]*dismissOnboarding\(\)/);
 assert.match(newtab, /onboardingAction === "show"[\s\S]*refreshState\(\)[\s\S]*showOnboarding\(\)/);
 assert.match(runtime, /RESET_STORAGE_KEYS[\s\S]*ONBOARDING_KEY/,
@@ -59,3 +59,10 @@ for (const temporary of [
 }
 
 console.log("Round 42 static validation passed");
+
+assert.match(newtab, /completeOnboarding: true/);
+assert.match(runtime, /completeOnboarding && isStartPageOnboardingComplete/);
+assert.match(runtime, /if \(completeOnboarding\) await chrome\.storage\.local\.set\(\{ \[ONBOARDING_KEY\]: \{ onboarded: true \} \}\)/);
+const gate80 = read("src/newtab/newtab-gate.js");
+assert.match(gate80, /navigator\.locks\.request\("start-tab:data-write"/);
+assert.match(gate80, /await readCommitted\(SETTINGS_KEY\)/);

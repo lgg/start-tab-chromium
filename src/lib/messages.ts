@@ -20,7 +20,7 @@ export type Message =
   | { type: "replace-blocked-sites"; sites: string[] }
   | { type: "open-native-new-tab" }
   | { type: "reset-start-page" }
-  | { type: "replace-start-page-settings"; settings: unknown; expectedSettingsUpdatedAt: number; expectedRuntimeUpdatedAt: number; localeChange?: LocaleChange }
+  | { type: "replace-start-page-settings"; settings: unknown; expectedSettingsUpdatedAt: number; expectedRuntimeUpdatedAt: number; localeChange?: LocaleChange; completeOnboarding?: true }
   | { type: "clock-action"; instanceId: string; action: ClockAction }
   | { type: "complete-clock"; instanceId: string; token: string }
   | { type: "reset-clocks" }
@@ -91,7 +91,8 @@ export function isMessage(value: unknown): value is Message {
         && value.expectedRuntimeUpdatedAt <= Number.MAX_SAFE_INTEGER
         && (value.localeChange === undefined || (isRecord(value.localeChange)
           && isLocalePreference(value.localeChange.expected)
-          && isLocalePreference(value.localeChange.preference)));
+          && isLocalePreference(value.localeChange.preference)))
+        && (value.completeOnboarding === undefined || value.completeOnboarding === true);
     case "clock-action":
       return isSafeIdentifier(value.instanceId) && (value.action === "toggle" || value.action === "reset");
     case "complete-clock":
