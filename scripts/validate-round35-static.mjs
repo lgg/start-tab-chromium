@@ -172,3 +172,7 @@ assert.match(formCache69, /host\.replaceChildren\(\.\.\.existing\.nodes\)/);
 for (const source of [editor, themeEditor69, options]) {
   assert.match(source, /return parseNumberField\(input\.value, fallback\)/);
 }
+
+const taskGate82 = read("src/newtab/task-submission-gate.ts");
+assert.match(taskGate82, /submittedDraft\.generation !== this\.draftGeneration/);
+assert.match(runtimeRenderer, /const submittedDraft = submissions\.snapshotDraft\(\)/);

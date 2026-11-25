@@ -421,10 +421,10 @@ export function renderLocalTasks(
       redraw();
       return;
     }
-    const submittedDraft = input.value;
-    submissions.draft = submittedDraft;
-    const title = submittedDraft.trim().slice(0, MAX_LOCAL_TASK_TITLE_LENGTH);
+    submissions.draft = input.value;
+    const title = submissions.draft.trim().slice(0, MAX_LOCAL_TASK_TITLE_LENGTH);
     if (!title || !submissions.begin()) return;
+    const submittedDraft = submissions.snapshotDraft();
     const now = Date.now();
     const task: LocalTask = {
       id: globalThis.crypto?.randomUUID?.() ?? `task-${now.toString(36)}-${Math.random().toString(36).slice(2)}`,
