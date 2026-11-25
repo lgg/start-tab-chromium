@@ -24,7 +24,7 @@ assert.match(guard, /if \(this\.active\) return false/);
 assert.match(options, /if \(!actionGuard\.tryStart\(\)\) return/);
 assert.match(options, /headerActions\.inert = busy[\s\S]*nav\.inert = busy[\s\S]*sections\.inert = busy/);
 assert.match(options, /finally \{[\s\S]*actionGuard\.finish\(\)[\s\S]*setActionBusy\(false\)/);
-assert.match(options, /catch \(error\) \{[\s\S]*await reloadState\(\);[\s\S]*render\(savingGeneral \|\| Boolean\(generalDraft\?\.state\.isDirty\(generalDraft\.signature\(\)\)\)\)/,
+assert.match(options, /catch \(error\) \{[\s\S]*await reloadState\(savingGeneral \|\| Boolean\(generalDraft\?\.state\.isDirty\(generalDraft\.signature\(\)\)\)\);[\s\S]*render\(savingGeneral \|\| Boolean\(generalDraft\?\.state\.isDirty\(generalDraft\.signature\(\)\)\)\)/,
   "Failed Options actions must reload canonical state");
 
 for (const marker of [
