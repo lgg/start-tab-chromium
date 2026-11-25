@@ -199,7 +199,9 @@ async function persistSettingsInTransaction(
 }
 
 export function createDefaultStartPageSettings(now = Date.now()): StartPageSettings {
-  return withBlockTimestamps(null, cloneSettings(DEFAULT_SETTINGS), now);
+  // Stamp the same canonical layout used by clean-install and backup
+  // normalization, not the overlapping raw preset geometry.
+  return withBlockTimestamps(null, normalizeStartPageSettings(undefined), now);
 }
 
 /** Read a normalized view without performing migration writes. */
