@@ -1,4 +1,5 @@
-import { cp, readFile, writeFile } from "node:fs/promises";
+import { cp, lstat, readFile, writeFile } from "node:fs/promises";
+import { assertPathContainsNoLinks } from "./path-safety.mjs";
 import path from "node:path";
 
 import { assertSafeBuildOutputFilesystem } from "./build-output-path.mjs";
@@ -49,15 +50,26 @@ export function createStaticOutputWriter({
   const assertSource = optionalFunction("assertSourceSafe", assertSourceSafe, async () => {});
   const resolvedOutdir = path.resolve(outdir);
 
-  async function guard() {
+  async function guard(destination) {
     await assertSafe(root, temporaryRoot, outdir);
+    await assertPathContainsNoLinks(resolvedOutdir, destination);
+    // Generated destinations should have been removed by onStart. Refuse
+    // any late file, hard link, directory or symlink instead of merging or
+    // truncating content belonging to another process.
+    try {
+      await lstat(destination);
+    } catch (error) {
+      if (error?.code === "ENOENT") return;
+      throw error;
+    }
+    throw new Error(`Build output destination already exists: ${destination}`);
   }
 
   async function copyOne(from, to, options) {
     const destination = resolveOutputTarget(resolvedOutdir, to);
     await assertSource(from, options);
-    await guard();
-    await copyFile(from, destination, options);
+    await guard(destination);
+    await copyFile(from, destination, { ...options, force: false, errorOnExist: true });
   }
 
   async function copyBatch(entries) {
@@ -74,8 +86,11 @@ export function createStaticOutputWriter({
 
   async function writeOne(target, data, options) {
     const destination = resolveOutputTarget(resolvedOutdir, target);
-    await guard();
-    await writeFileValue(destination, data, options);
+    await guard(destination);
+    const exclusiveOptions = typeof options === "string"
+      ? { encoding: options, flag: "wx" }
+      : { ...options, flag: "wx" };
+    await writeFileValue(destination, data, exclusiveOptions);
   }
 
   async function writeOutputFiles(outputFiles, expectedRelativePaths) {

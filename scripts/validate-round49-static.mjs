@@ -45,7 +45,7 @@ assert.match(lifecycle, /Production builds keep esbuild outputs in memory/);
 assert.match(lifecycle, /await invalidateGeneratedOutputs\(\)/,
   "Bundle finalization failures must retain fail-closed generated-output cleanup");
 
-assert.match(finalization, /async function copyOne\(from, to, options\)[\s\S]*await assertSource\(from, options\);[\s\S]*await guard\(\);[\s\S]*await copyFile/,
+assert.match(finalization, /async function copyOne\(from, to, options\)[\s\S]*await assertSource\(from, options\);[\s\S]*await guard\(destination\);[\s\S]*await copyFile/,
   "Concrete static source validation must run before the fresh output guard and cp");
 assert.match(finalization, /async function readOne\(source, options\)[\s\S]*await assertSource\(source, \{ recursive: false \}\)[\s\S]*readFileValue/);
 assert.match(finalization, /Build output target must stay strictly inside the selected outdir/,
@@ -103,3 +103,8 @@ assert.match(manualQa, /bundle/i);
 assert.match(manualQa, /manifest/i);
 
 console.log("Round 49 static validation passed");
+
+assert.match(finalization, /await assertPathContainsNoLinks\(resolvedOutdir, destination\)/);
+assert.match(finalization, /await lstat\(destination\)/);
+assert.match(finalization, /force: false, errorOnExist: true/);
+assert.match(finalization, /flag: "wx"/);

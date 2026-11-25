@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { build as esbuildBuild } from "esbuild";
-import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -148,6 +148,37 @@ try {
   );
   await exactWriter.writeOutputFiles([popupBundle], ["popup.js"]);
   assert.match(await readFile(path.join(exactOutdir, "popup.js"), "utf8"), /popup = true/);
+
+  // A late generated leaf is unsafe even when outdir itself is unchanged.
+  const leaf = path.join(exactOutdir, "manifest.json");
+  await link(protectedFile, leaf);
+  await assert.rejects(() => exactWriter.writeOne(leaf, "must not truncate"), /destination already exists/i);
+  assert.equal(await readFile(protectedFile, "utf8"), "external sentinel");
+  await rm(leaf);
+  await replaceWithLink(leaf);
+  await assert.rejects(() => exactWriter.writeOne(leaf, "must not follow"), /symbolic link or junction/i);
+  assert.equal(await readFile(protectedFile, "utf8"), "external sentinel");
+  await rm(leaf, { recursive: true, force: true });
+  const nested = path.join(exactOutdir, "icons");
+  await mkdir(nested);
+  await symlink(protectedDirectory, path.join(nested, "late"), process.platform === "win32" ? "junction" : "dir");
+  await assert.rejects(() => exactWriter.copyOne(iconsRoot, nested, { recursive: true }), /destination already exists/i);
+  await assert.rejects(() => exactWriter.writeOne(path.join(nested, "late", "new.json"), "must not escape"), /symbolic link or junction/i);
+  assert.equal(await exists(path.join(protectedDirectory, "new.json")), false);
+  const existingFile = path.join(exactOutdir, "popup.html");
+  await writeFile(existingFile, "unrelated file");
+  await assert.rejects(() => exactWriter.copyOne(popupHtml, existingFile), /destination already exists/i);
+  assert.equal(await readFile(existingFile, "utf8"), "unrelated file");
+  const race = path.join(exactOutdir, "race.js");
+  const raceWriter = createStaticOutputWriter({
+    root, temporaryRoot: tmpdir(), outdir: exactOutdir,
+    async write(target, data, options) {
+      await link(protectedFile, target);
+      await writeFile(target, data, options);
+    },
+  });
+  await assert.rejects(() => raceWriter.writeOne(race, "late overwrite"), /EEXIST/i);
+  assert.equal(await readFile(protectedFile, "utf8"), "external sentinel");
 
   // Reproduce the unguarded-bundle gap from Round 48. esbuild compiles fully in
   // memory. After the lifecycle's post-compile output check, replace outdir with
