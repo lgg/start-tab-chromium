@@ -12,6 +12,7 @@ import { actionButton, element, formatDuration } from "./block-renderer-common.j
 import type { BlockRenderContext } from "./block-renderer-types.js";
 import { ClockRequestGate } from "./clock-request-gate.js";
 import { TaskSubmissionGate } from "./task-submission-gate.js";
+import { NoteDraft } from "./note-draft.js";
 
 const clockRequests = new ClockRequestGate();
 
@@ -101,49 +102,143 @@ export function renderClock(
   });
 }
 
+interface NoteSession {
+  draft: NoteDraft;
+  timer: number | undefined;
+  save: (value: string, expectedValue: string) => Promise<void>;
+  reportError: (error: unknown) => void;
+  view?: () => void;
+  resolving: boolean;
+}
+
+const noteSessions = new Map<string, NoteSession>();
+
+export function hasUnsavedNoteDrafts(): boolean {
+  return [...noteSessions.values()].some((session) => session.draft.hasUnsaved || session.resolving);
+}
+
+function clearNoteTimer(session: NoteSession): void {
+  if (session.timer !== undefined) window.clearTimeout(session.timer);
+  session.timer = undefined;
+}
+
+function scheduleNoteSave(session: NoteSession, delay = 180): void {
+  clearNoteTimer(session);
+  if (session.draft.saving || session.draft.failed || !session.draft.hasUnsaved) return;
+  session.timer = window.setTimeout(() => {
+    session.timer = undefined;
+    void flushNoteSave(session);
+  }, delay);
+}
+
+async function flushNoteSave(session: NoteSession): Promise<void> {
+  clearNoteTimer(session);
+  const attempt = session.draft.beginSave();
+  if (!attempt) return;
+  session.view?.();
+  try {
+    await session.save(attempt.value, attempt.expectedValue);
+    session.draft.succeed(attempt);
+  } catch (error) {
+    session.draft.fail(attempt);
+    session.reportError(error);
+  } finally {
+    session.view?.();
+    // A new draft may have been entered while the older write was in flight.
+    // It uses the acknowledged baseline, not a newly constructed renderer's.
+    scheduleNoteSave(session, 0);
+  }
+}
+
 export function renderNote(
   block: Extract<BlockInstance, { type: "note" }>,
   container: HTMLElement,
   context: BlockRenderContext,
 ): void {
+  const canonicalValue = ownValue(context.runtime.notes, block.id) ?? "";
+  const save = (value: string, expectedValue: string): Promise<void> => context.setRuntime({
+    kind: "note",
+    instanceId: block.id,
+    value,
+    expectedValue,
+  });
+  const session: NoteSession = noteSessions.get(block.id) ?? {
+    draft: new NoteDraft(canonicalValue),
+    timer: undefined,
+    save,
+    reportError: context.reportError,
+    resolving: false,
+  };
+  noteSessions.set(block.id, session);
+  session.draft.observeCanonical(canonicalValue);
+  session.save = save;
+  session.reportError = context.reportError;
+
   const textarea = element("textarea", "note");
-  let persistedValue = ownValue(context.runtime.notes, block.id) ?? "";
-  textarea.value = persistedValue;
+  textarea.dataset.noteId = block.id;
   textarea.maxLength = MAX_NOTE_LENGTH;
   textarea.placeholder = block.config.placeholder || context.i18n.t("notePlaceholder");
   textarea.setAttribute("aria-label", blockUsesDefaultTitle(block) ? context.i18n.t(blockTitleKey(block.type)) : block.title);
-  let saveTimer = 0;
-  let saveJob: Promise<void> = Promise.resolve();
+  const status = element("div", "note-save-status");
+  const message = element("p", "note-save-status__message", context.i18n.t("noteDraftSaveFailed"));
+  message.setAttribute("role", "alert");
+  const controls = element("div", "note-save-status__controls");
 
-  const queueSave = (value: string): Promise<void> => {
-    const nextValue = value.slice(0, MAX_NOTE_LENGTH);
-    saveJob = saveJob.catch(() => undefined).then(async () => {
-      await context.setRuntime({
-        kind: "note",
-        instanceId: block.id,
-        value: nextValue,
-        expectedValue: persistedValue,
-      });
-      persistedValue = nextValue;
-    });
-    return saveJob;
+  const resolveDraft = async (discard: boolean): Promise<void> => {
+    if (session.resolving || session.draft.saving || !session.draft.failed) return;
+    session.resolving = true;
+    session.view?.();
+    try {
+      // Read the actual stored state, not this render's optimistic runtime.
+      const currentRuntime = await getStartPageRuntimeState();
+      const current = ownValue(currentRuntime.notes, block.id) ?? "";
+      if (discard) {
+        if (!window.confirm(context.i18n.t("noteDraftDiscardConfirm"))) return;
+        session.draft.discard(current);
+      } else {
+        if (current !== session.draft.expectedValue
+          && !window.confirm(context.i18n.t("noteDraftOverwriteConfirm"))) return;
+        session.draft.rebaseForRetry(current);
+      }
+      session.view?.();
+      if (!discard) await flushNoteSave(session);
+    } finally {
+      session.resolving = false;
+      session.view?.();
+    }
   };
 
+  const retry = actionButton(context.i18n.t("noteDraftRetry"), () => resolveDraft(false), "button button--secondary", context.reportError);
+  const discard = actionButton(context.i18n.t("noteDraftDiscard"), () => resolveDraft(true), "button button--secondary", context.reportError);
+  controls.append(retry, discard);
+  status.append(message, controls);
+  const wrapper = element("div", "note-editor");
+  wrapper.append(textarea, status);
+  container.append(wrapper);
+
+  const update = (): void => {
+    if (textarea.value !== session.draft.value) textarea.value = session.draft.value;
+    status.hidden = !session.draft.failed;
+    retry.disabled = session.resolving;
+    discard.disabled = session.resolving;
+    // Failed drafts remain visible but must not masquerade as canonical state
+    // or hide subsequent external storage events.
+    if (!session.draft.failed) context.runtime.notes[block.id] = session.draft.value;
+  };
+  session.view = update;
+  update();
+
   textarea.addEventListener("input", () => {
-    window.clearTimeout(saveTimer);
-    context.runtime.notes[block.id] = textarea.value;
-    saveTimer = window.setTimeout(() => {
-      saveTimer = 0;
-      void queueSave(textarea.value).catch(() => undefined);
-    }, 180);
+    session.draft.edit(textarea.value.slice(0, MAX_NOTE_LENGTH));
+    update();
+    scheduleNoteSave(session);
   });
   context.registerCleanup(() => {
-    const pending = saveTimer !== 0;
-    window.clearTimeout(saveTimer);
-    saveTimer = 0;
-    if (pending) void queueSave(textarea.value).catch(() => undefined);
+    if (session.view === update) session.view = undefined;
+    // Rendering no longer owns the save queue. Start any pending edit now,
+    // but let a currently running save finish before sending its successor.
+    void flushNoteSave(session);
   });
-  container.append(textarea);
 }
 
 function cloneTasks(tasks: readonly LocalTask[]): LocalTask[] {

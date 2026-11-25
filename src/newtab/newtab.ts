@@ -26,6 +26,7 @@ import {
   type StartPageSettings,
 } from "../lib/start-page-settings.js";
 import { renderBlockContent, type BlockRenderContext } from "./block-renderers.js";
+import { hasUnsavedNoteDrafts } from "./block-renderers-runtime.js";
 import { LayoutEditor } from "./layout-editor.js";
 import { RenderScheduler } from "./render-scheduler.js";
 import { recoverRuntimeMutation } from "./runtime-mutation-recovery.js";
@@ -229,6 +230,10 @@ function updateSettingsButton(settings: StartPageSettings): void {
 
 function render(): void {
   if (disposed) return;
+  const active = document.activeElement;
+  const noteFocus = active instanceof HTMLTextAreaElement && grid.contains(active) && active.dataset.noteId
+    ? { id: active.dataset.noteId, start: active.selectionStart, end: active.selectionEnd, direction: active.selectionDirection, scrollTop: active.scrollTop }
+    : null;
   clearRenderCleanups();
   const settings = editor.settings;
   const blocks = visibleBlocks(settings);
@@ -287,6 +292,16 @@ function render(): void {
   };
   grid.replaceChildren(...blocks.map((block) => cardFor(block, context)));
   if (blocks.length === 0) grid.append(element("p", "empty-layout", i18n.t("emptyLayout")));
+  if (noteFocus && (document.activeElement === document.body || document.activeElement === null)
+    && !page.hasAttribute("inert")) {
+    const replacement = Array.from(grid.querySelectorAll<HTMLTextAreaElement>("textarea[data-note-id]"))
+      .find((candidate) => candidate.dataset.noteId === noteFocus.id);
+    if (replacement) {
+      replacement.focus({ preventScroll: true });
+      replacement.setSelectionRange(noteFocus.start, noteFocus.end, noteFocus.direction);
+      replacement.scrollTop = noteFocus.scrollTop;
+    }
+  }
 }
 
 const renderScheduler = new RenderScheduler({
@@ -462,7 +477,7 @@ function handleResize(): void {
 }
 
 function handleBeforeUnload(event: BeforeUnloadEvent): void {
-  if (!editor.hasUnsavedChanges) return;
+  if (!editor.hasUnsavedChanges && !hasUnsavedNoteDrafts()) return;
   event.preventDefault();
   event.returnValue = "";
 }

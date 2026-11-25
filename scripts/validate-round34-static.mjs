@@ -7,6 +7,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 
 const newtab = read("src/newtab/newtab.ts");
+const notes = read("src/newtab/block-renderers-runtime.ts");
+const noteDraft = read("src/newtab/note-draft.ts");
 const storagePlan = read("src/newtab/storage-change-plan.ts");
 const integrations = read("src/newtab/block-renderers-integrations.ts");
 const editor = read("src/lib/block-settings-editor.ts");
@@ -24,6 +26,15 @@ assert.match(newtab,
   "Equal runtime storage echoes must update the revision without rebuilding the page");
 assert.match(newtab, /!isFutureRuntimeSchema\(runtimeChange\.newValue\)/,
   "Future runtime schemas must never be silently normalized while suppressing refresh");
+
+assert.match(notes, /const noteSessions = new Map<string, NoteSession>\(\)/);
+assert.match(notes, /session\.draft\.observeCanonical\(canonicalValue\)/);
+assert.match(notes, /await session\.save\(attempt\.value, attempt\.expectedValue\)[\s\S]*session\.draft\.succeed\(attempt\)[\s\S]*session\.draft\.fail\(attempt\)/);
+assert.match(notes, /current !== session\.draft\.expectedValue[\s\S]*noteDraftOverwriteConfirm[\s\S]*rebaseForRetry\(current\)/);
+assert.match(noteDraft, /if \(!this\.hasUnsaved\)/);
+assert.match(noteDraft, /this\.baseline = attempt\.value/);
+assert.match(newtab, /!editor\.hasUnsavedChanges && !hasUnsavedNoteDrafts\(\)/);
+assert.match(newtab, /textarea\[data-note-id\][\s\S]*setSelectionRange/);
 
 assert.match(integrations, /export function visibleWebUrlItems/,
   "Browser-derived URLs need one bounded safe filtering helper");

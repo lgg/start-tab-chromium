@@ -37,5 +37,20 @@
   },
   "nativeNewTabFailed": {
     "message": "Couldn't open the browser's native new tab. Try again."
+  },
+  "noteDraftSaveFailed": {
+    "message": "The note could not be saved. Your unsaved text is still here."
+  },
+  "noteDraftRetry": {
+    "message": "Retry save"
+  },
+  "noteDraftDiscard": {
+    "message": "Use saved note"
+  },
+  "noteDraftDiscardConfirm": {
+    "message": "Discard this unsaved draft and load the saved note?"
+  },
+  "noteDraftOverwriteConfirm": {
+    "message": "The saved note changed elsewhere. Overwrite that saved text with this draft?"
   }
 }
