@@ -125,3 +125,7 @@ for (const phrase of ["native new tab", "fallback", "temporary", "rapid", "alert
 }
 
 console.log("Round 51 static validation passed");
+
+assert.match(nativeTab, /async function stillOwnsTemporaryTab[\s\S]*chrome\.tabs\.get\(tabId\)[\s\S]*urls\.every\(\(url\) => attempted\.has\(url\)\)/);
+assert.match(nativeTab, /const expiresAt = await writeOwnedBypass\(tabId, timeoutMs\);[\s\S]*if \(!await stillOwnsTemporaryTab\(tabId, attempted\)\) break;[\s\S]*await chrome\.tabs\.update/);
+assert.match(nativeTab, /if \(await stillOwnsTemporaryTab\(tabId, attempted\)\) await chrome\.tabs\.remove\(tabId\)/);
