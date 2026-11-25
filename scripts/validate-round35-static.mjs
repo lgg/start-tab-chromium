@@ -180,3 +180,8 @@ assert.match(runtimeRenderer, /const submittedDraft = submissions\.snapshotDraft
 assert.match(taskGate82, /!retained\.has\(id\) && !session\.pending && !session\.draft/);
 assert.match(newtab, /renderHiddenTextDrafts\(hiddenTextHost,[\s\S]*hiddenTaskDrafts[\s\S]*hiddenSearchDrafts/);
 assert.doesNotMatch(newtab, /pruneSearchDrafts/);
+
+for (const renderer87 of [runtimeRenderer, links76]) {
+  assert.match(renderer87, /await context\.setRuntime\([\s\S]*await refreshAfterAcknowledgedRuntimeWrite\(/);
+  assert.match(renderer87, /runtimeSavedRefreshFailed/);
+}

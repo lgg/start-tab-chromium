@@ -35,3 +35,17 @@ export async function recoverRuntimeMutation(
   options.queueRender();
   throw mutationError;
 }
+
+/** An older worker may acknowledge a mutation without a revision. A follow-up
+ * read is useful but cannot undo that committed write or turn it into failure.
+ * The caller still schedules its ordinary state refresh after settling. */
+export async function refreshAfterAcknowledgedRuntimeWrite(
+  refresh: () => Promise<void>,
+  reportRefreshError: (error: unknown) => void,
+): Promise<void> {
+  try {
+    await refresh();
+  } catch (error) {
+    reportRefreshError(error);
+  }
+}
