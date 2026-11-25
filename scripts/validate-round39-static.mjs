@@ -64,3 +64,8 @@ assert.match(layoutEditor, /let persisted = ack\.savedSettings/);
 assert.match(layoutEditor, /chooseAcknowledgedSettings\(this\.saved, persisted\)/);
 assert.match(layoutEditor, /if \(!this\.dirty && this\.draftVersion\.updatedAt !== this\.saved\.updatedAt\)/);
 assert.match(layoutEditor, /layoutSavedRefreshFailed/);
+
+const scheduler86 = read("src/newtab/render-scheduler.ts");
+assert.match(scheduler86, /if \(forceRender && !this\.disposed\)/);
+assert.match(scheduler86, /new AggregateError\(\[error, renderError\]/);
+assert.match(scheduler86, /const next = this\.job\.catch\(\(\) => undefined\)\.then\(operation\)/);
