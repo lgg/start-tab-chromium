@@ -39,6 +39,7 @@ import {
   parseClockAlarmName,
   pauseClockState,
   reconcileStoredClockAlarms,
+  rearmClockAlarmIfPending,
   replaceStartPageSettingsWithRuntime,
   resetAllClockRuntimeWithAlarms,
   resetClockState,
@@ -155,7 +156,7 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   const parsed = parseClockAlarmName(alarm.name);
   if (!parsed) return;
-  void runRuntimeJob(() => finishClockCompletion(parsed.instanceId, parsed.token)).catch(ignoreBackgroundError);
+  void runRuntimeJob(() => finishClockAlarm(parsed.instanceId, parsed.token)).catch(ignoreBackgroundError);
 });
 
 chrome.runtime.onMessage.addListener(
@@ -312,6 +313,23 @@ async function performClockAction(instanceId: string, action: ClockAction): Prom
 
 async function resetAllClocks(): Promise<void> {
   await resetAllClockRuntimeWithAlarms();
+}
+
+async function finishClockAlarm(instanceId: string, token: string): Promise<void> {
+  try {
+    await finishClockCompletion(instanceId, token);
+  } catch (error) {
+    try {
+      // Avoid a tight retry loop when storage is temporarily unavailable.
+      await rearmClockAlarmIfPending(instanceId, token, 30_000);
+    } catch (rearmError) {
+      throw new AggregateError([error, rearmError], "Clock completion and alarm retry both failed");
+    }
+    throw error;
+  }
+  // A clock change or stale token makes this a no-op. An early alarm must
+  // still have its original deadline covered even when no page is open.
+  await rearmClockAlarmIfPending(instanceId, token, 100);
 }
 
 async function finishClockCompletion(instanceId: string, token: string): Promise<void> {

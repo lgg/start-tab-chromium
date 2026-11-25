@@ -111,3 +111,7 @@ try {
 }
 
 console.log("Round 7 static validation passed");
+
+assert.match(serviceWorker, /runRuntimeJob\(\(\) => finishClockAlarm\(parsed\.instanceId, parsed\.token\)\)/);
+assert.match(serviceWorker, /await rearmClockAlarmIfPending\(instanceId, token, 30_000\)/);
+assert.match(runtime, /export async function rearmClockAlarmIfPending[\s\S]*withStorageLock\("data-write"[\s\S]*clock\.completionToken !== token[\s\S]*chrome\.alarms\.create/);
