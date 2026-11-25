@@ -321,6 +321,16 @@ async function retrySyncConflicts<T>(operation: () => Promise<T>): Promise<T> {
   throw lastConflict ?? new StartTabDataRevisionConflictError("Start Tab data kept changing during Browser Sync; retry when edits are complete");
 }
 
+/** Metadata and chunks can arrive independently from Chrome Sync. A smart
+ * upload may claim a missing frame only when there is no remote evidence.
+ * An explicit Upload intentionally replaces an older/corrupt backup. */
+function assertEmptyRemoteFrame(storage: Record<string, unknown>): void {
+  if (Object.hasOwn(storage, META_KEY) || Object.keys(storage).some((key) =>
+    key.startsWith(CHUNK_PREFIX) && /^\d+$/.test(key.slice(CHUNK_PREFIX.length)) && storage[key] !== "")) {
+    throw new Error("Chrome sync backup metadata or chunks are incomplete; retry sync after the remote backup arrives, or use explicit Upload to replace it");
+  }
+}
+
 async function writeRemoteSnapshot(
   snapshot: Awaited<ReturnType<typeof prepareSnapshot>>,
   expectedRemote?: ParsedMeta | null,
@@ -330,6 +340,7 @@ async function writeRemoteSnapshot(
   if (expectedRemote !== undefined && !parsedMetaEqual(parseMeta(existing[META_KEY]), expectedRemote)) {
     throw new ChromeSyncRemoteConflictError();
   }
+  if (expectedRemote === null) assertEmptyRemoteFrame(existing);
   const meta: SyncMeta = { version: SYNC_META_VERSION, updatedAt: new Date().toISOString(), contentUpdatedAt: snapshot.contentUpdatedAt,
     deviceId: await deviceId(), snapshotId: snapshot.bundle.snapshotId, checksum: snapshot.checksum,
     contentChecksum: snapshot.contentChecksum, chunks: snapshot.chunks.length, backupVersion: snapshot.bundle.version };
@@ -344,7 +355,14 @@ async function writeRemoteSnapshot(
   await assertLocalRevisionGuard(guard, "Start Tab data changed before the Browser Sync upload could commit");
   // Chrome Sync is not a distributed CAS service. Revalidate any remotely
   // observed decision as late as possible, before overwriting the frame.
-  if (expectedRemote !== undefined && !parsedMetaEqual(await readRemoteMeta(), expectedRemote)) {
+  if (expectedRemote === null) {
+    // Repeat the full-frame absence check immediately before writing. Chunks
+    // alone may have arrived since the quota read without changing metadata.
+    const current = await chrome.storage.sync.get(null);
+    assertCompatibleSyncMeta(current[META_KEY], "remote");
+    if (parseMeta(current[META_KEY]) !== null) throw new ChromeSyncRemoteConflictError();
+    assertEmptyRemoteFrame(current);
+  } else if (expectedRemote !== undefined && !parsedMetaEqual(await readRemoteMeta(), expectedRemote)) {
     throw new ChromeSyncRemoteConflictError();
   }
   await chrome.storage.sync.set(payload);

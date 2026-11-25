@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { changedTabNavigationUrl, currentTabNavigationUrl, NewTabRedirectGuard } from "../src/lib/tab-navigation-change.js";
-import { samePopupTarget, type PopupTarget } from "../src/popup/popup-target.js";
+import { mayReloadPopupTarget, readStablePopupTarget, samePopupTarget, type PopupTarget } from "../src/popup/popup-target.js";
 
 const localState: Record<string, unknown> = {};
 const chromeMock = {
@@ -199,3 +199,26 @@ assert.equal(isBlockedPageNavigation(page92 + "?site=example.com", page92), true
 assert.equal(isBlockedPageNavigation("chrome-extension://another/blocked.html", page92), false);
 assert.equal(isBlockedPageNavigation("https://starttab/blocked.html", page92), false);
 console.log("Round 92 per-tab blocked navigation regressions passed");
+
+let active97: { id: number; url: string; pendingUrl?: string } = { id: 7, url: "https://example.com/old", pendingUrl: "https://other.example/new" };
+const seen97: string[] = [];
+const read97 = () => Promise.resolve({ ...active97 });
+const match97 = async (url: string) => { seen97.push(url); return null; };
+assert.deepEqual(await readStablePopupTarget(read97, match97), { tabId: 7, url: "https://other.example/new", host: "other.example", blockedHost: null });
+assert.deepEqual(seen97, ["https://other.example/new"], "A pending destination supersedes the old tab URL");
+active97 = { id: 7, url: "https://example.com/old" };
+assert.equal(await readStablePopupTarget(read97, async () => { active97 = { id: 7, url: "https://other.example/new" }; return null; }), null,
+  "A host change during blocklist IO invalidates the action");
+active97 = { id: 7, url: "https://example.com/old" };
+assert.equal(await readStablePopupTarget(read97, async () => { active97 = { id: 8, url: "https://example.com/old" }; return null; }), null,
+  "A tab switch during blocklist IO invalidates the action");
+active97 = { id: 7, url: "https://example.com/old" };
+assert.deepEqual(await readStablePopupTarget(read97, async () => { active97.url = "https://example.com/new"; return "example.com"; }),
+  { tabId: 7, url: "https://example.com/new", host: "example.com", blockedHost: "example.com" });
+assert.equal(mayReloadPopupTarget(displayed, { id: 7, url: "https://example.com/current" }), true);
+assert.equal(mayReloadPopupTarget(displayed, { id: 7, url: "https://example.com/current", pendingUrl: "https://other.example/" }), false);
+assert.equal(mayReloadPopupTarget(displayed, { id: 7, url: "https://example.com/current", pendingUrl: "https://example.com/next" }), false);
+assert.equal(mayReloadPopupTarget(displayed, { id: 7, url: "https://other.example/" }), false);
+assert.equal(mayReloadPopupTarget(displayed, { id: 8, url: "https://example.com/current" }), false);
+assert.equal(mayReloadPopupTarget(displayed, undefined), false);
+console.log("Round 97 stable popup target and guarded reload regressions passed");

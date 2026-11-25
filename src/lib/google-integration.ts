@@ -168,13 +168,20 @@ export async function listCalendarEvents(
     }
     pagesRead += 1;
 
-    const nextPageToken = typeof payload.nextPageToken === "string" ? payload.nextPageToken : "";
-    if (!nextPageToken || seenPageTokens.has(nextPageToken)) break;
+    // A filled widget is complete even if more events exist. Otherwise a
+    // malformed/repeated token or page cap is an incomplete listing, not
+    // evidence that the calendar is empty.
+    if (events.length >= limit) return events.slice(0, limit);
+    const nextPageToken = payload.nextPageToken;
+    if (nextPageToken === undefined || nextPageToken === "") return events;
+    if (typeof nextPageToken !== "string" || !nextPageToken.trim() || seenPageTokens.has(nextPageToken)) {
+      throw new Error("Google Calendar event listing did not advance");
+    }
     seenPageTokens.add(nextPageToken);
     pageToken = nextPageToken;
   }
 
-  return events.slice(0, limit);
+  throw new Error("Google Calendar event listing exceeded the safe pagination limit");
 }
 
 export function driveBackupListUrl(): string {

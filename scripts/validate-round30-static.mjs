@@ -33,8 +33,11 @@ assert.ok(blocklist.indexOf("assertDynamicRuleCapacity(foreignRules, rules)")
   < blocklist.indexOf("updateDynamicRules({"),
 "Capacity validation must happen before the atomic DNR mutation");
 
-assert.match(google, /if \(!nextPageToken \|\| seenPageTokens\.has\(nextPageToken\)\) break;/,
-  "Calendar pagination must follow any non-empty nextPageToken regardless of q");
+assert.match(google, /if \(nextPageToken === undefined \|\| nextPageToken === ""\) return events;/,
+  "Only a missing or empty page token indicates a fully exhausted Calendar listing");
+assert.match(google, /seenPageTokens\.has\(nextPageToken\)\) \{[\s\S]*throw new Error\("Google Calendar event listing did not advance"\)/);
+assert.match(google, /seenPageTokens\.add\(nextPageToken\);\s*pageToken = nextPageToken;/,
+  "Calendar pagination must follow any valid non-empty nextPageToken regardless of q");
 assert.doesNotMatch(google, /if \(!normalizedQuery \|\| !nextPageToken/,
   "A missing search query must not be treated as proof that the first page is complete");
 

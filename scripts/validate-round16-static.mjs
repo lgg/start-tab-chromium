@@ -48,3 +48,7 @@ console.log("Round 16 static validation passed");
 
 assert.match(runtime, /export async function getStartPageRuntimeState[\s\S]*return withStorageLock\("data-write", async \(\) => \{[\s\S]*chrome\.storage\.local\.get\(\[START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY\]\)/);
 assert.match(focus, /export async function getFocusStats\(\): Promise<FocusStats> \{\s*return withStorageLock\("data-write", \(\) => readStats\(\)\)/);
+
+const settings94 = read("src/lib/start-page-settings.ts");
+assert.match(settings94, /export async function getStartPageSettings\(\): Promise<StartPageSettings> \{[^}]*return withStorageLock\("data-write", async \(\) =>/);
+assert.match(settings94, /export async function getStartPageMigrationReport[\s\S]*withStorageLock\("data-write", \(\) => chrome\.storage\.local\.get\(START_PAGE_MIGRATION_REPORT_KEY\)\)/);

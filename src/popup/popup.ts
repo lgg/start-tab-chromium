@@ -3,7 +3,7 @@
  * from the blocklist. Mutations are routed through the service worker.
  */
 
-import { blockedSiteForUrl, getBlockedSites, hostFromUrl } from "../lib/blocklist.js";
+import { blockedSiteForUrl, getBlockedSites } from "../lib/blocklist.js";
 import {
   loadI18n,
   setLocalePreference,
@@ -11,7 +11,7 @@ import {
   type LocalePreference,
 } from "../lib/i18n.js";
 import { sendMessage, type Message } from "../lib/messages.js";
-import { samePopupTarget, type PopupTarget } from "./popup-target.js";
+import { mayReloadPopupTarget, readStablePopupTarget, samePopupTarget, type PopupTarget } from "./popup-target.js";
 
 const titleEl = document.getElementById("title") as HTMLHeadingElement;
 const siteEl = document.getElementById("site") as HTMLParagraphElement;
@@ -37,11 +37,7 @@ async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {
 }
 
 async function getActiveTarget(): Promise<PopupTarget | null> {
-  const tab = await getActiveTab();
-  const url = tab?.url;
-  const host = url ? hostFromUrl(url) : null;
-  if (typeof tab?.id !== "number" || !url || !host) return null;
-  return { tabId: tab.id, url, host, blockedHost: await blockedSiteForUrl(url) };
+  return readStablePopupTarget(getActiveTab, blockedSiteForUrl);
 }
 
 function show(el: HTMLElement, text?: string): void {
@@ -70,9 +66,11 @@ function setActionPending(pending: boolean): void {
   document.body.setAttribute("aria-busy", String(pending));
 }
 
-async function reloadTabIfPossible(tabId: number): Promise<void> {
+async function reloadTabIfPossible(target: PopupTarget): Promise<void> {
   try {
-    await chrome.tabs.reload(tabId);
+    const tab = await chrome.tabs.get(target.tabId);
+    if (!mayReloadPopupTarget(target, tab)) return;
+    await chrome.tabs.reload(target.tabId);
   } catch {
     // Some browser/internal pages cannot be reloaded by an extension after the mutation succeeds.
   }
@@ -139,7 +137,7 @@ async function mutateDisplayedTarget(expected: PopupTarget): Promise<void> {
       ? { type: "unblock", host: current.blockedHost }
       : { type: "block", host: current.host };
     if (!(await sendAction(message))) return;
-    await reloadTabIfPossible(current.tabId);
+    await reloadTabIfPossible(current);
     window.close();
   } finally {
     setActionPending(false);

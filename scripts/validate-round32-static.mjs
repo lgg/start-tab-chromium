@@ -53,3 +53,6 @@ for (const command of ["node scripts/run-round32-fixtures.mjs", "node scripts/va
 }
 
 console.log("Round 32 static validation passed");
+
+assert.match(chromeSync, /if \(expectedRemote === null\) assertEmptyRemoteFrame\(existing\)/);
+assert.match(chromeSync, /if \(expectedRemote === null\) \{[\s\S]*const current = await chrome\.storage\.sync\.get\(null\);[\s\S]*assertEmptyRemoteFrame\(current\)/);

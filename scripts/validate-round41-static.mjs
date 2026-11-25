@@ -93,3 +93,8 @@ for (const catalog of [en, ru]) {
   assert.ok(catalog.popupLanguageSavedRefreshFailed?.message);
   assert.ok(catalog.popupLanguageRefreshRequired?.message);
 }
+
+assert.match(popup, /return readStablePopupTarget\(getActiveTab, blockedSiteForUrl\)/);
+assert.match(popupTarget, /const url = currentTabNavigationUrl\(tab\)/);
+assert.match(popupTarget, /const blockedHost = await blockedSiteForUrl\(initial\.url\);\s*const current = tabTarget\(await readTab\(\)\)/);
+assert.match(popup, /const tab = await chrome\.tabs\.get\(target\.tabId\);\s*if \(!mayReloadPopupTarget\(target, tab\)\) return;\s*await chrome\.tabs\.reload\(target\.tabId\)/);
