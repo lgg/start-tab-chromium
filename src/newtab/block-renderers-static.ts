@@ -53,6 +53,10 @@ export function renderDateTime(
 
 const searchDrafts = new WidgetTextDrafts();
 
+export function hasSearchDrafts(): boolean {
+  return searchDrafts.hasDrafts();
+}
+
 export function pruneSearchDrafts(retained: ReadonlySet<string>): void {
   searchDrafts.prune(retained);
 }

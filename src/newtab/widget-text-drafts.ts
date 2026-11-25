@@ -7,6 +7,7 @@ export class WidgetTextDrafts {
     if (value) this.values.set(id, value);
     else this.values.delete(id);
   }
+  hasDrafts(): boolean { return this.values.size > 0; }
   prune(retained: ReadonlySet<string>): void {
     for (const id of this.values.keys()) {
       if (!retained.has(id)) this.values.delete(id);

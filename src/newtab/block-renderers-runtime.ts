@@ -14,6 +14,7 @@ import type { BlockRenderContext } from "./block-renderer-types.js";
 import { ClockRequestGate } from "./clock-request-gate.js";
 import { TaskFormSessions, type TaskFormSession } from "./task-submission-gate.js";
 import { NoteDraft } from "./note-draft.js";
+import { hiddenDraftIds } from "./protected-page-drafts.js";
 
 const clockRequests = new ClockRequestGate();
 
@@ -109,6 +110,7 @@ interface NoteSession {
   save: (value: string, expectedValue: string) => Promise<number | undefined>;
   requestRefresh: () => void;
   reportError: (error: unknown) => void;
+  title: string;
   view?: () => void;
   resolving: boolean;
 }
@@ -147,6 +149,7 @@ async function flushNoteSave(session: NoteSession): Promise<void> {
     session.reportError(error);
   } finally {
     session.view?.();
+    if (!session.view) session.requestRefresh();
     // A new draft may have been entered while the older write was in flight.
     // It uses the acknowledged baseline, not a newly constructed renderer's.
     scheduleNoteSave(session, 0);
@@ -171,6 +174,7 @@ export function renderNote(
     save,
     requestRefresh: context.requestRender,
     reportError: context.reportError,
+    title: block.title,
     resolving: false,
   };
   noteSessions.set(block.id, session);
@@ -178,6 +182,7 @@ export function renderNote(
   session.save = save;
   session.requestRefresh = context.requestRender;
   session.reportError = context.reportError;
+  session.title = blockUsesDefaultTitle(block) ? context.i18n.t(blockTitleKey(block.type)) : block.title;
 
   const textarea = element("textarea", "note");
   textarea.dataset.noteId = block.id;
@@ -248,7 +253,59 @@ export function renderNote(
   });
 }
 
+/** Keep inaccessible unsaved text available without writing it to another
+ * widget or storing private drafts in the backup/sync payload. */
+export function renderHiddenNoteDrafts(
+  host: HTMLElement,
+  visible: ReadonlySet<string>,
+  retained: ReadonlySet<string>,
+  context: BlockRenderContext,
+): void {
+  for (const [id, session] of noteSessions) {
+    if (!retained.has(id) && !visible.has(id) && !session.draft.hasUnsaved && !session.resolving) {
+      clearNoteTimer(session);
+      noteSessions.delete(id);
+    }
+  }
+  const hidden = hiddenDraftIds(Array.from(noteSessions, ([id, session]) => [id, { hasUnsaved: session.draft.hasUnsaved || session.resolving }] as const), visible);
+  host.hidden = hidden.length === 0;
+  if (hidden.length === 0) { host.replaceChildren(); return; }
+  const heading = element("h2", "", context.i18n.t("hiddenNoteDrafts"));
+  const description = element("p", "", context.i18n.t("hiddenNoteDraftsDescription"));
+  const entries = hidden.flatMap((id) => {
+    const session = noteSessions.get(id);
+    if (!session) return [];
+    const row = element("div", "hidden-note-draft");
+    const title = element("strong", "", session.title);
+    const text = element("textarea", "note");
+    text.readOnly = true;
+    text.value = session.draft.value;
+    text.setAttribute("aria-label", session.title);
+    const select = actionButton(context.i18n.t("hiddenNoteSelect"), () => {
+      text.focus();
+      text.select();
+    }, "button button--secondary", context.reportError);
+    const discard = actionButton(context.i18n.t("hiddenNoteDiscard"), () => {
+      if (noteSessions.get(id) !== session || session.draft.saving || session.resolving) return;
+      if (!window.confirm(context.i18n.t("noteDraftDiscardConfirm"))) return;
+      clearNoteTimer(session);
+      noteSessions.delete(id);
+      context.requestRender();
+    }, "button button--secondary", context.reportError);
+    discard.disabled = session.draft.saving || session.resolving;
+    const actions = element("div", "note-save-status__controls");
+    actions.append(select, discard);
+    row.append(title, text, actions);
+    return [row];
+  });
+  host.replaceChildren(heading, description, ...entries);
+}
+
 const taskForms = new TaskFormSessions();
+
+export function hasPendingTaskDrafts(): boolean {
+  return taskForms.hasPendingDrafts();
+}
 
 export function pruneTaskForms(retained: ReadonlySet<string>): void {
   taskForms.prune(retained);

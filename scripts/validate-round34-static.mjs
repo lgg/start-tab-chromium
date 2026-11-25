@@ -105,4 +105,8 @@ assert.match(staticWidgets, /const url = buildSearchUrl\(provider\.urlTemplate, 
 assert.match(options, /if \(next\.layout\.zone !== baseSettings\.layout\.zone\)/);
 assert.match(options, /if \(actionGuard\.needsRefresh\)[\s\S]*optionsRefreshedRetry/);
 assert.match(options, /optionsSavedRefreshFailed/);
-assert.match(newtab, /withStorageLock\("data-write", getLocalePreference\)[\s\S]*committed !== loadedLocalePreference/);
+assert.match(newtab, /withStorageLock\("data-write", getLocalePreference\)[\s\S]*localeReloadDecision\(loadedLocalePreference, committed, hasProtectedWork\(\), localeReloadDeferred\)/);
+assert.match(newtab, /editor\.isActive \|\| hasUnsavedNoteDrafts\(\) \|\| hasPendingTaskDrafts\(\)/);
+assert.match(newtab, /renderHiddenNoteDrafts\(hiddenNotesHost/);
+assert.match(notes, /text\.readOnly = true;[\s\S]*text\.value = session\.draft\.value/);
+assert.match(notes, /noteSessions\.get\(id\) !== session \|\| session\.draft\.saving \|\| session\.resolving/);

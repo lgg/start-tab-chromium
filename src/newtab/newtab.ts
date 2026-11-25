@@ -25,8 +25,9 @@ import {
   type StartPageSettings,
 } from "../lib/start-page-settings.js";
 import { renderBlockContent, type BlockRenderContext } from "./block-renderers.js";
-import { hasUnsavedNoteDrafts, pruneTaskForms } from "./block-renderers-runtime.js";
-import { pruneSearchDrafts, pruneLinkPages } from "./block-renderers-static.js";
+import { hasUnsavedNoteDrafts, hasPendingTaskDrafts, pruneTaskForms, renderHiddenNoteDrafts } from "./block-renderers-runtime.js";
+import { pruneSearchDrafts, pruneLinkPages, hasSearchDrafts } from "./block-renderers-static.js";
+import { localeReloadDecision } from "./protected-page-drafts.js";
 import { LayoutEditor } from "./layout-editor.js";
 import { RenderScheduler } from "./render-scheduler.js";
 import { recoverRuntimeMutation } from "./runtime-mutation-recovery.js";
@@ -76,6 +77,39 @@ const statusRegion = requireElement<HTMLElement>("statusRegion");
 
 let i18n: I18n;
 let loadedLocalePreference: LocalePreference;
+let localeReloadDeferred = false;
+let localeCheckGeneration = 0;
+const localeNotice = element("section", "draft-recovery");
+localeNotice.hidden = true;
+const hiddenNotesHost = element("section", "draft-recovery");
+hiddenNotesHost.hidden = true;
+page.insertBefore(localeNotice, grid);
+page.insertBefore(hiddenNotesHost, grid);
+
+function hasProtectedWork(): boolean {
+  return editor.isActive || hasUnsavedNoteDrafts() || hasPendingTaskDrafts()
+    || hasSearchDrafts() || onboardingOpening || onboardingFinishing
+    || Boolean(document.querySelector("dialog[open]") || document.getElementById("onboarding"));
+}
+
+function showLocaleNotice(): void {
+  localeNotice.hidden = false;
+  const message = element("p", "", i18n.t("localeReloadDeferred"));
+  message.setAttribute("role", "status");
+  const reload = button(i18n.t("localeReloadAction"), "button button--secondary");
+  reload.addEventListener("click", () => runUiTask(async () => {
+    const committed = await withStorageLock("data-write", getLocalePreference);
+    if (disposed) return;
+    if (committed === loadedLocalePreference) {
+      localeReloadDeferred = false;
+      localeNotice.hidden = true;
+      return;
+    }
+    if (hasProtectedWork() && !window.confirm(i18n.t("localeReloadDiscardConfirm"))) return;
+    location.reload();
+  }));
+  localeNotice.replaceChildren(message, reload);
+}
 let savedSettings: StartPageSettings;
 let runtime: StartPageRuntimeState;
 let editor: LayoutEditor;
@@ -303,6 +337,7 @@ function render(): void {
     registerCleanup: registerRenderCleanup,
   };
   grid.replaceChildren(...blocks.map((block) => cardFor(block, context)));
+  renderHiddenNoteDrafts(hiddenNotesHost, new Set(blocks.filter((block) => block.type === "note" && block.enabled).map((block) => block.id)), new Set(savedSettings.layout.blocks.filter((block) => block.type === "note").map((block) => block.id)), context);
   if (blocks.length === 0) grid.append(element("p", "empty-layout", i18n.t("emptyLayout")));
   if (noteFocus && (document.activeElement === document.body || document.activeElement === null)
     && !page.hasAttribute("inert")) {
@@ -466,9 +501,18 @@ function handleStorageChange(changes: Record<string, chrome.storage.StorageChang
   if (changes.localeOverride) {
     // Ignore provisional writes/rollbacks; reload only for the committed
     // preference that differs from the catalog loaded by this page.
+    const generation = ++localeCheckGeneration;
     runUiTask(async () => {
       const committed = await withStorageLock("data-write", getLocalePreference);
-      if (!disposed && committed !== loadedLocalePreference) location.reload();
+      if (disposed || generation !== localeCheckGeneration) return;
+      const decision = localeReloadDecision(loadedLocalePreference, committed, hasProtectedWork(), localeReloadDeferred);
+      if (decision === "none") {
+        localeReloadDeferred = false;
+        localeNotice.hidden = true;
+      } else if (decision === "defer") {
+        localeReloadDeferred = true;
+        showLocaleNotice();
+      } else location.reload();
     });
   }
   const onboardingAction = onboardingStorageAction(changes[START_PAGE_ONBOARDING_KEY]);
