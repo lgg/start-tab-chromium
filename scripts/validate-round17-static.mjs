@@ -40,3 +40,8 @@ assert.match(worker, /performClockAction[\s\S]*\|\s*null>\(\(runtime, settings\)
 assert.match(worker, /occurredAt: outcome\.occurredAt/);
 assert.match(runtime, /resetAllClockRuntimeWithAlarms\(at\?: number\)[\s\S]*\(runtime, settings\) => \{\s*const now = at \?\? Date\.now\(\)/);
 assert.match(runtime, /completeClockInstance[\s\S]*\(runtime, settings\) => \{\s*now = at \?\? Date\.now\(\)/);
+
+assert.match(focus, /const MAX_STAT_VALUE = Number\.MAX_SAFE_INTEGER/);
+assert.match(focus, /interrupted\.reduce\(addStat, 0\)/);
+assert.match(focus, /now < domain\.lastAvoidedAt/);
+assert.match(focus, /const day = ensureDay\(stats, occurredAt\)/);
