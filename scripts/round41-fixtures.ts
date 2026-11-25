@@ -222,3 +222,52 @@ assert.equal(mayReloadPopupTarget(displayed, { id: 7, url: "https://other.exampl
 assert.equal(mayReloadPopupTarget(displayed, { id: 8, url: "https://example.com/current" }), false);
 assert.equal(mayReloadPopupTarget(displayed, undefined), false);
 console.log("Round 97 stable popup target and guarded reload regressions passed");
+
+let removeFails103 = false;
+let setFails103 = false;
+let getFails103 = false;
+let storageUnavailable103 = false;
+const persisted103: Record<string, unknown> = {};
+const store103 = {
+  async get(key: string) {
+    if (getFails103) throw new Error("read unavailable");
+    return { [key]: structuredClone(persisted103[key]) };
+  },
+  async set(items: Record<string, unknown>) {
+    if (setFails103) throw new Error("write unavailable");
+    Object.assign(persisted103, structuredClone(items));
+  },
+  async remove(key: string) {
+    if (removeFails103) throw new Error("remove unavailable");
+    delete persisted103[key];
+  },
+};
+const registry103 = new BlockedNavigationRegistry(() => {
+  if (storageUnavailable103) throw new Error("session unavailable");
+  return store103;
+});
+const host103 = "example.com";
+let matches103 = 0;
+const match103 = async () => { matches103++; return host103; };
+await registry103.observe(103, "https://example.com/old", match103);
+removeFails103 = true;
+setFails103 = true;
+assert.equal(await registry103.observe(103, "https://example.com/new", match103), host103);
+assert.equal(matches103, 2, "Session failure must not suppress the core blocked-site match");
+assert.equal(await registry103.lookup(103, host103), "https://example.com/new", "Failed session persistence must use the newest in-memory destination");
+assert.equal(await registry103.lookup(103, "other.example"), null);
+await assert.rejects(() => registry103.observe(103, "https://example.com/error", async () => { throw new Error("match failed"); }), /match failed/);
+assert.equal(await registry103.lookup(103, host103), null, "A failed invalidation and match must mask stale persisted URLs");
+setFails103 = false;
+await registry103.observe(103, "https://example.com/recovered", match103);
+assert.equal(await new BlockedNavigationRegistry(() => store103).lookup(103, host103), "https://example.com/recovered");
+await registry103.forget(103);
+assert.equal(await new BlockedNavigationRegistry(() => store103).lookup(103, host103), null, "A durable tombstone survives worker restart if removal fails");
+getFails103 = true;
+assert.equal(await registry103.lookup(103, host103), null);
+storageUnavailable103 = true;
+assert.equal(await registry103.observe(104, "https://example.com/unavailable", match103), host103);
+assert.equal(await registry103.lookup(104, host103), "https://example.com/unavailable");
+await registry103.forget(104);
+assert.equal(await registry103.lookup(104, host103), null);
+console.log("Round 103 session storage degradation regressions passed");
