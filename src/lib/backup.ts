@@ -10,7 +10,7 @@ import {
   DATA_REVISION_KEY,
   assertStartTabDataRevisionUnchanged,
   markStartTabDataChanged,
-  readStartTabDataRevision,
+  readStartTabDataRevisionSnapshot,
 } from "./data-revision.js";
 import { runIndependentEffects } from "./independent-effects.js";
 import { withStorageLock } from "./storage-lock.js";
@@ -72,6 +72,7 @@ export interface BackupImportOptions {
   dataRevisionAt?: number;
   expectedCurrentDataRevision?: number;
   expectedCurrentDataRevisionFallback?: number;
+  expectedCurrentStoredDataRevision?: number | null;
   revisionConflictMessage?: string;
 }
 
@@ -79,6 +80,7 @@ export interface ExportedBackupSnapshot {
   bundle: BackupBundle;
   dataRevision: number;
   dataRevisionFallback: number;
+  storedDataRevision: number | null;
 }
 
 export interface BackupImportReport {
@@ -238,8 +240,8 @@ export async function exportBackupSnapshot(): Promise<ExportedBackupSnapshot> {
   return withStorageLock("data-write", async () => {
     const bundle = await exportBackupInCurrentTransaction();
     const dataRevisionFallback = backupModifiedAt(bundle);
-    const dataRevision = await readStartTabDataRevision(dataRevisionFallback);
-    return { bundle, dataRevision, dataRevisionFallback };
+    const { dataRevision, storedDataRevision } = await readStartTabDataRevisionSnapshot(dataRevisionFallback);
+    return { bundle, dataRevision, dataRevisionFallback, storedDataRevision };
   });
 }
 
@@ -269,6 +271,7 @@ export async function importBackup(value: unknown, options: BackupImportOptions 
         options.expectedCurrentDataRevision,
         options.expectedCurrentDataRevisionFallback ?? 0,
         options.revisionConflictMessage,
+        options.expectedCurrentStoredDataRevision,
       );
     }
     const current = await chrome.storage.local.get([...ROLLBACK_KEYS]);
@@ -322,6 +325,7 @@ export async function importBackupAfterRead(
   return importBackup(value, {
     expectedCurrentDataRevision: localBeforeRead.dataRevision,
     expectedCurrentDataRevisionFallback: localBeforeRead.dataRevisionFallback,
+    expectedCurrentStoredDataRevision: localBeforeRead.storedDataRevision,
     revisionConflictMessage,
   });
 }

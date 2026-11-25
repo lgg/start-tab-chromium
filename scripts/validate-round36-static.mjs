@@ -19,8 +19,11 @@ const selfHosted = read("scripts/validate-self-hosted-ci.mjs");
 const manualQa = read("docs/manual-qa-3.0.0.md");
 const audit = read("docs/audit-2026-07-22-round-36.md");
 
-assert.match(sync, /await chrome\.storage\.sync\.set\(payload\)[\s\S]*readRemoteMeta\(\)[\s\S]*readVerifiedRemoteBundle\(committed\)[\s\S]*writeLocalMeta\(meta\)/,
+assert.match(sync, /await chrome\.storage\.sync\.set\(payload\)[\s\S]*readRemoteMeta\(\)[\s\S]*readVerifiedRemoteBundle\(committed\)[\s\S]*assertLocalRevisionGuard\(guard, "Start Tab data changed while the Browser Sync upload was committing", meta\)/,
   "Browser Sync upload must verify metadata and all committed chunks before advancing local metadata");
+
+assert.match(sync, /async function assertLocalRevisionGuard[\s\S]*withStorageLock\("data-write"[\s\S]*await assertStartTabDataRevisionUnchanged[\s\S]*if \(meta\) await writeLocalMeta\(meta\)/,
+  "Local metadata must be persisted only under the validated data-write lock");
 
 assert.match(settings, /settingsWithLayoutPreset[\s\S]*next\.layout\.mode = "grid"[\s\S]*next\.layout\.columns = preset\.columns/,
   "Applying a preset must restore its grid mode and declared columns");
