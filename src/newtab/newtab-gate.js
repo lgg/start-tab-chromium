@@ -28,9 +28,16 @@
     return browserLocale.startsWith("ru") ? "ru" : "en";
   }
 
+  async function readCommitted(key) {
+    const read = () => chrome.storage.local.get(key);
+    return navigator.locks
+      ? navigator.locks.request("start-tab:data-write", { mode: "exclusive" }, read)
+      : read();
+  }
+
   async function loadGateCatalog() {
     const generation = ++catalogLoadGeneration;
-    const items = await chrome.storage.local.get(LOCALE_OVERRIDE_KEY).catch(() => ({}));
+    const items = await readCommitted(LOCALE_OVERRIDE_KEY).catch(() => ({}));
     const locale = resolvedGateLocale(items[LOCALE_OVERRIDE_KEY]);
     const catalogs = await Promise.all(catalogFiles.map(async (file) => {
       try {
@@ -228,7 +235,7 @@
         showOverlay(text("splitViewTitle", "Choose a tab for Split View"), text("splitViewText", "Select an open tab below."), tabs);
         return;
       }
-      const items = await chrome.storage.local.get(SETTINGS_KEY);
+      const items = await readCommitted(SETTINGS_KEY);
       if (generation !== applyGeneration) return;
       if (items[SETTINGS_KEY]?.startTab?.enabled !== false) removeOverlay();
       else showOverlay(text("startTabDisabledTitle", "Start Tab is disabled"), text("startTabDisabledText", "Re-enable Start Tab in extension settings."));

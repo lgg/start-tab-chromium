@@ -613,3 +613,31 @@ assert.equal((await workerMessage(staleLocale78)).ok, false, "A stale language b
 assert.deepEqual(localState, beforeConflict78);
 assert.equal((await workerMessage({ ...staleLocale78, localeChange: { expected: targetLocale78, preference: "xx" } })).ok, false);
 console.log("Round 78 atomic language and layout regressions passed");
+
+const before80 = await runtimeApi.getStartPageViewSnapshot();
+delete localState.startPageOnboarding;
+const candidate80 = settingsApi.cloneSettings(before80.settings);
+candidate80.layout.showBlockTitles = !candidate80.layout.showBlockTitles;
+const snapshot80 = structuredClone(localState);
+const request80 = {
+  type: "replace-start-page-settings",
+  settings: candidate80,
+  expectedSettingsUpdatedAt: before80.settings.updatedAt,
+  expectedRuntimeUpdatedAt: before80.runtime.updatedAt,
+  completeOnboarding: true,
+};
+failSetAfterApplyForKey = "startPageOnboarding";
+const failed80 = await workerMessage(request80);
+assert.equal(failed80.ok, false);
+assert.match(failed80.error ?? "", /forced storage failure/);
+assert.deepEqual(localState, snapshot80, "Onboarding flag failure must roll back the preset, runtime and data revision");
+assert.equal((await workerMessage(request80)).ok, true);
+assert.deepEqual(localState.startPageOnboarding, { onboarded: true });
+const after80 = await runtimeApi.getStartPageViewSnapshot();
+assert.equal(after80.settings.layout.showBlockTitles, candidate80.layout.showBlockTitles);
+const second80 = { ...request80, settings: before80.settings, expectedSettingsUpdatedAt: after80.settings.updatedAt, expectedRuntimeUpdatedAt: after80.runtime.updatedAt };
+const committed80 = structuredClone(localState);
+assert.equal((await workerMessage(second80)).ok, false, "A second wizard cannot replace an already completed onboarding preset");
+assert.deepEqual(localState, committed80);
+assert.equal((await workerMessage({ ...second80, completeOnboarding: false })).ok, false, "Invalid onboarding flags must be rejected");
+console.log("Round 80 atomic onboarding regression passed");

@@ -400,8 +400,10 @@ function refreshState(): Promise<boolean> {
 }
 
 async function onboardingState(): Promise<boolean> {
-  const items = await chrome.storage.local.get(START_PAGE_ONBOARDING_KEY);
-  return isStartPageOnboardingComplete(items[START_PAGE_ONBOARDING_KEY]);
+  return withStorageLock("data-write", async () => {
+    const items = await chrome.storage.local.get(START_PAGE_ONBOARDING_KEY);
+    return isStartPageOnboardingComplete(items[START_PAGE_ONBOARDING_KEY]);
+  });
 }
 
 function dismissOnboarding(restoreFocus = true): void {
@@ -429,6 +431,7 @@ async function finishOnboarding(presetId: LayoutPresetId | null): Promise<void> 
         return;
       }
       if (presetId) {
+        await refreshState();
         const next = settingsWithLayoutPreset(savedSettings, presetId);
         const removesUserData = layoutReplacementRemovesUserData(savedSettings, next, runtime);
         if (removesUserData && !window.confirm(i18n.t("applyPresetWithDataConfirm"))) return;
@@ -437,17 +440,20 @@ async function finishOnboarding(presetId: LayoutPresetId | null): Promise<void> 
           settings: next,
           expectedSettingsUpdatedAt: savedSettings.updatedAt,
           expectedRuntimeUpdatedAt: runtime.updatedAt,
+          completeOnboarding: true,
         });
-        await refreshState();
+      } else {
+        await withStorageLock("data-write", async () => {
+          const items = await chrome.storage.local.get(START_PAGE_ONBOARDING_KEY);
+          if (isStartPageOnboardingComplete(items[START_PAGE_ONBOARDING_KEY])) return;
+          await commitStorageMutationWithRevision(
+            [START_PAGE_ONBOARDING_KEY],
+            () => chrome.storage.local.set({ [START_PAGE_ONBOARDING_KEY]: { onboarded: true } }),
+          );
+        });
       }
-      await withStorageLock("data-write", async () => {
-        await commitStorageMutationWithRevision(
-          [START_PAGE_ONBOARDING_KEY],
-          () => chrome.storage.local.set({ [START_PAGE_ONBOARDING_KEY]: { onboarded: true } }),
-        );
-      });
       dismissOnboarding();
-      queueRender();
+      queueStateRefresh();
     });
   } finally {
     onboardingFinishing = false;
@@ -460,7 +466,8 @@ async function showOnboarding(): Promise<void> {
   onboardingOpening = true;
   try {
     await window.startTabGateReady;
-    if (!savedSettings.startTab.enabled
+    if (disposed || editor.isActive || hasUnsavedNoteDrafts() || hasPendingTaskDrafts()
+      || !savedSettings.startTab.enabled
       || document.getElementById("startTabGateOverlay")
       || document.getElementById("onboarding")
       || await onboardingState()) return;
@@ -515,13 +522,17 @@ function handleStorageChange(changes: Record<string, chrome.storage.StorageChang
       } else location.reload();
     });
   }
-  const onboardingAction = onboardingStorageAction(changes[START_PAGE_ONBOARDING_KEY]);
-  if (onboardingAction === "dismiss") {
-    dismissOnboarding();
-  } else if (onboardingAction === "show") {
+  if (changes[START_PAGE_ONBOARDING_KEY]) {
     runUiTask(async () => {
-      if (!editor.hasUnsavedChanges) await refreshState();
-      await showOnboarding();
+      const complete = await onboardingState();
+      if (disposed) return;
+      const onboardingAction = onboardingStorageAction({ newValue: { onboarded: complete } });
+      if (onboardingAction === "dismiss") {
+        dismissOnboarding();
+      } else if (onboardingAction === "show") {
+        await refreshState();
+        await showOnboarding();
+      }
     });
   }
   if (changes.startPageSettings || changes.startPageRuntimeState || changes.focusStats) {
