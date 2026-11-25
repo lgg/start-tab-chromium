@@ -234,3 +234,38 @@ projected89.layout.blocks = projected89.layout.blocks.filter((block) => block.id
 assert.equal((await runtimeApi.getStartPageRuntimeState(projected89)).notes[note.id], undefined);
 assert.equal((await runtimeApi.getStartPageRuntimeState()).notes[note.id], saved89.notes[note.id], "A projected editor read must not prune committed runtime");
 console.log("Round 89 committed runtime and statistics read regressions passed");
+
+const initial91 = await runtimeApi.getStartPageViewSnapshot();
+const initialRaw91 = structuredClone(localState);
+let entered91!: () => void;
+let release91!: () => void;
+const ready91 = new Promise<void>((resolve) => { entered91 = resolve; });
+const held91 = withStorageLock("data-write", async () => {
+  const provisional91 = settingsApi.cloneSettings(initial91.settings);
+  provisional91.updatedAt += 100;
+  provisional91.layout.showBlockTitles = !provisional91.layout.showBlockTitles;
+  localState.startPageSettings = provisional91;
+  localState.localeOverride = initial91.localePreference === "ru" ? "en" : "ru";
+  entered91();
+  await new Promise<void>((resolve) => { release91 = resolve; });
+  localState.startPageSettings = initialRaw91.startPageSettings;
+  if (Object.hasOwn(initialRaw91, "localeOverride")) localState.localeOverride = initialRaw91.localeOverride;
+  else delete localState.localeOverride;
+});
+await ready91;
+let resolved91 = false;
+const read91 = runtimeApi.getStartPageViewSnapshot().then((snapshot) => { resolved91 = true; return snapshot; });
+await new Promise<void>((resolve) => setTimeout(resolve, 0));
+assert.equal(resolved91, false, "Options must wait for a combined layout/locale transaction");
+release91();
+await held91;
+assert.deepEqual(await read91, initial91, "Options must not combine a committed layout with a provisional locale");
+const nextLocale91 = initial91.localePreference === "ru" ? "en" : "ru";
+const committed91 = settingsApi.cloneSettings(initial91.settings);
+committed91.layout.showBlockTitles = !committed91.layout.showBlockTitles;
+await runtimeApi.replaceStartPageSettingsWithRuntime(committed91, initial91.settings.updatedAt, initial91.runtime.updatedAt,
+  { expected: initial91.localePreference, preference: nextLocale91 });
+const nextSnapshot91 = await runtimeApi.getStartPageViewSnapshot();
+assert.equal(nextSnapshot91.localePreference, nextLocale91);
+assert.equal(nextSnapshot91.settings.layout.showBlockTitles, committed91.layout.showBlockTitles);
+console.log("Round 91 coherent layout and locale snapshot regressions passed");

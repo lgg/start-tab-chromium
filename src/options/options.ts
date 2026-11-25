@@ -25,7 +25,6 @@ import {
   uploadDriveBackup,
 } from "../lib/google-integration.js";
 import {
-  getLocalePreference,
   loadI18n,
   setLocalePreference,
   type I18n,
@@ -257,7 +256,9 @@ async function runAction<T>(
       actionGuard.invalidate();
       try {
         await reloadState();
-        render(savingGeneral);
+        // Confirming replacement allowed a successful action to replace the
+        // draft; a failed action does not justify losing the user's edits.
+        render(savingGeneral || Boolean(generalDraft?.state.isDirty(generalDraft.signature())));
         actionGuard.markRefreshed();
       } catch (refreshError) {
         failure = new AggregateError([error, refreshError], "The action failed and Options could not reload the latest state");
@@ -748,8 +749,7 @@ async function renderStatistics(): Promise<HTMLElement> {
 }
 
 async function reloadState(): Promise<void> {
-  const { settings: nextSettings, runtime: nextRuntime } = await getStartPageViewSnapshot();
-  const nextLocale = await getLocalePreference();
+  const { settings: nextSettings, runtime: nextRuntime, localePreference: nextLocale } = await getStartPageViewSnapshot();
   const nextSites = await getBlockedSites();
   // A failed read must not leave half the UI using a new baseline while
   // the remaining controls still belong to the previous snapshot.
