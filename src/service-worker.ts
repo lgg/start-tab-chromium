@@ -239,12 +239,13 @@ async function updateRuntimeLinkPage(instanceId: string, page: number, expectedP
 }
 
 async function performClockAction(instanceId: string, action: ClockAction): Promise<void> {
-  const now = Date.now();
   await mutateStartPageRuntimeStateWithAlarmsAndStorageEffect<{
     next: ClockRuntimeState;
     interruptedMs: number;
     startedWork: boolean;
+    occurredAt: number;
   } | null>((runtime, settings) => {
+    const now = Date.now();
     assertRuntimeMutationTarget(settings, instanceId, "clock");
     const block = settings.layout.blocks.find(
       (candidate): candidate is ClockBlock => candidate.id === instanceId && isClockBlock(candidate),
@@ -272,13 +273,13 @@ async function performClockAction(instanceId: string, action: ClockAction): Prom
     }
 
     runtime.clocks[instanceId] = next;
-    return { state: runtime, result: { next, interruptedMs, startedWork } };
+    return { state: runtime, result: { next, interruptedMs, startedWork, occurredAt: now } };
   }, [FOCUS_STATS_KEY], async (outcome) => {
     if (!outcome || (!outcome.startedWork && outcome.interruptedMs <= 0)) return;
     await applyFocusClockStatsPatchInExistingTransaction({
       startedSessions: outcome.startedWork ? 1 : 0,
       interruptedFocusTimesMs: outcome.interruptedMs > 0 ? [outcome.interruptedMs] : [],
-      occurredAt: now,
+      occurredAt: outcome.occurredAt,
     });
   });
 }

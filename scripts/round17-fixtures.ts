@@ -213,3 +213,61 @@ assert.deepEqual(localState.focusStats, futureStats,
   "Timer completion must not read, downgrade, or rewrite unrelated future focus statistics");
 
 console.log("Round 17 fixtures passed");
+
+const lock71 = await import("../src/lib/storage-lock.js");
+const originalNow71 = Date.now;
+try {
+  localState.focusStats = { version: 1 };
+  const queuedAt71 = 10_000_000;
+  const committedAt71 = queuedAt71 + 15_000;
+  let currentTime71 = queuedAt71;
+  Date.now = () => currentTime71;
+  let runtime71 = await runtimeApi.getStartPageRuntimeState(settings);
+  const token71 = "round71-queued-completion";
+  runtime71.clocks[pomodoro.id] = {
+    ...runtimeApi.defaultClockForBlock(pomodoro),
+    running: true, startedAt: queuedAt71 - 60_000, targetAt: queuedAt71,
+    focusSessionStartedAt: queuedAt71 - 60_000, phase: "work", completionToken: token71,
+  };
+  await runtimeApi.setStartPageRuntimeState(runtime71);
+  let release71!: () => void;
+  let entered71!: () => void;
+  const entered = new Promise<void>((resolve) => { entered71 = resolve; });
+  const held = lock71.withStorageLock("data-write", async () => {
+    entered71();
+    await new Promise<void>((resolve) => { release71 = resolve; });
+  });
+  await entered;
+  const completion71 = runtimeApi.completeClockInstance(pomodoro.id, token71);
+  currentTime71 = committedAt71;
+  release71();
+  await held;
+  const completed71 = await completion71;
+  assert.equal(completed71.completed, true);
+  assert.equal(completed71.clock?.startedAt, committedAt71, "Auto-started phase must use the execution time after the lock");
+  assert.equal(completed71.clock?.targetAt, committedAt71 + 30_000);
+  assert.equal(completed71.focusTimeMs, 60_000);
+  runtime71 = await runtimeApi.getStartPageRuntimeState(settings);
+  runtime71.clocks[pomodoro.id] = {
+    ...runtimeApi.defaultClockForBlock(pomodoro),
+    running: true, startedAt: committedAt71, targetAt: committedAt71 + 60_000,
+    focusSessionStartedAt: committedAt71, phase: "work", completionToken: "round71-queued-reset",
+  };
+  await runtimeApi.setStartPageRuntimeState(runtime71);
+  let releaseReset!: () => void;
+  let enteredReset!: () => void;
+  const resetEntered = new Promise<void>((resolve) => { enteredReset = resolve; });
+  const resetHeld = lock71.withStorageLock("data-write", async () => {
+    enteredReset();
+    await new Promise<void>((resolve) => { releaseReset = resolve; });
+  });
+  await resetEntered;
+  const reset71 = runtimeApi.resetAllClockRuntimeWithAlarms();
+  currentTime71 += 10_000;
+  releaseReset();
+  await resetHeld;
+  assert.deepEqual(await reset71, [10_000], "Queued reset must account for focus time until it actually executes");
+} finally {
+  Date.now = originalNow71;
+}
+console.log("Round 71 queued clock timing regressions passed");
