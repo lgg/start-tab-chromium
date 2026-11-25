@@ -4,7 +4,7 @@ import { safeWebUrl } from "../lib/start-page-validation-primitives.js";
 import { isGoogleIntegrationConfigured, listCalendarEvents, type GoogleCalendarEvent } from "../lib/google-integration.js";
 import type { I18n } from "../lib/i18n.js";
 import { sendMessage } from "../lib/messages.js";
-import { getStartPageRuntimeState } from "../lib/start-page-runtime.js";
+import { CommandActionGate } from "./command-action-gate.js";
 import type { BlockInstance } from "../lib/start-page-settings.js";
 import { actionButton, downloadJson, element, formatDuration } from "./block-renderer-common.js";
 import type { BlockRenderContext, UrlItem } from "./block-renderer-types.js";
@@ -13,6 +13,7 @@ import { parseWeatherPayload, validDateOnly, type WeatherDay, type WeatherResult
 import { fetchWidgetJson } from "./widget-network.js";
 
 const requestCache = new WidgetRequestCache();
+const destructiveCommands = new CommandActionGate();
 
 function attached(node: Node): boolean {
   return node.isConnected;
@@ -234,22 +235,35 @@ export function renderBrowserPinned(container: HTMLElement, context: BlockRender
   });
 }
 
+function resetCommandButton(
+  type: "reset-clocks" | "reset-stats",
+  title: string,
+  confirmation: string,
+  context: BlockRenderContext,
+): HTMLButtonElement {
+  const button = actionButton(title, () => {
+    if (!button.isConnected) return;
+    return destructiveCommands.run(
+      () => window.confirm(confirmation),
+      () => sendMessage({ type }),
+      context.requestRender,
+    );
+  }, "button", context.reportError);
+  const unsubscribe = destructiveCommands.subscribe((pending) => {
+    button.disabled = pending;
+    button.setAttribute("aria-busy", String(pending));
+  });
+  context.registerCleanup(unsubscribe);
+  return button;
+}
+
 export function renderCommands(container: HTMLElement, context: BlockRenderContext): void {
   const actions = element("div", "command-list");
   actions.append(
     actionButton(context.i18n.t("openSettings"), () => chrome.runtime.openOptionsPage(), "button", context.reportError),
     actionButton(context.i18n.t("exportBackup"), async () => downloadJson(backupFileName(), await exportBackup()), "button", context.reportError),
-    actionButton(context.i18n.t("commandResetClocks"), async () => {
-      if (!window.confirm(context.i18n.t("resetAllClocksConfirm"))) return;
-      await sendMessage({ type: "reset-clocks" });
-      context.runtime = await getStartPageRuntimeState(context.settings);
-      context.requestRender();
-    }, "button", context.reportError),
-    actionButton(context.i18n.t("commandResetStats"), async () => {
-      if (!window.confirm(context.i18n.t("resetStatisticsConfirm"))) return;
-      await sendMessage({ type: "reset-stats" });
-      context.requestRender();
-    }, "button", context.reportError),
+    resetCommandButton("reset-clocks", context.i18n.t("commandResetClocks"), context.i18n.t("resetAllClocksConfirm"), context),
+    resetCommandButton("reset-stats", context.i18n.t("commandResetStats"), context.i18n.t("resetStatisticsConfirm"), context),
   );
   container.append(actions);
 }

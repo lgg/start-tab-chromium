@@ -338,3 +338,42 @@ await assert.rejects(settleClockMutation(
 assert.equal(reads93, 3, "Both successful and failed commands must attempt canonical recovery");
 assert.equal(notices93.length, 1, "Only post-commit read failure produces a saved-state warning");
 console.log("Round 93 clock command recovery regressions passed");
+
+const { CommandActionGate } = await import("../src/newtab/command-action-gate.js");
+const commands105 = new CommandActionGate();
+const oldView105: boolean[] = [];
+const newView105: boolean[] = [];
+const unsubscribe105 = commands105.subscribe((pending) => oldView105.push(pending));
+let confirmed105 = 0;
+let writes105 = 0;
+let refreshes105 = 0;
+let release105!: () => void;
+const held105 = new Promise<void>((resolve) => { release105 = resolve; });
+const first105 = commands105.run(
+  () => { confirmed105++; return true; },
+  async () => { writes105++; await held105; },
+  () => { refreshes105++; },
+);
+assert.equal(commands105.pending, true);
+unsubscribe105();
+commands105.subscribe((pending) => newView105.push(pending));
+await commands105.run(() => { confirmed105++; return true; }, async () => { writes105++; }, () => { refreshes105++; });
+assert.equal(confirmed105, 1, "Another widget or replacement button must not open a second confirmation while a reset is pending");
+assert.equal(writes105, 1);
+release105();
+await first105;
+assert.deepEqual(oldView105, [false, true]);
+assert.deepEqual(newView105, [true, false], "Replacement controls must inherit the outstanding lease");
+assert.equal(refreshes105, 1);
+assert.equal(commands105.pending, false);
+await commands105.run(() => false, async () => { writes105++; }, () => { refreshes105++; });
+assert.equal(writes105, 1);
+assert.equal(refreshes105, 1, "Cancel must not trigger a mutation or refresh");
+const failure105 = new Error("reset failed");
+await assert.rejects(commands105.run(() => true, async () => { throw failure105; }, () => { refreshes105++; }), (error) => error === failure105);
+assert.equal(commands105.pending, false, "A rejected command must release all controls");
+assert.equal(refreshes105, 2, "A failed reset still queues canonical recovery");
+await commands105.run(() => true, async () => { writes105++; }, () => { refreshes105++; });
+assert.equal(writes105, 2);
+assert.equal(refreshes105, 3);
+console.log("Round 105 destructive command lease regressions passed");

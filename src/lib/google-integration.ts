@@ -13,6 +13,9 @@ const MAX_CALENDAR_RESULTS = 25;
 const CALENDAR_QUERY_PAGE_SIZE = 100;
 const MAX_CALENDAR_QUERY_PAGES = 20;
 const MAX_DRIVE_LIST_PAGES = 100;
+// Only metadata/list responses are bounded here. An explicit media restore
+// may legitimately contain a much larger user backup.
+const MAX_GOOGLE_METADATA_BYTES = 4 * 1024 * 1024;
 
 export interface GoogleCalendarEvent {
   id: string;
@@ -69,7 +72,34 @@ async function getToken(interactive: boolean): Promise<string> {
   throw new Error("Unable to get Google OAuth token");
 }
 
-async function googleFetch<T>(url: string, init: RequestInit = {}, interactive = false): Promise<T> {
+function discardGoogleBody(response: Response): void {
+  void response.body?.cancel().catch(() => undefined);
+}
+
+async function readGoogleMetadata(response: Response): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_GOOGLE_METADATA_BYTES) throw new Error("Google API metadata response exceeds the size limit");
+      text += decoder.decode(value, { stream: true });
+    }
+    return text + decoder.decode();
+  } catch (error) {
+    void reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function googleFetch<T>(url: string, init: RequestInit = {}, interactive = false, mediaDownload = false): Promise<T> {
   const requestWithToken = async (token: string): Promise<Response> => {
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${token}`);
@@ -86,12 +116,16 @@ async function googleFetch<T>(url: string, init: RequestInit = {}, interactive =
   let response = await requestWithToken(token);
 
   if (response.status === 401 || response.status === 403) {
+    discardGoogleBody(response);
     await chrome.identity.removeCachedAuthToken({ token });
     response = await requestWithToken(await getToken(interactive));
   }
 
-  if (!response.ok) throw new Error(`Google API request failed: ${response.status}`);
-  const text = await response.text();
+  if (!response.ok) {
+    discardGoogleBody(response);
+    throw new Error(`Google API request failed: ${response.status}`);
+  }
+  const text = mediaDownload ? await response.text() : await readGoogleMetadata(response);
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
@@ -144,6 +178,7 @@ export async function listCalendarEvents(
 
   while (events.length < limit && pagesRead < MAX_CALENDAR_QUERY_PAGES) {
     const url = new URL(GOOGLE_CALENDAR_EVENTS_URL.replace("{calendarId}", encodeURIComponent(normalizedCalendarId(calendarId))));
+    url.searchParams.set("fields", "nextPageToken,items(id,summary,status,start(date,dateTime),end(date,dateTime))");
     url.searchParams.set("singleEvents", "true");
     url.searchParams.set("orderBy", "startTime");
     url.searchParams.set("timeMin", timeMin);
@@ -289,7 +324,7 @@ export async function restoreDriveBackup(): Promise<void> {
   await withStorageLock("google-drive", async () => {
     const existing = await findDriveBackupFile(true);
     if (!existing) throw new Error("No Start Tab backup found in Google Drive app data");
-    const bundle = await googleFetch<BackupBundle>(`${GOOGLE_DRIVE_FILES_URL}/${encodeURIComponent(existing.id)}?alt=media`, {}, true);
+    const bundle = await googleFetch<BackupBundle>(`${GOOGLE_DRIVE_FILES_URL}/${encodeURIComponent(existing.id)}?alt=media`, {}, true, true);
     await importBackup(bundle, {
       expectedCurrentDataRevision: localBeforeNetwork.dataRevision,
       expectedCurrentDataRevisionFallback: localBeforeNetwork.dataRevisionFallback,
