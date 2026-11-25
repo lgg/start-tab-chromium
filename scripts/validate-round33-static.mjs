@@ -39,7 +39,7 @@ assert.match(integrations, /recentHistory[\s\S]*visibleWebUrlItems\(items, maxRe
 assert.match(integrations, /browserPinnedTabs[\s\S]*visibleWebUrlItems\(tabs\)/);
 
 assert.match(options, /const localeChanged = locale\.value !== baseLocale/);
-assert.match(options, /if \(localeChanged\) \{[\s\S]*await setLocalePreference[\s\S]*location\.reload\(\)/,
+assert.match(options, /if \(localeChanged\) \{[\s\S]*if \(!settingsChanged\) await setLocalePreference\(preference, baseLocale\);[\s\S]*location\.reload\(\)/,
   "Switching back to automatic locale detection must apply immediately");
 assert.doesNotMatch(options, /locale\.value !== "auto"\) location\.reload/);
 

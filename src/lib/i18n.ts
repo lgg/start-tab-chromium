@@ -6,7 +6,16 @@ export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 export type LocalePreference = SupportedLocale | "auto";
 
 const DEFAULT_LOCALE: SupportedLocale = "en";
-const LOCALE_OVERRIDE_KEY = "localeOverride";
+export const LOCALE_OVERRIDE_KEY = "localeOverride";
+
+export interface LocaleChange {
+  expected: LocalePreference;
+  preference: LocalePreference;
+}
+
+export function isLocalePreference(value: unknown): value is LocalePreference {
+  return value === "auto" || value === "en" || value === "ru";
+}
 
 type LocaleCatalog = Record<string, { message: string }>;
 
@@ -21,22 +30,35 @@ function normalizeLocale(locale: string): SupportedLocale | null {
   return SUPPORTED_LOCALES.find((supported) => supported === language) ?? null;
 }
 
-async function readLocaleOverride(): Promise<SupportedLocale | null> {
-  const items = await chrome.storage.local.get(LOCALE_OVERRIDE_KEY);
-  const value = items[LOCALE_OVERRIDE_KEY];
-  return typeof value === "string" ? normalizeLocale(value) : null;
+export function localePreferenceFromStored(value: unknown): LocalePreference {
+  return (typeof value === "string" ? normalizeLocale(value) : null) ?? "auto";
 }
 
 export async function getLocalePreference(): Promise<LocalePreference> {
-  return (await readLocaleOverride()) ?? "auto";
+  const items = await chrome.storage.local.get(LOCALE_OVERRIDE_KEY);
+  return localePreferenceFromStored(items[LOCALE_OVERRIDE_KEY]);
 }
 
-export async function setLocalePreference(preference: LocalePreference): Promise<void> {
+export function assertLocalePreference(current: unknown, expected: LocalePreference): void {
+  if (localePreferenceFromStored(current) !== expected) {
+    throw new Error("Start Tab language changed in another extension context; reload before saving");
+  }
+}
+
+/** Call only inside a data-write transaction that snapshots the locale key. */
+export async function writeLocalePreferenceInExistingTransaction(preference: LocalePreference): Promise<void> {
+  if (!isLocalePreference(preference)) throw new Error("Unsupported locale preference");
+  if (preference === "auto") await chrome.storage.local.remove(LOCALE_OVERRIDE_KEY);
+  else await chrome.storage.local.set({ [LOCALE_OVERRIDE_KEY]: preference });
+}
+
+export async function setLocalePreference(preference: LocalePreference, expected?: LocalePreference): Promise<void> {
   await withStorageLock("data-write", async () => {
-    await commitStorageMutationWithRevision([LOCALE_OVERRIDE_KEY], async () => {
-      if (preference === "auto") await chrome.storage.local.remove(LOCALE_OVERRIDE_KEY);
-      else await chrome.storage.local.set({ [LOCALE_OVERRIDE_KEY]: preference });
-    });
+    if (expected !== undefined) {
+      const current = await chrome.storage.local.get(LOCALE_OVERRIDE_KEY);
+      assertLocalePreference(current[LOCALE_OVERRIDE_KEY], expected);
+    }
+    await commitStorageMutationWithRevision([LOCALE_OVERRIDE_KEY], () => writeLocalePreferenceInExistingTransaction(preference));
   });
 }
 
@@ -45,9 +67,8 @@ function browserLanguages(): string[] {
   return languages.length > 0 ? [...languages] : [navigator.language].filter(Boolean);
 }
 
-async function detectLocale(): Promise<SupportedLocale> {
-  const override = await readLocaleOverride();
-  if (override) return override;
+function detectLocale(preference: LocalePreference): SupportedLocale {
+  if (preference !== "auto") return preference;
   for (const language of browserLanguages()) {
     const supported = normalizeLocale(language);
     if (supported) return supported;
@@ -87,8 +108,9 @@ export function renderTemplate(template: string, replacements: Record<string, st
     Object.hasOwn(replacements, key) ? String(replacements[key]) : placeholder);
 }
 
-export async function loadI18n(): Promise<I18n> {
-  const preferredLocale = await detectLocale();
+export async function loadI18n(): Promise<I18n & { preference: LocalePreference }> {
+  const preference = await withStorageLock("data-write", getLocalePreference);
+  const preferredLocale = detectLocale(preference);
   const defaultCatalog = await loadCatalog(DEFAULT_LOCALE);
   const { locale, catalog } = await mergeCatalogs(preferredLocale, defaultCatalog);
   document.documentElement.lang = locale;
@@ -96,5 +118,5 @@ export async function loadI18n(): Promise<I18n> {
     const template = catalog[key]?.message ?? key;
     return renderTemplate(template, replacements);
   };
-  return { locale, t, list: (key: string) => t(key).split("|").filter(Boolean) };
+  return { locale, preference, t, list: (key: string) => t(key).split("|").filter(Boolean) };
 }

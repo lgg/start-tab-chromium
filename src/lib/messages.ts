@@ -9,6 +9,7 @@ import {
   MAX_START_PAGE_BLOCKS,
 } from "./platform-limits.js";
 import type { LocalTask } from "./start-page-types.js";
+import { isLocalePreference, type LocaleChange } from "./i18n.js";
 
 export type ClockAction = "toggle" | "reset";
 
@@ -19,7 +20,7 @@ export type Message =
   | { type: "replace-blocked-sites"; sites: string[] }
   | { type: "open-native-new-tab" }
   | { type: "reset-start-page" }
-  | { type: "replace-start-page-settings"; settings: unknown; expectedSettingsUpdatedAt: number; expectedRuntimeUpdatedAt: number }
+  | { type: "replace-start-page-settings"; settings: unknown; expectedSettingsUpdatedAt: number; expectedRuntimeUpdatedAt: number; localeChange?: LocaleChange }
   | { type: "clock-action"; instanceId: string; action: ClockAction }
   | { type: "complete-clock"; instanceId: string; token: string }
   | { type: "reset-clocks" }
@@ -87,7 +88,10 @@ export function isMessage(value: unknown): value is Message {
         && typeof value.expectedRuntimeUpdatedAt === "number"
         && Number.isInteger(value.expectedRuntimeUpdatedAt)
         && value.expectedRuntimeUpdatedAt >= 0
-        && value.expectedRuntimeUpdatedAt <= Number.MAX_SAFE_INTEGER;
+        && value.expectedRuntimeUpdatedAt <= Number.MAX_SAFE_INTEGER
+        && (value.localeChange === undefined || (isRecord(value.localeChange)
+          && isLocalePreference(value.localeChange.expected)
+          && isLocalePreference(value.localeChange.preference)));
     case "clock-action":
       return isSafeIdentifier(value.instanceId) && (value.action === "toggle" || value.action === "reset");
     case "complete-clock":

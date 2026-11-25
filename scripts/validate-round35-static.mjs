@@ -162,7 +162,7 @@ assert.match(options, /preserveGeneral && generalDraft \? generalDraft\.root : r
 assert.match(options, /expectedSettingsUpdatedAt: baseSettings\.updatedAt/);
 assert.match(options, /expectedRuntimeUpdatedAt: baseRuntimeUpdatedAt/);
 assert.match(options, /createCustomThemeDraft\(settings,[\s\S]*saveNewCustomTheme\(edited\)/);
-assert.match(options, /const nextSettings = await getStartPageSettings\(\);[\s\S]*const nextSites = await getBlockedSites\(\);[\s\S]*settings = nextSettings/);
+assert.match(options, /const \{ settings: nextSettings, runtime: nextRuntime \} = await getStartPageViewSnapshot\(\);[\s\S]*const nextSites = await getBlockedSites\(\);[\s\S]*settings = nextSettings/);
 
 const themeEditor69 = read("src/lib/theme-editor.ts");
 const formCache69 = read("src/lib/form-panel-cache.ts");

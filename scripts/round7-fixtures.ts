@@ -580,3 +580,36 @@ release74();
 await held74;
 assert.deepEqual(await read74, snapshot74, "Page snapshot must see the rolled-back committed content, not the provisional higher revision");
 console.log("Round 74 coherent page snapshot regression passed");
+
+const localeBaseline78 = await runtimeApi.getStartPageViewSnapshot();
+const initialLocale78 = await i18nApi.getLocalePreference();
+const targetLocale78 = initialLocale78 === "ru" ? "en" : "ru";
+const desired78 = settingsApi.cloneSettings(localeBaseline78.settings);
+desired78.layout.showBlockTitles = !desired78.layout.showBlockTitles;
+const prior78 = structuredClone(localState);
+const alarms78 = structuredClone([...alarmState.values()]);
+const change78 = {
+  type: "replace-start-page-settings",
+  settings: desired78,
+  expectedSettingsUpdatedAt: localeBaseline78.settings.updatedAt,
+  expectedRuntimeUpdatedAt: localeBaseline78.runtime.updatedAt,
+  localeChange: { expected: initialLocale78, preference: targetLocale78 },
+};
+failSetAfterApplyForKey = "localeOverride";
+const failed78 = await workerMessage(change78);
+assert.equal(failed78.ok, false);
+assert.match(failed78.error ?? "", /forced storage failure/);
+assert.deepEqual(localState, prior78, "Locale write failure must roll back layout, runtime, locale and revision together");
+assert.deepEqual([...alarmState.values()], alarms78);
+assert.equal((await workerMessage(change78)).ok, true);
+assert.equal(await i18nApi.getLocalePreference(), targetLocale78);
+assert.equal((await settingsApi.getStartPageSettings()).layout.showBlockTitles, desired78.layout.showBlockTitles);
+await assert.rejects(() => i18nApi.setLocalePreference("auto", initialLocale78), /language changed/);
+const fresh78 = await runtimeApi.getStartPageViewSnapshot();
+const staleLocale78 = { ...change78, settings: fresh78.settings, expectedSettingsUpdatedAt: fresh78.settings.updatedAt,
+  expectedRuntimeUpdatedAt: fresh78.runtime.updatedAt };
+const beforeConflict78 = structuredClone(localState);
+assert.equal((await workerMessage(staleLocale78)).ok, false, "A stale language baseline must reject the combined write");
+assert.deepEqual(localState, beforeConflict78);
+assert.equal((await workerMessage({ ...staleLocale78, localeChange: { expected: targetLocale78, preference: "xx" } })).ok, false);
+console.log("Round 78 atomic language and layout regressions passed");

@@ -1,6 +1,11 @@
 /** Prevent duplicate Options mutations while one storage transaction is active. */
 export class OptionsActionGuard {
   private active = false;
+  private stale = false;
+
+  get needsRefresh(): boolean { return this.stale; }
+  invalidate(): void { this.stale = true; }
+  markRefreshed(): void { this.stale = false; }
 
   get pending(): boolean {
     return this.active;
