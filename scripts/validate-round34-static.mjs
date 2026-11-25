@@ -74,7 +74,7 @@ assert.match(options, /const settingsChanged = !jsonContentEqual\(next, baseSett
 assert.match(options,
   /if \(settingsChanged\) \{[\s\S]*await sendMessage\(\{[\s\S]*type: "replace-start-page-settings"[\s\S]*localeChange: \{ expected: baseLocale, preference \}[\s\S]*if \(localeChanged\) \{[\s\S]*if \(!settingsChanged\) await setLocalePreference\(preference, baseLocale\)/,
   "Combined language and settings changes must share one worker transaction; locale-only changes retain independent CAS");
-assert.match(options, /catch \(error\) \{[\s\S]*await reloadState\(\);[\s\S]*render\(savingGeneral\);/,
+assert.match(options, /catch \(error\) \{[\s\S]*await reloadState\(\);[\s\S]*render\(savingGeneral \|\| Boolean\(generalDraft\?\.state\.isDirty\(generalDraft\.signature\(\)\)\)\);/,
   "A failed General action must refresh canonical state while retaining the form draft");
 
 for (const command of ["node scripts/run-round34-fixtures.mjs", "node scripts/validate-round34-static.mjs"]) {
