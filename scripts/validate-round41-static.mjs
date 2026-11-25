@@ -28,6 +28,13 @@ assert.doesNotMatch(nativeTab, /if \(value\.tabId === tabId\) await chrome\.stor
 
 assert.match(navigation, /typeof changeInfo\.url === "string"/);
 assert.match(worker, /changedTabNavigationUrl\(changeInfo\)/);
+assert.match(worker, /newTabRedirectGuard\.observe\(tabId, url\)/);
+assert.match(worker, /newTabRedirectGuard\.observe\(tab\.id, currentTabNavigationUrl\(tab\)\)/);
+assert.match(worker, /chrome\.tabs\.onRemoved\.addListener\(\(tabId\) => newTabRedirectGuard\.cancel\(tabId\)\)/);
+assert.match(navigation, /return tab\.pendingUrl \|\| tab\.url/);
+assert.match(navigation, /this\.cancel\(tabId\);[\s\S]*if \(!this\.deps\.isEligible\(url\)\) return/);
+assert.match(navigation, /if \(!await matchesLiveTab\(\)\) return;[\s\S]*shouldBypass\(tabId\)[\s\S]*isEnabled\(\)[\s\S]*if \(!await matchesLiveTab\(\) \|\| !isCurrent\(\)\) return;[\s\S]*this\.deps\.redirect\(tabId\)/);
+assert.match(worker, /async function migrateAndSyncRules\(\)[\s\S]*runIndependentEffects\(\[[\s\S]*getStartPageRuntimeState\(settings\)[\s\S]*reconcileClockAlarms,[\s\S]*await syncRules\(\)/);
 assert.match(worker, /if \(!url\) return/);
 assert.doesNotMatch(worker, /changeInfo\.url \?\? tab\.url/,
   "Non-navigation tab updates must not re-run the native new-tab fallback");
