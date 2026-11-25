@@ -266,6 +266,10 @@ async function prepareSnapshot(): Promise<{
   dataRevisionFallback: number;
 }> {
   const captured = await exportBackupSnapshot();
+  if (!Number.isSafeInteger(captured.dataRevision) || captured.dataRevision < 0
+    || captured.dataRevision >= Number.MAX_SAFE_INTEGER) {
+    throw new Error("Local Start Tab backup contains an invalid data revision");
+  }
   const bundle = captured.bundle;
   const json = JSON.stringify(bundle);
   const chunks = chunkForChromeSync(json, syncItemQuotaBytes());
