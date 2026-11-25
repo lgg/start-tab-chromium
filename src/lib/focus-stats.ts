@@ -233,7 +233,11 @@ function domainMinutes(host: string, settings: StartPageSettings): number {
   return ownValue(settings.focusStats.domainMinutes, host) ?? settings.focusStats.defaultMinutesPerAvoidedVisit;
 }
 
-export async function getFocusStats(): Promise<FocusStats> { return readStats(); }
+/** UI readers must not observe statistics written by a clock/restore
+ * transaction that has not yet committed its alarms and revision. */
+export async function getFocusStats(): Promise<FocusStats> {
+  return withStorageLock("data-write", () => readStats());
+}
 export async function resetFocusStats(): Promise<void> {
   if (typeof document !== "undefined") { await sendMessage({ type: "reset-stats" }); return; }
   await withStorageLock("data-write", async () => { await writeStatsInTransaction(emptyStats()); });

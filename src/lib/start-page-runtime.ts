@@ -324,29 +324,19 @@ export async function getStartPageViewSnapshot(): Promise<{ settings: StartPageS
 }
 
 export async function getStartPageRuntimeState(inputSettings?: StartPageSettings): Promise<StartPageRuntimeState> {
-  const view = (canonical: StartPageRuntimeState): StartPageRuntimeState =>
-    inputSettings ? normalizeRuntimeState(canonical, inputSettings) : canonical;
-  const settingsSnapshot = await readRuntimeSettingsSnapshot(false);
-  const items = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
-  const raw = items[START_PAGE_RUNTIME_KEY];
-  // A caller may pass a transient editor layout. It is a projection, not
-  // authority for persisting/pruning runtime data or deciding migration.
-  const normalized = normalizeRuntimeState(raw, settingsSnapshot.settings, items[LEGACY_INSTANCE_RUNTIME_KEY]);
-  if (settingsSnapshot.future || isFutureRuntimeSchema(raw) || jsonContentEqual(raw, normalized)) return view(normalized);
-
   return withStorageLock("data-write", async () => {
-    const freshSettingsSnapshot = await readRuntimeSettingsSnapshot(false);
-    const freshItems = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
-    const freshRaw = freshItems[START_PAGE_RUNTIME_KEY];
-    const freshNormalized = normalizeRuntimeState(freshRaw, freshSettingsSnapshot.settings, freshItems[LEGACY_INSTANCE_RUNTIME_KEY]);
-    if (freshSettingsSnapshot.future || isFutureRuntimeSchema(freshRaw) || jsonContentEqual(freshRaw, freshNormalized)) return view(freshNormalized);
-    return view(await persistRuntimeInTransaction(
-      freshNormalized,
-      freshSettingsSnapshot.settings,
-      true,
-      null,
-      freshItems[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined,
-    ));
+    // Even already-normalized storage can be a provisional transaction
+    // write. Read settings and runtime together only after it has settled.
+    const items = await chrome.storage.local.get([START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
+    const rawSettings = items[START_PAGE_SETTINGS_KEY];
+    const raw = items[START_PAGE_RUNTIME_KEY];
+    const settings = normalizeStartPageSettings(rawSettings);
+    const normalized = normalizeRuntimeState(raw, settings, items[LEGACY_INSTANCE_RUNTIME_KEY]);
+    const canonical = isFutureStartPageSchema(rawSettings) || isFutureRuntimeSchema(raw) || jsonContentEqual(raw, normalized)
+      ? normalized
+      : await persistRuntimeInTransaction(normalized, settings, true, null, items[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined);
+    // An editor layout is a projection, not authority to prune stored data.
+    return inputSettings ? normalizeRuntimeState(canonical, inputSettings) : canonical;
   });
 }
 

@@ -45,3 +45,6 @@ assert.match(messages, /value\.sites\.length <= MAX_BLOCKED_SITES/,
   "Service-worker message validation must reject oversized blocklist payloads");
 
 console.log("Round 16 static validation passed");
+
+assert.match(runtime, /export async function getStartPageRuntimeState[\s\S]*return withStorageLock\("data-write", async \(\) => \{[\s\S]*chrome\.storage\.local\.get\(\[START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY\]\)/);
+assert.match(focus, /export async function getFocusStats\(\): Promise<FocusStats> \{\s*return withStorageLock\("data-write", \(\) => readStats\(\)\)/);

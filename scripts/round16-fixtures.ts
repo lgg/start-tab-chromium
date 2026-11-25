@@ -196,3 +196,41 @@ assert.equal(removedTabs.includes(successfulTabId), false, "A successfully opene
 assert.equal(updatedUrls.at(-1), "chrome://new-tab-page/", "Successful explicit bypass consumption must stop trying fallback URLs");
 
 console.log("Round 16 fixtures passed");
+
+const { withStorageLock } = await import("../src/lib/storage-lock.js");
+const saved89 = await runtimeApi.getStartPageRuntimeState();
+const savedStats89 = await focusApi.getFocusStats();
+const exact89 = structuredClone(localState);
+let enter89!: () => void;
+let release89!: () => void;
+const entered89 = new Promise<void>((resolve) => { enter89 = resolve; });
+const held89 = withStorageLock("data-write", async () => {
+  const provisional89 = structuredClone(saved89);
+  provisional89.updatedAt += 100;
+  provisional89.notes[note.id] = "provisional clock/restore transaction";
+  localState.startPageRuntimeState = provisional89;
+  const provisionalStats89 = structuredClone(savedStats89);
+  provisionalStats89.totals.focusSessionsStarted += 99;
+  localState.focusStats = provisionalStats89;
+  enter89();
+  await new Promise<void>((resolve) => { release89 = resolve; });
+  localState.startPageRuntimeState = exact89.startPageRuntimeState;
+  localState.focusStats = exact89.focusStats;
+});
+await entered89;
+let runtimeRead89 = false;
+let statsRead89 = false;
+const runtimeResult89 = runtimeApi.getStartPageRuntimeState().then((value) => { runtimeRead89 = true; return value; });
+const statsResult89 = focusApi.getFocusStats().then((value) => { statsRead89 = true; return value; });
+await new Promise<void>((resolve) => setTimeout(resolve, 0));
+assert.equal(runtimeRead89, false, "Runtime reads must wait even for a normalized provisional snapshot");
+assert.equal(statsRead89, false, "Statistics reads must wait for the enclosing data transaction");
+release89();
+await held89;
+assert.deepEqual(await runtimeResult89, saved89);
+assert.deepEqual(await statsResult89, savedStats89);
+const projected89 = settingsApi.cloneSettings(await settingsApi.getStartPageSettings());
+projected89.layout.blocks = projected89.layout.blocks.filter((block) => block.id !== note.id);
+assert.equal((await runtimeApi.getStartPageRuntimeState(projected89)).notes[note.id], undefined);
+assert.equal((await runtimeApi.getStartPageRuntimeState()).notes[note.id], saved89.notes[note.id], "A projected editor read must not prune committed runtime");
+console.log("Round 89 committed runtime and statistics read regressions passed");
