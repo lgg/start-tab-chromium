@@ -193,3 +193,9 @@ for (const renderer87 of [runtimeRenderer, links76]) {
 assert.match(runtimeRenderer, /submissions\.committed\.observe\(ack\.savedTasks, ack\.runtimeUpdatedAt\)/);
 assert.match(runtimeRenderer, /ack\.runtimeUpdatedAt !== undefined && Array\.isArray\(ack\.savedTasks\)/);
 assert.match(links76, /ack\.runtimeUpdatedAt !== undefined && ack\.savedLinkPage !== undefined/);
+
+assert.match(newtab, /async function reconcileCommittedLocale\(\): Promise<boolean>/);
+assert.match(newtab, /runUiTask\(reconcileCommittedLocale\)/);
+const init102 = newtab.slice(newtab.indexOf("async function init()"));
+assert.match(init102, /chrome\.storage\.onChanged\.addListener\(handleStorageChange\)[\s\S]*await refreshState\(\);[\s\S]*await reconcileCommittedLocale\(\)[\s\S]*render\(\);/,
+  "Subscribe before the startup state and locale catch-up so initialization cannot miss earlier committed changes");

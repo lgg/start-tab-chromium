@@ -517,24 +517,31 @@ async function showOnboarding(): Promise<void> {
   }
 }
 
+/** Check the committed locale both on startup and on storage notifications. */
+async function reconcileCommittedLocale(): Promise<boolean> {
+  const generation = ++localeCheckGeneration;
+  const committed = await withStorageLock("data-write", getLocalePreference);
+  if (disposed || generation !== localeCheckGeneration) return false;
+  const decision = localeReloadDecision(loadedLocalePreference, committed, hasProtectedWork(), localeReloadDeferred);
+  if (decision === "none") {
+    localeReloadDeferred = false;
+    localeNotice.hidden = true;
+  } else if (decision === "defer") {
+    localeReloadDeferred = true;
+    showLocaleNotice();
+  } else {
+    location.reload();
+    return true;
+  }
+  return false;
+}
+
 function handleStorageChange(changes: Record<string, chrome.storage.StorageChange>, areaName: string): void {
   if (areaName !== "local" || disposed) return;
   if (changes.localeOverride) {
     // Ignore provisional writes/rollbacks; reload only for the committed
     // preference that differs from the catalog loaded by this page.
-    const generation = ++localeCheckGeneration;
-    runUiTask(async () => {
-      const committed = await withStorageLock("data-write", getLocalePreference);
-      if (disposed || generation !== localeCheckGeneration) return;
-      const decision = localeReloadDecision(loadedLocalePreference, committed, hasProtectedWork(), localeReloadDeferred);
-      if (decision === "none") {
-        localeReloadDeferred = false;
-        localeNotice.hidden = true;
-      } else if (decision === "defer") {
-        localeReloadDeferred = true;
-        showLocaleNotice();
-      } else location.reload();
-    });
+    runUiTask(reconcileCommittedLocale);
   }
   if (changes[START_PAGE_ONBOARDING_KEY]) {
     runUiTask(async () => {
@@ -634,6 +641,10 @@ async function init(): Promise<void> {
     if (event.persisted && disposed) location.reload();
   });
   window.addEventListener("pagehide", dispose, { once: true });
+  // Changes committed before listener registration may never be delivered to
+  // this page. Subscribe first, then reconcile before its initial render.
+  await refreshState();
+  if (disposed || await reconcileCommittedLocale() || disposed) return;
   render();
   await showOnboarding();
 }
