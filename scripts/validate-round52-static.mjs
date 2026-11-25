@@ -128,3 +128,6 @@ assert.match(backup, /ROLLBACK_KEYS = \[\.\.\.SNAPSHOT_KEYS, PRE_IMPORT_BACKUP_K
 assert.match(backup, /await markStartTabDataChanged[\s\S]*if \(options\.syncBaseline\)[\s\S]*\[LOCAL_SYNC_META_KEY\]: options\.syncBaseline/);
 assert.match(chromeSync, /syncBaseline: parsed\.legacy/);
 assert.match(chromeSync, /snapshot\.contentChecksum !== restoredChecksum/);
+
+assert.match(google, /Google Calendar event listing did not advance/);
+assert.match(google, /Google Calendar event listing exceeded the safe pagination limit/);

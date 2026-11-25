@@ -208,11 +208,8 @@ export async function readStartPageSettingsSnapshot(): Promise<StartPageSettings
 }
 
 export async function getStartPageSettings(): Promise<StartPageSettings> {
-  const raw = await readRawSettings();
-  const initial = normalizeStartPageSettingsWithReport(raw);
-  if (isFutureStartPageSchema(raw)) return initial.settings;
-  if (jsonContentEqual(raw, initial.settings)) return initial.settings;
-
+  // Even a normalized value may be an intermediate write in a transaction
+  // that will roll back. Keep the public reader behind the commit barrier.
   return withStorageLock("data-write", async () => {
     const currentRaw = await readRawSettings();
     const { settings, report } = normalizeStartPageSettingsWithReport(currentRaw);
@@ -237,7 +234,7 @@ export async function getStartPageSettings(): Promise<StartPageSettings> {
 }
 
 export async function getStartPageMigrationReport(): Promise<MigrationReport | null> {
-  const items = await chrome.storage.local.get(START_PAGE_MIGRATION_REPORT_KEY);
+  const items = await withStorageLock("data-write", () => chrome.storage.local.get(START_PAGE_MIGRATION_REPORT_KEY));
   const value = items[START_PAGE_MIGRATION_REPORT_KEY];
   if (!isRecord(value) || typeof value.fromVersion !== "number" || typeof value.toVersion !== "number") return null;
   const issues = Array.isArray(value.issues)
