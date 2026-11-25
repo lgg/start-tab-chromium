@@ -215,3 +215,37 @@ await blocklist.clearAll(["b.example", "a.example"]);
 assert.deepEqual(storage.blockedSites, []);
 assert.equal(dynamicRules.length, 0);
 console.log("Round 63 guarded blocklist clear regressions passed");
+
+let canceled106 = 0;
+let requests106 = 0;
+try {
+  globalThis.fetch = async (input) => {
+    requests106++;
+    const url = new URL(String(input));
+    assert.equal(url.searchParams.get("fields"), "nextPageToken,items(id,summary,status,start(date,dateTime),end(date,dateTime))");
+    return new Response(new ReadableStream<Uint8Array>({
+      pull(controller) { controller.enqueue(new Uint8Array(1024 * 1024)); },
+      cancel() { canceled106++; },
+    }));
+  };
+  await assert.rejects(() => google.listCalendarEvents(), /metadata response exceeds the size limit/);
+  assert.equal(canceled106, 1, "Oversized metadata streams must be canceled");
+  assert.equal(requests106, 1, "Oversized metadata must not trigger an automatic retry");
+
+  requests106 = 0;
+  globalThis.fetch = async () => {
+    requests106++;
+    if (requests106 === 1) {
+      return new Response(new ReadableStream<Uint8Array>({ cancel() { canceled106++; } }), { status: 401 });
+    }
+    return Response.json({ items: [] });
+  };
+  assert.deepEqual(await google.listCalendarEvents(), []);
+  assert.equal(requests106, 2);
+  assert.equal(canceled106, 2, "Discard the old unauthorized response before refreshing the token");
+
+  globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({ cancel() { canceled106++; } }), { status: 500 });
+  await assert.rejects(() => google.listCalendarEvents(), /Google API request failed: 500/);
+  assert.equal(canceled106, 3, "Failed response bodies must be canceled");
+} finally { globalThis.fetch = originalFetch; }
+console.log("Round 106 bounded Google metadata and response cleanup regressions passed");
