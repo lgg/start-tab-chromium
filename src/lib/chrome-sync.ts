@@ -490,6 +490,10 @@ async function syncChromeSyncBackupInTransaction(): Promise<ChromeSyncResult> {
     await assertLocalRevisionGuard(guard, "Start Tab data changed while Browser Sync was confirming matching content", remote.meta);
     return "unchanged";
   }
+  // A different checksum is not evidence that the remote frame is fully
+  // replicated. Verify it before choosing either direction; only matching
+  // content above may be repaired automatically from a known local copy.
+  await readVerifiedRemoteBundle(remote);
   const local = await readLocalMeta();
   if (!local || local.legacy) {
     if (isPristineBackup(localSnapshot.bundle) || remoteWins(remote.meta, localSnapshot)) { await restoreParsedSnapshot(remote, guard); return "restored"; }
