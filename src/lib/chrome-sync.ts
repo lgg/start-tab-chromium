@@ -204,7 +204,7 @@ function isFutureSyncMeta(value: unknown): boolean {
 }
 function isSyncMeta(value: unknown): value is SyncMeta {
   return isRecord(value) && value.version === SYNC_META_VERSION && isIsoTimestamp(value.updatedAt)
-    && typeof value.contentUpdatedAt === "number" && Number.isFinite(value.contentUpdatedAt) && value.contentUpdatedAt >= 0
+    && typeof value.contentUpdatedAt === "number" && Number.isSafeInteger(value.contentUpdatedAt) && value.contentUpdatedAt >= 0 && value.contentUpdatedAt < Number.MAX_SAFE_INTEGER
     && typeof value.deviceId === "string" && value.deviceId.length > 0
     && typeof value.snapshotId === "string" && value.snapshotId.length > 0
     && isSha256Checksum(value.checksum) && isSha256Checksum(value.contentChecksum)
@@ -238,6 +238,11 @@ function parsedMetaEqual(left: ParsedMeta | null, right: ParsedMeta): boolean {
 function assertCompatibleSyncMeta(value: unknown, location: "remote" | "local"): void {
   if (isFutureSyncMeta(value)) {
     throw new Error(`The ${location} Start Tab sync metadata was created by a newer extension version`);
+  }
+  if (isRecord(value) && value.version === SYNC_META_VERSION
+    && (typeof value.contentUpdatedAt !== "number" || !Number.isSafeInteger(value.contentUpdatedAt)
+      || value.contentUpdatedAt < 0 || value.contentUpdatedAt >= Number.MAX_SAFE_INTEGER)) {
+    throw new Error(`The ${location} Start Tab sync metadata contains an invalid data revision`);
   }
 }
 async function readRemoteMeta(): Promise<ParsedMeta | null> {
