@@ -56,3 +56,6 @@ console.log("Round 32 static validation passed");
 
 assert.match(chromeSync, /if \(expectedRemote === null\) assertEmptyRemoteFrame\(existing\)/);
 assert.match(chromeSync, /if \(expectedRemote === null\) \{[\s\S]*const current = await chrome\.storage\.sync\.get\(null\);[\s\S]*assertEmptyRemoteFrame\(current\)/);
+
+assert.match(chromeSync, /await readVerifiedRemoteBundle\(remote\);\s*const local = await readLocalMeta\(\);/,
+  "Smart Sync must verify differing remote content before choosing upload or restore");
