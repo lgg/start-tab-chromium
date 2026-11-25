@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { WidgetRequestCache } from "../src/newtab/widget-request-cache.js";
 import { parseIpPayload, parseWeatherPayload, validDateOnly } from "../src/newtab/provider-payloads.js";
-import { fetchWidgetJson } from "../src/newtab/widget-network.js";
+import { fetchWidgetJson, MAX_WIDGET_RESPONSE_BYTES } from "../src/newtab/widget-network.js";
 import { NoteDraft } from "../src/newtab/note-draft.js";
 import { providerSelectionIndexAfterEdit } from "../src/lib/block-settings-editor.js";
 import type { StartPageRuntimeState } from "../src/lib/start-page-runtime.js";
@@ -255,3 +255,38 @@ assert.equal(buildSearchUrl("https://{query}.example.com/", "invalid hostname"),
 assert.equal(buildSearchUrl("javascript:{query}", "alert(1)"), null);
 assert.equal(buildSearchUrl("https://example.com/", "ignored"), null);
 console.log("Round 77 localized date formatting and search URL regressions passed");
+
+const originalFetch84 = globalThis.fetch;
+try {
+  const encoder84 = new TextEncoder();
+  const json84 = encoder84.encode(JSON.stringify({ city: "Москва ☀️" }));
+  globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const byte of json84) controller.enqueue(Uint8Array.of(byte));
+      controller.close();
+    },
+  }));
+  assert.deepEqual(await fetchWidgetJson("https://example.com"), { city: "Москва ☀️" }, "UTF-8 decoding must survive multibyte chunk boundaries");
+
+  let cancelled84 = false;
+  globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new Uint8Array(MAX_WIDGET_RESPONSE_BYTES));
+      controller.enqueue(Uint8Array.of(32));
+    },
+    cancel() { cancelled84 = true; },
+  }), { headers: { "content-length": "2" } });
+  await assert.rejects(() => fetchWidgetJson("https://example.com"), /size limit/);
+  assert.equal(cancelled84, true, "An oversized stream must be cancelled even with a misleading Content-Length");
+
+  const exact84 = JSON.stringify("a".repeat(MAX_WIDGET_RESPONSE_BYTES - 2));
+  globalThis.fetch = async () => new Response(exact84);
+  assert.equal(await fetchWidgetJson("https://example.com"), exact84.slice(1, -1), "Accept a valid response at the exact limit");
+  globalThis.fetch = async () => new Response("{broken");
+  await assert.rejects(() => fetchWidgetJson("https://example.com"), SyntaxError);
+  globalThis.fetch = async () => new Response(null, { status: 204 });
+  await assert.rejects(() => fetchWidgetJson("https://example.com"), /empty response/);
+} finally {
+  globalThis.fetch = originalFetch84;
+}
+console.log("Round 84 bounded widget response regressions passed");

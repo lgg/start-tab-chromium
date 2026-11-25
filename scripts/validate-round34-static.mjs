@@ -110,3 +110,8 @@ assert.match(newtab, /editor\.isActive \|\| hasUnsavedNoteDrafts\(\) \|\| hasPen
 assert.match(newtab, /renderHiddenNoteDrafts\(hiddenNotesHost/);
 assert.match(notes, /text\.readOnly = true;[\s\S]*text\.value = session\.draft\.value/);
 assert.match(notes, /noteSessions\.get\(id\) !== session \|\| session\.draft\.saving \|\| session\.resolving/);
+
+assert.match(network, /response\.body\.getReader\(\)/);
+assert.match(network, /bytes > MAX_WIDGET_RESPONSE_BYTES/);
+assert.match(network, /reader\.cancel\(\)/);
+assert.doesNotMatch(network, /response\.json\(\)/, "Do not buffer an unbounded provider response before checking its size");
