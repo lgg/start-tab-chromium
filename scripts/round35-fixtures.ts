@@ -309,3 +309,32 @@ await refreshAfterAcknowledgedRuntimeWrite(async () => { refreshed87 = true; }, 
 assert.equal(refreshed87, true);
 assert.equal(warnings87.length, 1);
 console.log("Round 87 acknowledged runtime refresh regressions passed");
+
+const { settleClockMutation } = await import("../src/newtab/runtime-mutation-recovery.js");
+const commandError93 = new Error("clock command rejected");
+const readError93 = new Error("clock refresh rejected");
+const notices93: unknown[] = [];
+let commands93 = 0;
+let reads93 = 0;
+await settleClockMutation(
+  async () => { commands93++; },
+  async () => { reads93++; throw readError93; },
+  (error) => notices93.push(error),
+);
+assert.equal(commands93, 1, "An acknowledged clock command must never be retried because the read failed");
+assert.equal(reads93, 1);
+assert.deepEqual(notices93, [readError93]);
+await assert.rejects(settleClockMutation(
+  async () => { throw commandError93; },
+  async () => { reads93++; },
+  (error) => notices93.push(error),
+), (error) => error === commandError93);
+await assert.rejects(settleClockMutation(
+  async () => { throw commandError93; },
+  async () => { reads93++; throw readError93; },
+  (error) => notices93.push(error),
+), (error) => error instanceof AggregateError
+  && error.errors[0] === commandError93 && error.errors[1] === readError93);
+assert.equal(reads93, 3, "Both successful and failed commands must attempt canonical recovery");
+assert.equal(notices93.length, 1, "Only post-commit read failure produces a saved-state warning");
+console.log("Round 93 clock command recovery regressions passed");
