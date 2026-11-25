@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { FormPanelCache, parseNumberField } from "../src/lib/form-panel-cache.js";
 import { GeneralFormDraft } from "../src/options/general-form-draft.js";
 import { ClockRequestGate } from "../src/newtab/clock-request-gate.js";
 import { TaskSubmissionGate, TaskFormSessions } from "../src/newtab/task-submission-gate.js";
@@ -160,3 +161,33 @@ assert.equal(drafts65.get("search-b"), "");
 drafts65.set("search-a", "");
 assert.equal(drafts65.get("search-a"), "");
 console.log("Round 65 transient widget draft regressions passed");
+
+assert.equal(parseNumberField("", 42), 42);
+assert.equal(parseNumberField("   ", 42), 42);
+assert.equal(parseNumberField("0", 42), 0);
+assert.equal(parseNumberField("-12.5", 42), -12.5);
+assert.equal(parseNumberField("Infinity", 42), 42);
+assert.equal(parseNumberField("invalid", 42), 42);
+const panelHost69 = {
+  childNodes: [] as Array<{ value: string }>,
+  replaceChildren(...nodes: Array<{ value: string }>) { this.childNodes = nodes; },
+};
+const panelCache69 = new FormPanelCache<string, { value: string }>();
+let creates69 = 0;
+const makePanel69 = (initial: string) => () => {
+  creates69++;
+  const node = { value: initial };
+  panelHost69.childNodes.push(node);
+  return () => node.value;
+};
+const readGradient69 = panelCache69.show("gradient", panelHost69, makePanel69("initial gradient"));
+panelHost69.childNodes[0]!.value = "edited gradient";
+const readImage69 = panelCache69.show("image", panelHost69, makePanel69("initial image"));
+assert.equal(panelHost69.childNodes.length, 1, "Inactive panel fields must be detached");
+panelHost69.childNodes[0]!.value = "edited image";
+assert.equal(panelCache69.show("gradient", panelHost69, makePanel69("wrong"))(), "edited gradient");
+assert.equal(panelCache69.show("image", panelHost69, makePanel69("wrong"))(), "edited image");
+assert.equal(readGradient69(), "edited gradient");
+assert.equal(readImage69(), "edited image");
+assert.equal(creates69, 2, "Each panel is constructed once per dialog");
+console.log("Round 69 form panel and numeric input regressions passed");

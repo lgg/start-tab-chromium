@@ -1,4 +1,5 @@
 import type { I18n } from "./i18n.js";
+import { FormPanelCache, parseNumberField } from "./form-panel-cache.js";
 import { focusExistingSettingsDialog, nextSettingsDialogTitleId } from "./settings-dialog-guard.js";
 import {
 cloneTheme,
@@ -57,8 +58,7 @@ wrapper.append(element("span", "settings-field__label", label), control);
 return wrapper;
 }
 function readNumber(input: HTMLInputElement, fallback: number): number {
-const parsed = Number(input.value);
-return Number.isFinite(parsed) ? parsed : fallback;
+return parseNumberField(input.value, fallback);
 }
 function issueText(i18n: I18n, issues: ValidationIssue[]): string {
 return issues.map((issue) => `${issue.path}: ${i18n.t(issue.messageKey, issue.replacements)}`).join("\n");
@@ -85,22 +85,20 @@ const kind = select(theme.background.kind, [
 const dynamic = element("div", "settings-grid theme-background-editor__dynamic");
 root.append(field(i18n.t("backgroundTile"), kind, true), dynamic);
 let readDynamic: () => BackgroundTile;
-const draw = (): void => {
-dynamic.replaceChildren();
+const backgroundPanels = new FormPanelCache<BackgroundTile>();
+const createBackgroundPanel = (): (() => BackgroundTile) => {
 switch (kind.value) {
 case "solid": {
 const fallback = theme.background.kind === "solid" ? theme.background.color : "#08111f";
 const color = textInput(fallback, "color");
 dynamic.append(field(i18n.t("backgroundColor"), color, true));
-readDynamic = () => ({ kind: "solid", color: color.value });
-break;
+return () => ({ kind: "solid", color: color.value });
 }
 case "gradient": {
 const fallback = theme.background.kind === "gradient" ? theme.background.css : "linear-gradient(145deg, #08111f, #312e81)";
 const css = textInput(fallback);
 dynamic.append(field(i18n.t("backgroundGradientCss"), css, true));
-readDynamic = () => ({ kind: "gradient", css: css.value });
-break;
+return () => ({ kind: "gradient", css: css.value });
 }
 case "image": {
 const existing = theme.background.kind === "image" ? theme.background : { url: "", fit: "cover" as const, position: "center" };
@@ -108,8 +106,7 @@ const url = textInput(existing.url, "url");
 const fit = select(existing.fit, [["cover", i18n.t("imageFitCover")], ["contain", i18n.t("imageFitContain")]]);
 const position = textInput(existing.position);
 dynamic.append(field(i18n.t("backgroundImageUrl"), url, true), field(i18n.t("backgroundImageFit"), fit), field(i18n.t("backgroundImagePosition"), position));
-readDynamic = () => ({ kind: "image", url: url.value, fit: fit.value as "cover" | "contain", position: position.value });
-break;
+return () => ({ kind: "image", url: url.value, fit: fit.value as "cover" | "contain", position: position.value });
 }
 default: {
 const existing = defaultEffectTile(theme);
@@ -125,9 +122,10 @@ const effect = select<AnimatedEffectId>(existing.config.effect, [
 ]);
 const effectFields = element("div", "settings-grid settings-field--wide");
 dynamic.append(field(i18n.t("backgroundBaseColor"), baseColor), field(i18n.t("backgroundEffect"), effect), effectFields);
-let readEffect: () => Extract<BackgroundTile, { kind: "effect" }>["config"];
-const drawEffect = (): void => {
-effectFields.replaceChildren();
+type EffectConfig = Extract<BackgroundTile, { kind: "effect" }>["config"];
+let readEffect: () => EffectConfig;
+const effectPanels = new FormPanelCache<EffectConfig>();
+const createEffectPanel = (): (() => EffectConfig) => {
 const current = existing.config.effect === effect.value ? existing.config : null;
 const speed = numberInput("speed" in existing.config ? existing.config.speed : 1, 0.05, 4, 0.05);
 const intensity = numberInput(existing.config.intensity, 0, 1, 0.01);
@@ -136,53 +134,52 @@ case "animated-gradient": {
 const angle = numberInput(current?.effect === "animated-gradient" ? current.angle : 135, 0, 360, 1);
 const colors = textInput(current?.effect === "animated-gradient" ? current.colors.join(", ") : "#111827, #312e81, #0f766e, #111827");
 effectFields.append(field(i18n.t("effectSpeed"), speed), field(i18n.t("effectIntensity"), intensity), field(i18n.t("effectAngle"), angle), field(i18n.t("effectColors"), colors, true));
-readEffect = () => ({ effect: "animated-gradient", speed: readNumber(speed, 1), intensity: readNumber(intensity, 0.8), angle: readNumber(angle, 135), colors: colors.value.split(",").map((item) => item.trim()).filter(Boolean) });
-break;
+return () => ({ effect: "animated-gradient", speed: readNumber(speed, 1), intensity: readNumber(intensity, 0.8), angle: readNumber(angle, 135), colors: colors.value.split(",").map((item) => item.trim()).filter(Boolean) });
 }
 case "aurora": {
 const blur = numberInput(current?.effect === "aurora" ? current.blur : 72, 0, 160, 1);
 effectFields.append(field(i18n.t("effectSpeed"), speed), field(i18n.t("effectIntensity"), intensity), field(i18n.t("effectBlur"), blur));
-readEffect = () => ({ effect: "aurora", speed: readNumber(speed, 1), intensity: readNumber(intensity, 0.65), blur: readNumber(blur, 72) });
-break;
+return () => ({ effect: "aurora", speed: readNumber(speed, 1), intensity: readNumber(intensity, 0.65), blur: readNumber(blur, 72) });
 }
 case "mesh": {
 const scale = numberInput(current?.effect === "mesh" ? current.scale : 1, 0.25, 4, 0.05);
 effectFields.append(field(i18n.t("effectSpeed"), speed), field(i18n.t("effectIntensity"), intensity), field(i18n.t("effectScale"), scale));
-readEffect = () => ({ effect: "mesh", speed: readNumber(speed, 0.7), intensity: readNumber(intensity, 0.75), scale: readNumber(scale, 1) });
-break;
+return () => ({ effect: "mesh", speed: readNumber(speed, 0.7), intensity: readNumber(intensity, 0.75), scale: readNumber(scale, 1) });
 }
 case "spotlight": {
 const size = numberInput(current?.effect === "spotlight" ? current.size : 62, 10, 180, 1);
 effectFields.append(field(i18n.t("effectSpeed"), speed), field(i18n.t("effectIntensity"), intensity), field(i18n.t("effectSize"), size));
-readEffect = () => ({ effect: "spotlight", speed: readNumber(speed, 0.65), intensity: readNumber(intensity, 0.72), size: readNumber(size, 62) });
-break;
+return () => ({ effect: "spotlight", speed: readNumber(speed, 0.65), intensity: readNumber(intensity, 0.72), size: readNumber(size, 62) });
 }
 case "noise": {
 const animated = checkbox(current?.effect === "noise" ? current.animated : false);
 effectFields.append(field(i18n.t("effectIntensity"), intensity), field(i18n.t("effectAnimated"), animated), field(i18n.t("effectSpeed"), speed));
-readEffect = () => ({ effect: "noise", intensity: readNumber(intensity, 0.22), animated: animated.checked, speed: readNumber(speed, 0.5) });
-break;
+return () => ({ effect: "noise", intensity: readNumber(intensity, 0.22), animated: animated.checked, speed: readNumber(speed, 0.5) });
 }
 case "matrix": {
 const density = numberInput(current?.effect === "matrix" ? current.density : 0.55, 0.1, 1, 0.01);
 effectFields.append(field(i18n.t("effectSpeed"), speed), field(i18n.t("effectIntensity"), intensity), field(i18n.t("effectDensity"), density));
-readEffect = () => ({ effect: "matrix", speed: readNumber(speed, 1), intensity: readNumber(intensity, 0.7), density: readNumber(density, 0.55) });
-break;
+return () => ({ effect: "matrix", speed: readNumber(speed, 1), intensity: readNumber(intensity, 0.7), density: readNumber(density, 0.55) });
 }
 case "cyberpunk": {
 const scanlines = checkbox(current?.effect === "cyberpunk" ? current.scanlines : true);
 effectFields.append(field(i18n.t("effectSpeed"), speed), field(i18n.t("effectIntensity"), intensity), field(i18n.t("effectScanlines"), scanlines));
-readEffect = () => ({ effect: "cyberpunk", speed: readNumber(speed, 1.1), intensity: readNumber(intensity, 0.72), scanlines: scanlines.checked });
-break;
+return () => ({ effect: "cyberpunk", speed: readNumber(speed, 1.1), intensity: readNumber(intensity, 0.72), scanlines: scanlines.checked });
 }
 }
+throw new Error("Unknown background effect");
+};
+const drawEffect = (): void => {
+readEffect = effectPanels.show(effect.value, effectFields, createEffectPanel);
 };
 effect.addEventListener("change", drawEffect);
 drawEffect();
-readDynamic = () => ({ kind: "effect", baseColor: baseColor.value, config: readEffect() });
-break;
+return () => ({ kind: "effect", baseColor: baseColor.value, config: readEffect() });
 }
 }
+};
+const draw = (): void => {
+readDynamic = backgroundPanels.show(kind.value, dynamic, createBackgroundPanel);
 };
 kind.addEventListener("change", draw);
 draw();

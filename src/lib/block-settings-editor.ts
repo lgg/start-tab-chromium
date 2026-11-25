@@ -1,4 +1,5 @@
 import type { I18n } from "./i18n.js";
+import { parseNumberField } from "./form-panel-cache.js";
 import { focusExistingSettingsDialog, nextSettingsDialogTitleId } from "./settings-dialog-guard.js";
 import {
   blockTitleKey,
@@ -89,8 +90,7 @@ function selectInput<T extends string>(value: T, options: Array<[T, string]>): H
 }
 
 function readNumber(input: HTMLInputElement, fallback: number): number {
-  const parsed = Number(input.value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  return parseNumberField(input.value, fallback);
 }
 
 function makeId(prefix: string): string {
