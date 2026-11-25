@@ -1,4 +1,6 @@
-import { exportBackup, exportBackupSnapshot, importBackup, type BackupBundle } from "./backup.js";
+import { exportBackupSnapshot, importBackup, type BackupBundle } from "./backup.js";
+import { withStorageLock } from "./storage-lock.js";
+import { assertStartTabDataRevisionUnchanged } from "./data-revision.js";
 
 const GOOGLE_CALENDAR_EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/{calendarId}/events";
 const GOOGLE_DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files";
@@ -9,6 +11,7 @@ const MIN_CALENDAR_RESULTS = 1;
 const MAX_CALENDAR_RESULTS = 25;
 const CALENDAR_QUERY_PAGE_SIZE = 100;
 const MAX_CALENDAR_QUERY_PAGES = 20;
+const MAX_DRIVE_LIST_PAGES = 100;
 
 export interface GoogleCalendarEvent {
   id: string;
@@ -38,6 +41,7 @@ interface DriveFile {
 
 interface DriveListResponse {
   files?: DriveFile[];
+  nextPageToken?: string;
 }
 
 type AuthTokenResponse = string | { token?: string };
@@ -153,7 +157,7 @@ export async function listCalendarEvents(
 export function driveBackupListUrl(): string {
   const url = new URL(GOOGLE_DRIVE_FILES_URL);
   url.searchParams.set("spaces", "appDataFolder");
-  url.searchParams.set("fields", "files(id,name,modifiedTime)");
+  url.searchParams.set("fields", "nextPageToken,files(id,name,modifiedTime)");
   url.searchParams.set("q", `name='${DRIVE_BACKUP_FILE_NAME}' and trashed=false`);
   url.searchParams.set("orderBy", "modifiedTime desc");
   url.searchParams.set("pageSize", "1");
@@ -161,8 +165,31 @@ export function driveBackupListUrl(): string {
 }
 
 async function findDriveBackupFile(interactive = false): Promise<DriveFile | null> {
-  const payload = await googleFetch<DriveListResponse>(driveBackupListUrl(), {}, interactive);
-  return payload.files?.[0] ?? null;
+  const url = new URL(driveBackupListUrl());
+  const seen = new Set<string>();
+  for (let page = 0; page < MAX_DRIVE_LIST_PAGES; page += 1) {
+    const payload = await googleFetch<DriveListResponse>(url.toString(), {}, interactive);
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)
+      || (payload.files !== undefined && !Array.isArray(payload.files))) {
+      throw new Error("Google Drive returned an invalid backup listing");
+    }
+    if (payload.files?.length) {
+      const file = payload.files[0];
+      if (!file || typeof file.id !== "string" || !file.id.trim()
+        || file.name !== DRIVE_BACKUP_FILE_NAME) {
+        throw new Error("Google Drive returned an invalid backup file");
+      }
+      return file;
+    }
+    const token = payload.nextPageToken;
+    if (token === undefined || token === "") return null;
+    if (typeof token !== "string" || seen.has(token)) {
+      throw new Error("Google Drive backup listing did not advance");
+    }
+    seen.add(token);
+    url.searchParams.set("pageToken", token);
+  }
+  throw new Error("Google Drive backup listing exceeded the safe pagination limit");
 }
 
 function driveMultipartBoundary(content: string): string {
@@ -174,16 +201,26 @@ function driveMultipartBoundary(content: string): string {
 }
 
 export async function uploadDriveBackup(): Promise<void> {
-  const bundle = await exportBackup();
+  await withStorageLock("google-drive", uploadDriveBackupInTransaction);
+}
+
+async function uploadDriveBackupInTransaction(): Promise<void> {
+  // Serialize lookup + write in this browser profile and take the snapshot
+  // after acquiring the lock, not when the action was queued.
   const existing = await findDriveBackupFile(true);
-  const body = JSON.stringify(bundle, null, 2);
+  const snapshot = await exportBackupSnapshot();
+  const body = JSON.stringify(snapshot.bundle, null, 2);
+  const assertCurrent = (message: string) => withStorageLock("data-write", () =>
+    assertStartTabDataRevisionUnchanged(snapshot.dataRevision, snapshot.dataRevisionFallback, message));
+  await assertCurrent("Start Tab data changed before the Google Drive backup could be uploaded");
 
   if (existing) {
-    await googleFetch<unknown>(`${GOOGLE_DRIVE_UPLOAD_URL}/${existing.id}?uploadType=media`, {
+    await googleFetch<unknown>(`${GOOGLE_DRIVE_UPLOAD_URL}/${encodeURIComponent(existing.id)}?uploadType=media`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body,
     }, true);
+    await assertCurrent("Start Tab data changed during the Google Drive backup upload; upload again");
     return;
   }
 
@@ -208,16 +245,19 @@ export async function uploadDriveBackup(): Promise<void> {
       `--${boundary}--`,
     ].join("\r\n"),
   }, true);
+  await assertCurrent("Start Tab data changed during the Google Drive backup upload; upload again");
 }
 
 export async function restoreDriveBackup(): Promise<void> {
   const localBeforeNetwork = await exportBackupSnapshot();
-  const existing = await findDriveBackupFile(true);
-  if (!existing) throw new Error("No Start Tab backup found in Google Drive app data");
-  const bundle = await googleFetch<BackupBundle>(`${GOOGLE_DRIVE_FILES_URL}/${existing.id}?alt=media`, {}, true);
-  await importBackup(bundle, {
-    expectedCurrentDataRevision: localBeforeNetwork.dataRevision,
-    expectedCurrentDataRevisionFallback: localBeforeNetwork.dataRevisionFallback,
-    revisionConflictMessage: "Start Tab data changed while the Google Drive restore was being downloaded",
+  await withStorageLock("google-drive", async () => {
+    const existing = await findDriveBackupFile(true);
+    if (!existing) throw new Error("No Start Tab backup found in Google Drive app data");
+    const bundle = await googleFetch<BackupBundle>(`${GOOGLE_DRIVE_FILES_URL}/${encodeURIComponent(existing.id)}?alt=media`, {}, true);
+    await importBackup(bundle, {
+      expectedCurrentDataRevision: localBeforeNetwork.dataRevision,
+      expectedCurrentDataRevisionFallback: localBeforeNetwork.dataRevisionFallback,
+      revisionConflictMessage: "Start Tab data changed while the Google Drive restore was being downloaded",
+    });
   });
 }

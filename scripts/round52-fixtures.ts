@@ -301,4 +301,140 @@ try {
   Object.defineProperty(globalThis, "fetch", { value: originalFetch, configurable: true, writable: true });
 }
 
+// Round 53: Drive list pages may be empty even when nextPageToken exists.
+// Never create a second backup merely because the first page is empty.
+resetState();
+localStorage = localData("drive-paged.example", REVISION_BASE + 1200);
+const driveRequests: string[] = [];
+let drivePatched: unknown = null;
+globalThis.fetch = async (input, init) => {
+  const url = new URL(typeof input === "string" || input instanceof URL ? input.toString() : input.url);
+  driveRequests.push(url.toString());
+  if (url.searchParams.get("spaces") === "appDataFolder") {
+    if (!url.searchParams.get("pageToken")) {
+      assert.ok(url.searchParams.get("fields")?.includes("nextPageToken"));
+      return Response.json({ files: [], nextPageToken: "next" });
+    }
+    assert.equal(url.searchParams.get("pageToken"), "next");
+    return Response.json({ files: [{ id: "existing", name: "start-tab-backup.json" }] });
+  }
+  assert.equal(init?.method, "PATCH");
+  assert.ok(url.pathname.endsWith("/existing"));
+  drivePatched = JSON.parse(String(init?.body));
+  return Response.json({ id: "existing" });
+};
+try {
+  await google.uploadDriveBackup();
+  assert.equal(driveRequests.length, 3);
+  assert.deepEqual((drivePatched as backup.BackupBundle).storage.blockedSites, ["drive-paged.example"]);
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+// A repeated pagination token is not proof of absence. Fail without POST.
+resetState();
+localStorage = localData("drive-loop.example", REVISION_BASE + 1250);
+let loopReads = 0;
+globalThis.fetch = async (_input, init) => {
+  assert.equal(init?.method, undefined);
+  loopReads++;
+  return Response.json({ files: [], nextPageToken: "repeated" });
+};
+try {
+  await assert.rejects(() => google.uploadDriveBackup(), /did not advance/);
+  assert.equal(loopReads, 2);
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+// Two concurrent local uploads must share the same list/write lock.
+// The second lookup must observe the first create and PATCH instead of POST.
+resetState();
+localStorage = localData("drive-first.example", REVISION_BASE + 1300);
+let driveExists = false;
+let drivePosts = 0;
+let drivePatches = 0;
+let driveLists = 0;
+let releaseCreate!: () => void;
+let enterCreate!: () => void;
+const createEntered = new Promise<void>((resolve) => { enterCreate = resolve; });
+const createRelease = new Promise<void>((resolve) => { releaseCreate = resolve; });
+globalThis.fetch = async (input, init) => {
+  const url = new URL(typeof input === "string" || input instanceof URL ? input.toString() : input.url);
+  if (url.searchParams.get("spaces") === "appDataFolder") {
+    driveLists++;
+    if (driveLists === 2) localStorage = localData("drive-second.example", REVISION_BASE + 1400);
+    return Response.json({ files: driveExists ? [{ id: "created", name: "start-tab-backup.json" }] : [] });
+  }
+  if (init?.method === "POST") {
+    drivePosts++;
+    enterCreate();
+    await createRelease;
+    driveExists = true;
+  } else if (init?.method === "PATCH") {
+    drivePatches++;
+    assert.deepEqual(JSON.parse(String(init.body)).storage.blockedSites, ["drive-second.example"]);
+  } else {
+    throw new Error("Unexpected Drive request");
+  }
+  return Response.json({ id: "created" });
+};
+try {
+  const firstUpload = google.uploadDriveBackup();
+  await createEntered;
+  const secondUpload = google.uploadDriveBackup();
+  // Wait a turn to prove the queued upload has not made a second list request.
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  assert.equal(driveLists, 1);
+  releaseCreate();
+  await firstUpload;
+  await secondUpload;
+  assert.equal(drivePosts, 1);
+  assert.equal(drivePatches, 1);
+} finally {
+  releaseCreate();
+  globalThis.fetch = originalFetch;
+}
+
+// An edit arriving during the media request must not be reported as a fresh
+// backup. The already-uploaded snapshot may remain remotely; retry explicitly.
+resetState();
+localStorage = localData("drive-stale.example", REVISION_BASE + 1500);
+globalThis.fetch = async (input, init) => {
+  const url = new URL(typeof input === "string" || input instanceof URL ? input.toString() : input.url);
+  if (url.searchParams.get("spaces") === "appDataFolder") {
+    return Response.json({ files: [{ id: "existing", name: "start-tab-backup.json" }] });
+  }
+  assert.equal(init?.method, "PATCH");
+  localStorage = localData("drive-fresh.example", REVISION_BASE + 1600);
+  return Response.json({ id: "existing" });
+};
+try {
+  await assert.rejects(() => google.uploadDriveBackup(),
+    (error: unknown) => error instanceof revision.StartTabDataRevisionConflictError);
+  assert.deepEqual(localStorage.blockedSites, ["drive-fresh.example"]);
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+// A malicious/invalid remote revision cannot poison all subsequent local CAS.
+resetState();
+localStorage = localData("safe.example", REVISION_BASE + 1700);
+const safeBefore = clone(localStorage);
+await assert.rejects(() => revision.markStartTabDataChanged(1e30), /safe integer range/);
+assert.deepEqual(localStorage, safeBefore);
+localStorage = localData("corrupted-revision.example", 1e30);
+await assert.rejects(() => chromeSync.uploadChromeSyncBackup(), /safe integer range/);
+assert.equal(syncSetCount, 0);
+localStorage = clone(safeBefore);
+const unsafeFrame = await buildRemoteFrame("unsafe-remote.example", REVISION_BASE + 1800);
+(unsafeFrame.startTabSyncMeta as { contentUpdatedAt: number }).contentUpdatedAt = 1e30;
+syncStorage = unsafeFrame;
+localStorage = clone(safeBefore);
+await assert.rejects(() => chromeSync.restoreChromeSyncBackup(), /invalid data revision/);
+await assert.rejects(() => chromeSync.uploadChromeSyncBackup(), /invalid data revision/);
+assert.deepEqual(localStorage, safeBefore);
+assert.equal((syncStorage.startTabSyncMeta as { contentUpdatedAt: number }).contentUpdatedAt, 1e30);
+
 console.log("Round 52 remote backup concurrency fixtures passed");
+console.log("Round 53 Drive pagination, upload serialization and safe revision fixtures passed");

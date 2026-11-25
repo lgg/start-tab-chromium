@@ -47,7 +47,11 @@ export async function readStartTabDataRevision(fallback = 0): Promise<number> {
   if (isFutureDataRevisionSchema(revision)) {
     throw new Error("Start Tab data revision was created by a newer extension version");
   }
-  return revisionValue(revision, fallback);
+  const current = revisionValue(revision, fallback);
+  if (!Number.isSafeInteger(current) || current >= Number.MAX_SAFE_INTEGER) {
+    throw new Error("Start Tab data revision exceeds the safe integer range");
+  }
+  return current;
 }
 
 /**
@@ -80,9 +84,16 @@ export async function markStartTabDataChanged(
       ? Math.max(0, raw.updatedAt)
       : 0;
     const current = Math.max(revisionValue(raw), futureFloor);
+    const updatedAt = Math.max(current + 1, Math.max(0, Math.round(Number.isFinite(at) ? at : Date.now())));
+    // A non-safe integer can stop advancing under +1 and defeat every CAS.
+    // Reject it before writing; callers' existing transaction rollback then
+    // preserves the previous state instead of publishing an unusable revision.
+    if (!Number.isSafeInteger(updatedAt) || updatedAt >= Number.MAX_SAFE_INTEGER || updatedAt <= current) {
+      throw new Error("Start Tab data revision exceeds the safe integer range");
+    }
     const revision: DataRevision = {
       version: DATA_REVISION_SCHEMA_VERSION,
-      updatedAt: Math.max(current + 1, Math.max(0, Math.round(Number.isFinite(at) ? at : Date.now()))),
+      updatedAt,
     };
     await chrome.storage.local.set({ [DATA_REVISION_KEY]: revision });
     return revision.updatedAt;

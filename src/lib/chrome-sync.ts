@@ -204,7 +204,7 @@ function isFutureSyncMeta(value: unknown): boolean {
 }
 function isSyncMeta(value: unknown): value is SyncMeta {
   return isRecord(value) && value.version === SYNC_META_VERSION && isIsoTimestamp(value.updatedAt)
-    && typeof value.contentUpdatedAt === "number" && Number.isFinite(value.contentUpdatedAt) && value.contentUpdatedAt >= 0
+    && typeof value.contentUpdatedAt === "number" && Number.isSafeInteger(value.contentUpdatedAt) && value.contentUpdatedAt >= 0 && value.contentUpdatedAt < Number.MAX_SAFE_INTEGER
     && typeof value.deviceId === "string" && value.deviceId.length > 0
     && typeof value.snapshotId === "string" && value.snapshotId.length > 0
     && isSha256Checksum(value.checksum) && isSha256Checksum(value.contentChecksum)
@@ -239,6 +239,11 @@ function assertCompatibleSyncMeta(value: unknown, location: "remote" | "local"):
   if (isFutureSyncMeta(value)) {
     throw new Error(`The ${location} Start Tab sync metadata was created by a newer extension version`);
   }
+  if (isRecord(value) && value.version === SYNC_META_VERSION
+    && (typeof value.contentUpdatedAt !== "number" || !Number.isSafeInteger(value.contentUpdatedAt)
+      || value.contentUpdatedAt < 0 || value.contentUpdatedAt >= Number.MAX_SAFE_INTEGER)) {
+    throw new Error(`The ${location} Start Tab sync metadata contains an invalid data revision`);
+  }
 }
 async function readRemoteMeta(): Promise<ParsedMeta | null> {
   const result = await chrome.storage.sync.get(META_KEY);
@@ -261,6 +266,10 @@ async function prepareSnapshot(): Promise<{
   dataRevisionFallback: number;
 }> {
   const captured = await exportBackupSnapshot();
+  if (!Number.isSafeInteger(captured.dataRevision) || captured.dataRevision < 0
+    || captured.dataRevision >= Number.MAX_SAFE_INTEGER) {
+    throw new Error("Local Start Tab backup contains an invalid data revision");
+  }
   const bundle = captured.bundle;
   const json = JSON.stringify(bundle);
   const chunks = chunkForChromeSync(json, syncItemQuotaBytes());
