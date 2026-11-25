@@ -27,7 +27,7 @@ assert.doesNotMatch(blocklist, /excludedRequestDomains/,
   "Specificity must not create growing nested-domain exclusion arrays");
 assert.match(blocklist, /rememberBlockedNavigation\(url: string\): Promise<string \| null>/,
   "Remembered navigation must return its atomically selected blocked site");
-assert.match(worker, /const host = await rememberBlockedNavigation\(url\);/,
+assert.match(worker, /matched = await rememberBlockedNavigation\(destination\);[\s\S]*if \(matched\) await runStatsJob\(\(\) => recordBlockedNavigation\(matched!\)\);/,
   "The worker must use the site returned by the locked remember operation");
 assert.doesNotMatch(worker, /blockedSiteForUrl/,
   "The worker must not perform a separate pre-match before remembered URL persistence");
