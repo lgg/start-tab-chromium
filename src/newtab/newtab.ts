@@ -26,7 +26,8 @@ import {
   type StartPageSettings,
 } from "../lib/start-page-settings.js";
 import { renderBlockContent, type BlockRenderContext } from "./block-renderers.js";
-import { hasUnsavedNoteDrafts } from "./block-renderers-runtime.js";
+import { hasUnsavedNoteDrafts, pruneTaskForms } from "./block-renderers-runtime.js";
+import { pruneSearchDrafts } from "./block-renderers-static.js";
 import { LayoutEditor } from "./layout-editor.js";
 import { RenderScheduler } from "./render-scheduler.js";
 import { recoverRuntimeMutation } from "./runtime-mutation-recovery.js";
@@ -236,8 +237,17 @@ function render(): void {
   const noteFocus = active instanceof HTMLTextAreaElement && grid.contains(active) && active.dataset.noteId
     ? { id: active.dataset.noteId, start: active.selectionStart, end: active.selectionEnd, direction: active.selectionDirection, scrollTop: active.scrollTop }
     : null;
+  const widgetFocus = active instanceof HTMLInputElement && grid.contains(active) && active.dataset.widgetDraft
+    ? { key: active.dataset.widgetDraft, start: active.selectionStart, end: active.selectionEnd, direction: active.selectionDirection }
+    : null;
   clearRenderCleanups();
   const settings = editor.settings;
+  // While editing a layout a removed block can still be restored by Cancel.
+  // Only prune against committed layouts, not transient editor drafts.
+  if (!editor.isActive) {
+    pruneTaskForms(new Set(settings.layout.blocks.filter((block) => block.type === "localTasks").map((block) => block.id)));
+    pruneSearchDrafts(new Set(settings.layout.blocks.filter((block) => block.type === "search").map((block) => block.id)));
+  }
   const blocks = visibleBlocks(settings);
   applyTheme(getTheme(settings), background);
   updateSettingsButton(settings);
@@ -302,6 +312,16 @@ function render(): void {
       replacement.focus({ preventScroll: true });
       replacement.setSelectionRange(noteFocus.start, noteFocus.end, noteFocus.direction);
       replacement.scrollTop = noteFocus.scrollTop;
+    }
+  } else if (widgetFocus && (document.activeElement === document.body || document.activeElement === null)
+    && !page.hasAttribute("inert")) {
+    const replacement = Array.from(grid.querySelectorAll<HTMLInputElement>("input[data-widget-draft]"))
+      .find((candidate) => candidate.dataset.widgetDraft === widgetFocus.key);
+    if (replacement && !replacement.disabled) {
+      replacement.focus({ preventScroll: true });
+      if (widgetFocus.start !== null && widgetFocus.end !== null) {
+        replacement.setSelectionRange(widgetFocus.start, widgetFocus.end, widgetFocus.direction ?? "none");
+      }
     }
   } else if (cardFocus && document.activeElement === document.body && !page.hasAttribute("inert")) {
     Array.from(grid.querySelectorAll<HTMLElement>(".card--editing"))

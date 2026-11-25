@@ -11,7 +11,7 @@ import { blockTitleKey, blockUsesDefaultTitle, type BlockInstance, type LocalTas
 import { actionButton, element, formatDuration } from "./block-renderer-common.js";
 import type { BlockRenderContext } from "./block-renderer-types.js";
 import { ClockRequestGate } from "./clock-request-gate.js";
-import { TaskSubmissionGate } from "./task-submission-gate.js";
+import { TaskFormSessions } from "./task-submission-gate.js";
 import { NoteDraft } from "./note-draft.js";
 
 const clockRequests = new ClockRequestGate();
@@ -241,6 +241,12 @@ export function renderNote(
   });
 }
 
+const taskForms = new TaskFormSessions();
+
+export function pruneTaskForms(retained: ReadonlySet<string>): void {
+  taskForms.prune(retained);
+}
+
 function cloneTasks(tasks: readonly LocalTask[]): LocalTask[] {
   return tasks.map((task) => ({ ...task }));
 }
@@ -303,8 +309,12 @@ export function renderLocalTasks(
   const add = element("button", "button button--primary", context.i18n.t("addTask"));
   add.type = "submit";
   const list = element("div", "task-list");
-  const submissions = new TaskSubmissionGate();
+  const submissions = taskForms.get(block.id);
+  input.dataset.widgetDraft = `task:${block.id}`;
+  input.value = submissions.draft;
+  input.addEventListener("input", () => { submissions.draft = input.value; });
   const redraw = (): void => {
+    if (input.value !== submissions.draft) input.value = submissions.draft;
     const allTasks = ownValue(context.runtime.tasks, block.id) ?? [];
     const atCapacity = allTasks.length >= MAX_LOCAL_TASKS_PER_INSTANCE;
     input.disabled = atCapacity;
@@ -313,6 +323,10 @@ export function renderLocalTasks(
     list.replaceChildren(...tasks.map((task) => taskRow(block, task, context, redraw)));
     if (tasks.length === 0) list.append(element("p", "empty-state", context.i18n.t("emptyList")));
   };
+  submissions.view = redraw;
+  context.registerCleanup(() => {
+    if (submissions.view === redraw) submissions.view = undefined;
+  });
   form.append(input, add);
   form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -321,7 +335,9 @@ export function renderLocalTasks(
       redraw();
       return;
     }
+    if (submissions.view !== redraw) return;
     const submittedDraft = input.value;
+    submissions.draft = submittedDraft;
     const title = submittedDraft.trim().slice(0, MAX_LOCAL_TASK_TITLE_LENGTH);
     if (!title || !submissions.begin()) return;
     add.disabled = true;
@@ -335,10 +351,13 @@ export function renderLocalTasks(
     };
     const nextTasks = [...currentTasks.map((item) => ({ ...item })), task];
     void saveTasks(block, context, nextTasks).then(() => {
-      input.value = submissions.afterSuccess(input.value, submittedDraft);
+      submissions.acknowledge(submittedDraft);
     }).catch(() => undefined).finally(() => {
       submissions.finish();
-      if (list.isConnected) redraw();
+      submissions.view?.();
+      // A renderer may have been rebuilt with an earlier runtime snapshot
+      // before the worker committed. Refresh the canonical list as well.
+      context.requestRender();
     });
   });
   container.append(form, list);

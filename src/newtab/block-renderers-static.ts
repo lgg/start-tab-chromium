@@ -4,6 +4,7 @@ import type { BlockInstance, StartLink } from "../lib/start-page-settings.js";
 import { actionButton, element } from "./block-renderer-common.js";
 import type { BlockRenderContext } from "./block-renderer-types.js";
 import { WidgetRequestCache } from "./widget-request-cache.js";
+import { WidgetTextDrafts } from "./widget-text-drafts.js";
 import { parseIpPayload, type IpResult } from "./provider-payloads.js";
 import { fetchWidgetJson } from "./widget-network.js";
 
@@ -78,6 +79,12 @@ export function renderDateTime(
   context.registerCleanup(() => window.clearInterval(timer));
 }
 
+const searchDrafts = new WidgetTextDrafts();
+
+export function pruneSearchDrafts(retained: ReadonlySet<string>): void {
+  searchDrafts.prune(retained);
+}
+
 export function renderSearch(
   block: Extract<BlockInstance, { type: "search" }>,
   container: HTMLElement,
@@ -86,6 +93,9 @@ export function renderSearch(
   const form = element("form", "search");
   const input = element("input", "input search__input");
   input.type = "search";
+  input.dataset.widgetDraft = `search:${block.id}`;
+  input.value = searchDrafts.get(block.id);
+  input.addEventListener("input", () => searchDrafts.set(block.id, input.value));
   input.placeholder = block.config.placeholder || context.i18n.t("searchPlaceholder");
   input.autocomplete = "off";
   input.setAttribute("aria-label", context.i18n.t("searchPlaceholder"));

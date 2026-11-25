@@ -37,7 +37,7 @@ assert.match(tasks, /allTasks\.length >= MAX_LOCAL_TASKS_PER_INSTANCE/,
   "Local task controls must disable at the same capacity as runtime validation");
 assert.match(tasks, /currentTasks\.length >= MAX_LOCAL_TASKS_PER_INSTANCE/,
   "Task submit must recheck capacity to prevent stale-UI overflows");
-assert.match(tasks, /saveTasks\([\s\S]*\.then\(\(\) => \{[\s\S]*input\.value = submissions\.afterSuccess\(input\.value, submittedDraft\)/,
+assert.match(tasks, /saveTasks\([\s\S]*\.then\(\(\) => \{[\s\S]*submissions\.acknowledge\(submittedDraft\)/,
   "Task input must clear only after persistence succeeds");
 
 assert.match(backupUrls, /mode === "strict-import" && entries\.length > MAX_BLOCKED_SITES/,

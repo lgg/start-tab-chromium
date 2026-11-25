@@ -96,9 +96,13 @@ assert.match(popup, /languageEl\.value = localePreference/,
 assert.match(blocked, /remaining <= 0[\s\S]*cancelEl\.disabled = true[\s\S]*finishUnblock/,
   "The countdown cancel action must not race an unblock already being committed");
 
-assert.match(runtimeRenderer, /const submissions = new TaskSubmissionGate\(\)/);
+assert.match(runtimeRenderer, /const submissions = taskForms\.get\(block\.id\)/);
 assert.match(runtimeRenderer, /!title \|\| !submissions\.begin\(\)/);
-assert.match(runtimeRenderer, /submissions\.afterSuccess\(input\.value, submittedDraft\)/);
+assert.match(runtimeRenderer, /submissions\.acknowledge\(submittedDraft\)/);
+assert.match(runtimeRenderer, /submissions\.view = redraw/);
+assert.match(runtimeRenderer, /if \(submissions\.view !== redraw\) return/);
+assert.match(newtab, /input\[data-widget-draft\][\s\S]*setSelectionRange/);
+assert.match(newtab, /if \(!editor\.isActive\) \{[\s\S]*pruneTaskForms[\s\S]*pruneSearchDrafts/);
 assert.match(runtimeRenderer, /finally\(\(\) => \{[\s\S]*submissions\.finish\(\)/);
 assert.match(runtimeRenderer, /Math\.ceil\(value \/ 1000\) \* 1000/);
 assert.match(runtimeRenderer, /const clockRequests = new ClockRequestGate\(\)/);
