@@ -247,6 +247,43 @@ function assertBackupPayload(storage: Record<string, unknown>): void {
       throw new Error(`Invalid Start Tab backup section: ${key}`);
     }
   }
+
+  // Known collections are not interchangeable with scalar values. Reject
+  // damaged present containers before a normalizer turns them into defaults
+  // or empty dictionaries. Missing fields still support legacy migration.
+  const requireShape = (parent: Record<string, unknown>, key: string, path: string, check: (value: unknown) => boolean): void => {
+    if (Object.hasOwn(parent, key) && !check(parent[key])) {
+      throw new Error(`Invalid Start Tab backup section: ${path}.${key}`);
+    }
+  };
+  const record = (value: unknown): Record<string, unknown> => isRecord(value) ? value : {};
+  const recordArray = (value: unknown): boolean => Array.isArray(value) && value.every(isRecord);
+  const recordValues = (value: unknown, check: (entry: unknown) => boolean): boolean =>
+    isRecord(value) && Object.values(value).every(check);
+  const settings = record(storage[START_PAGE_SETTINGS_KEY]);
+  for (const key of ["layout", "themes", "startTab", "settingsButton", "focusStats"]) {
+    requireShape(settings, key, START_PAGE_SETTINGS_KEY, isRecord);
+  }
+  requireShape(record(settings.layout), "blocks", START_PAGE_SETTINGS_KEY + ".layout", recordArray);
+  requireShape(record(settings.themes), "customThemes", START_PAGE_SETTINGS_KEY + ".themes", recordArray);
+
+  const runtime = record(storage[START_PAGE_RUNTIME_KEY]);
+  requireShape(runtime, "clocks", START_PAGE_RUNTIME_KEY, (value) => recordValues(value, isRecord));
+  requireShape(runtime, "notes", START_PAGE_RUNTIME_KEY, (value) => recordValues(value, (entry) => typeof entry === "string"));
+  requireShape(runtime, "tasks", START_PAGE_RUNTIME_KEY, (value) => recordValues(value, recordArray));
+  requireShape(runtime, "linkPages", START_PAGE_RUNTIME_KEY, (value) => recordValues(value, (entry) => typeof entry === "number" && Number.isFinite(entry)));
+  requireShape(runtime, "localTasks", START_PAGE_RUNTIME_KEY, recordArray);
+
+  const legacy = record(storage[LEGACY_INSTANCE_RUNTIME_KEY]);
+  requireShape(legacy, "localTasks", LEGACY_INSTANCE_RUNTIME_KEY, (value) => recordValues(value, recordArray));
+  requireShape(legacy, "clocks", LEGACY_INSTANCE_RUNTIME_KEY, (value) => recordValues(value, isRecord));
+  requireShape(legacy, "linkPages", LEGACY_INSTANCE_RUNTIME_KEY, (value) => recordValues(value, (entry) => typeof entry === "number" && Number.isFinite(entry)));
+
+  const stats = record(storage[FOCUS_STATS_KEY]);
+  requireShape(stats, "totals", FOCUS_STATS_KEY, isRecord);
+  requireShape(stats, "byDay", FOCUS_STATS_KEY, (value) => recordValues(value, isRecord));
+  requireShape(stats, "byDomain", FOCUS_STATS_KEY, (value) => recordValues(value, isRecord));
+  requireShape(stats, "processedClockCompletions", FOCUS_STATS_KEY, isRecord);
 }
 
 export function migrateBackup(value: unknown): BackupBundle {

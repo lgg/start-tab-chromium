@@ -137,3 +137,7 @@ assert.match(google, /if \(payload\.incompleteSearch !== undefined && payload\.i
 
 assert.match(backup, /function assertBackupPayload\(storage: Record<string, unknown>\)/);
 assert.match(backup, /assertSupportedSchemas\(value\.storage\);\s*assertBackupPayload\(value\.storage\);\s*return currentSchema/);
+
+assert.match(backup, /requireShape\(record\(settings\.layout\), "blocks"/);
+assert.match(backup, /requireShape\(runtime, "tasks", START_PAGE_RUNTIME_KEY, \(value\) => recordValues\(value, recordArray\)\)/);
+assert.match(backup, /requireShape\(stats, "byDomain"/);
