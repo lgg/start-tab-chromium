@@ -88,3 +88,9 @@ body {
   color: var(--danger-fg);
   font-weight: 600;
 }
+
+.blocked__error {
+  margin: 0;
+  font-size: 16px;
+  color: #fca5a5;
+}

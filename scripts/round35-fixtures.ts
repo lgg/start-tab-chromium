@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { ClockRequestGate } from "../src/newtab/clock-request-gate.js";
+import { TaskSubmissionGate } from "../src/newtab/task-submission-gate.js";
+import { remainingCountdownSeconds } from "../src/blocked/countdown.js";
 import { normalizeBackupLastBlockedUrls } from "../src/lib/backup-blocked-urls.js";
 import { canonicalJsonValue, jsonContentEqual } from "../src/lib/json-content.js";
 import {
@@ -67,3 +70,51 @@ assert.deepEqual(Object.keys(bounded), ["a.example", "z.example"],
   "Local backup recovery ordering must be deterministic and locale-independent");
 
 console.log("Round 35 fixtures passed");
+
+let tick = 0;
+const requests = new ClockRequestGate(() => tick, 1_000);
+const first = requests.begin("clock", "token-a");
+assert.ok(first);
+assert.equal(requests.isPending("clock"), true);
+assert.equal(requests.begin("clock"), null, "Manual actions cannot overlap completion or its refresh");
+assert.equal(requests.begin("clock", "token-a"), null, "A rebuilt renderer cannot duplicate an outstanding completion");
+const independent = requests.begin("second");
+assert.ok(independent);
+requests.finish(independent);
+requests.finish(first);
+assert.equal(requests.isPending("clock"), false);
+assert.equal(requests.canComplete("clock", "token-a"), false, "Failed/stale completion must not retry synchronously");
+tick = 999;
+assert.equal(requests.canComplete("clock", "token-a"), false);
+const manual = requests.begin("clock");
+assert.ok(manual, "Retry cooldown must not disable manual actions");
+requests.finish(first); // Old callback must not clear the newer lease.
+assert.equal(requests.isPending("clock"), true);
+requests.finish(manual);
+assert.equal(requests.canComplete("clock", "token-b"), true, "A new completion token is independent of the old cooldown");
+tick = 1000;
+assert.equal(requests.canComplete("clock", "token-a"), true, "The same token can retry after a bounded delay");
+const retry = requests.begin("clock", "token-a");
+assert.ok(retry);
+tick = 2000;
+requests.finish(retry);
+assert.equal(requests.canComplete("clock", "token-a"), false, "Cooldown begins after the action and refresh settle");
+
+const deadline = 10_000;
+assert.equal(remainingCountdownSeconds(deadline, 0), 10);
+assert.equal(remainingCountdownSeconds(deadline, 1), 10);
+assert.equal(remainingCountdownSeconds(deadline, 9_999), 1, "Do not unblock before the full waiting time");
+assert.equal(remainingCountdownSeconds(deadline, 10_000), 0);
+assert.equal(remainingCountdownSeconds(deadline, 18_000), 0, "Throttled callbacks must not add another ten seconds");
+console.log("Round 57 clock request and countdown regressions passed");
+
+const submissions = new TaskSubmissionGate();
+assert.equal(submissions.begin(), true);
+assert.equal(submissions.pending, true);
+assert.equal(submissions.begin(), false, "A second submit while the first task is pending must not create a duplicate");
+assert.equal(submissions.afterSuccess("next task", "first task"), "next task", "A late acknowledgement cannot erase the next draft");
+assert.equal(submissions.afterSuccess("first task", "first task"), "");
+submissions.finish();
+assert.equal(submissions.begin(), true, "A finished or failed submit must permit retry");
+submissions.finish();
+console.log("Round 57 task submission regressions passed");

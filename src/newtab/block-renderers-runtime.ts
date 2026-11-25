@@ -10,6 +10,10 @@ import {
 import { blockTitleKey, blockUsesDefaultTitle, type BlockInstance, type LocalTask } from "../lib/start-page-settings.js";
 import { actionButton, element, formatDuration } from "./block-renderer-common.js";
 import type { BlockRenderContext } from "./block-renderer-types.js";
+import { ClockRequestGate } from "./clock-request-gate.js";
+import { TaskSubmissionGate } from "./task-submission-gate.js";
+
+const clockRequests = new ClockRequestGate();
 
 async function refreshClock(
   block: Extract<BlockInstance, { type: "timer" | "stopwatch" | "pomodoro" }>,
@@ -30,17 +34,22 @@ export function renderClock(
   const phase = element("div", "clock__phase");
   const display = element("div", "clock__display");
   const actions = element("div", "clock__actions");
-  let requestPending = false;
+  let disposed = false;
 
   const runAction = async (action: ClockAction): Promise<void> => {
-    if (requestPending) return;
-    requestPending = true;
+    if (disposed) return;
+    const lease = clockRequests.begin(block.id);
+    if (!lease) return;
     update();
     try {
       await sendMessage({ type: "clock-action", instanceId: block.id, action });
     } finally {
-      requestPending = false;
-      await refreshClock(block, context);
+      try {
+        await refreshClock(block, context);
+      } finally {
+        clockRequests.finish(lease);
+        if (!disposed) update();
+      }
     }
   };
 
@@ -51,38 +60,45 @@ export function renderClock(
   container.append(display, actions);
 
   const requestCompletion = async (token: string): Promise<void> => {
-    if (requestPending) return;
-    requestPending = true;
+    if (disposed) return;
+    const lease = clockRequests.begin(block.id, token);
+    if (!lease) return;
     update();
     try {
       await sendMessage({ type: "complete-clock", instanceId: block.id, token });
     } finally {
-      requestPending = false;
-      await refreshClock(block, context);
+      try {
+        await refreshClock(block, context);
+      } finally {
+        clockRequests.finish(lease);
+        if (!disposed) update();
+      }
     }
   };
 
   const update = (): void => {
+    if (disposed) return;
     clock = ownValue(context.runtime.clocks, block.id) ?? clock;
     const now = Date.now();
     const value = block.type === "stopwatch" ? elapsedClockMs(clock, now) : remainingClockMs(clock, now);
-    display.textContent = formatDuration(value, block.type === "stopwatch");
+    // A countdown must not show zero before its actual deadline.
+    display.textContent = formatDuration(block.type === "stopwatch" ? value : Math.ceil(value / 1000) * 1000, block.type === "stopwatch");
     startPause.textContent = context.i18n.t(clock.running ? "clockPause" : "clockStart");
-    startPause.disabled = requestPending;
-    reset.disabled = requestPending;
+    startPause.disabled = clockRequests.isPending(block.id);
+    reset.disabled = clockRequests.isPending(block.id);
     if (block.type === "pomodoro") phase.textContent = context.i18n.t(clock.phase === "break" ? "pomodoroBreak" : "pomodoroWork");
-    if (clock.running && block.type !== "stopwatch" && value <= 0 && clock.completionToken && !requestPending) {
-      void requestCompletion(clock.completionToken).catch((error: unknown) => {
-        requestPending = false;
-        update();
-        context.reportError(error);
-      });
+    if (clock.running && block.type !== "stopwatch" && value <= 0 && clock.completionToken
+      && clockRequests.canComplete(block.id, clock.completionToken)) {
+      void requestCompletion(clock.completionToken).catch(context.reportError);
     }
   };
 
   update();
   const timer = window.setInterval(update, 250);
-  context.registerCleanup(() => window.clearInterval(timer));
+  context.registerCleanup(() => {
+    disposed = true;
+    window.clearInterval(timer);
+  });
 }
 
 export function renderNote(
@@ -192,11 +208,12 @@ export function renderLocalTasks(
   const add = element("button", "button button--primary", context.i18n.t("addTask"));
   add.type = "submit";
   const list = element("div", "task-list");
+  const submissions = new TaskSubmissionGate();
   const redraw = (): void => {
     const allTasks = ownValue(context.runtime.tasks, block.id) ?? [];
     const atCapacity = allTasks.length >= MAX_LOCAL_TASKS_PER_INSTANCE;
     input.disabled = atCapacity;
-    add.disabled = atCapacity;
+    add.disabled = atCapacity || submissions.pending;
     const tasks = allTasks.filter((task) => block.config.showCompleted || !task.done);
     list.replaceChildren(...tasks.map((task) => taskRow(block, task, context, redraw)));
     if (tasks.length === 0) list.append(element("p", "empty-state", context.i18n.t("emptyList")));
@@ -209,8 +226,10 @@ export function renderLocalTasks(
       redraw();
       return;
     }
-    const title = input.value.trim().slice(0, MAX_LOCAL_TASK_TITLE_LENGTH);
-    if (!title) return;
+    const submittedDraft = input.value;
+    const title = submittedDraft.trim().slice(0, MAX_LOCAL_TASK_TITLE_LENGTH);
+    if (!title || !submissions.begin()) return;
+    add.disabled = true;
     const now = Date.now();
     const task: LocalTask = {
       id: globalThis.crypto?.randomUUID?.() ?? `task-${now.toString(36)}-${Math.random().toString(36).slice(2)}`,
@@ -221,9 +240,11 @@ export function renderLocalTasks(
     };
     const nextTasks = [...currentTasks.map((item) => ({ ...item })), task];
     void saveTasks(block, context, nextTasks).then(() => {
-      input.value = "";
-      redraw();
-    }).catch(() => undefined);
+      input.value = submissions.afterSuccess(input.value, submittedDraft);
+    }).catch(() => undefined).finally(() => {
+      submissions.finish();
+      if (list.isConnected) redraw();
+    });
   });
   container.append(form, list);
   redraw();
