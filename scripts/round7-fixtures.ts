@@ -681,3 +681,40 @@ assert.deepEqual(localState, paused88, "Repeated Pause does not write another re
 assert.deepEqual(await clockMessage88("toggle"), { ok: true }, "Legacy toggle messages remain accepted");
 assert.equal((await runtimeApi.getStartPageViewSnapshot()).runtime.clocks[pomodoro88.id]?.running, true);
 console.log("Round 88 idempotent clock intent regressions passed");
+
+const canonical90 = structuredClone(localState);
+const savedSites90 = await blocklistApi.getBlockedSites();
+const savedUrl90 = await blocklistApi.getLastBlockedUrl("round90.example");
+let enter90!: () => void;
+let release90!: () => void;
+const entered90 = new Promise<void>((resolve) => { enter90 = resolve; });
+const held90 = clockLock71.withStorageLock("data-write", async () => {
+  localState.blockedSites = ["round90.example"];
+  localState.lastBlockedUrls = { "round90.example": "https://round90.example/provisional" };
+  enter90();
+  await new Promise<void>((resolve) => { release90 = resolve; });
+  for (const key of ["blockedSites", "lastBlockedUrls"]) {
+    if (Object.hasOwn(canonical90, key)) localState[key] = structuredClone(canonical90[key]);
+    else delete localState[key];
+  }
+});
+await entered90;
+let sitesDone90 = false;
+let urlDone90 = false;
+const sites90 = blocklistApi.getBlockedSites().then((value) => { sitesDone90 = true; return value; });
+const url90 = blocklistApi.getLastBlockedUrl("round90.example").then((value) => { urlDone90 = true; return value; });
+await new Promise<void>((resolve) => setTimeout(resolve, 0));
+assert.equal(sitesDone90, false);
+assert.equal(urlDone90, false, "Blocked page must not read a provisional last URL");
+release90();
+await held90;
+assert.deepEqual(await sites90, savedSites90);
+assert.equal(await url90, savedUrl90);
+
+const displayedLocale90 = await i18nApi.getLocalePreference();
+const externalLocale90 = displayedLocale90 === "en" ? "ru" : "en";
+await i18nApi.setLocalePreference(externalLocale90, displayedLocale90);
+const beforeStale90 = structuredClone(localState);
+await assert.rejects(() => i18nApi.setLocalePreference("auto", displayedLocale90), /language changed/);
+assert.deepEqual(localState, beforeStale90, "A stale popup locale write cannot overwrite a later Options change");
+console.log("Round 90 committed blocklist and stale popup locale regressions passed");
