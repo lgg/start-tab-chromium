@@ -4,6 +4,7 @@ let localStorage: Record<string, unknown> = {};
 let syncStorage: Record<string, unknown> = {};
 let syncSetCalls = 0;
 let replaceMetaAfterChunkRead: Record<string, unknown> | null = null;
+let beforeSyncRead96: ((keys: string | string[] | Record<string, unknown> | null | undefined) => void) | null = null;
 
 function clone<T>(value: T): T { return structuredClone(value); }
 function keysFor(area: Record<string, unknown>, keys?: string | string[] | Record<string, unknown> | null): string[] {
@@ -43,6 +44,7 @@ const chromeMock = {
       QUOTA_BYTES_PER_ITEM: 8192,
       QUOTA_BYTES: 102_400,
       get: async (keys?: string | string[] | Record<string, unknown> | null) => {
+        beforeSyncRead96?.(keys);
         const output = selected(syncStorage, keys);
         const requested = keysFor(syncStorage, keys);
         if (replaceMetaAfterChunkRead && requested.some((key) => key.startsWith("startTabSyncChunk"))) {
@@ -120,3 +122,44 @@ assert.equal(syncSetCalls, 0, "A concurrently replaced remote snapshot must neve
 assert.equal((syncStorage.startTabSyncMeta as Record<string, unknown>).snapshotId, "round32-concurrent-snapshot");
 
 console.log("Round 32 fixtures passed");
+
+const local96 = clone(localStorage);
+const complete96 = clone(syncStorage);
+const goodMeta96 = clone(complete96.startTabSyncMeta as Record<string, unknown>);
+for (const frame96 of [
+  { startTabSyncMeta: { ...goodMeta96, checksum: "broken" }, startTabSyncChunk0: validChunk },
+  { startTabSyncMeta: null },
+  { startTabSyncChunk0: validChunk },
+  { startTabSyncChunk1: 123 },
+]) {
+  syncStorage = clone(frame96);
+  syncSetCalls = 0;
+  await assert.rejects(() => chromeSync.syncChromeSyncBackup(), /metadata or chunks are incomplete/);
+  assert.equal(syncSetCalls, 0, "Smart Sync must never claim malformed or partially replicated remote data");
+  assert.deepEqual(syncStorage, frame96);
+  assert.deepEqual(localStorage, local96);
+}
+
+syncStorage = {};
+let fullReads96 = 0;
+beforeSyncRead96 = (keys) => {
+  if (keys === null && ++fullReads96 === 2) syncStorage.startTabSyncChunk0 = validChunk;
+};
+syncSetCalls = 0;
+try {
+  await assert.rejects(() => chromeSync.syncChromeSyncBackup(), /metadata or chunks are incomplete/);
+  assert.equal(fullReads96, 2, "Missing-frame smart uploads must recheck all chunks before commit");
+  assert.equal(syncSetCalls, 0);
+  assert.equal(syncStorage.startTabSyncChunk0, validChunk);
+} finally { beforeSyncRead96 = null; }
+
+await chromeSync.uploadChromeSyncBackup();
+assert.equal(syncSetCalls, 1, "Explicit Upload can replace an incomplete remote frame");
+assert.equal(await chromeSync.syncChromeSyncBackup(), "unchanged");
+
+syncStorage = { unrelated: "keep", startTabSyncChunk0: "", startTabSyncChunk1: "" };
+syncSetCalls = 0;
+assert.equal(await chromeSync.syncChromeSyncBackup(), "uploaded", "Empty reserved chunk slots alone are not a backup");
+assert.equal(syncSetCalls, 1);
+assert.equal(syncStorage.unrelated, "keep");
+console.log("Round 96 incomplete remote frame protection regressions passed");
