@@ -16,6 +16,7 @@ const alarms = new Map<string, AlarmState>();
 let syncGetHook: StorageHook | null = null;
 let syncSetHook: SyncSetHook | null = null;
 let syncSetCount = 0;
+let failLocalSetAfterApply: string | null = null;
 
 function clone<T>(value: T): T {
   return structuredClone(value);
@@ -58,6 +59,10 @@ const chromeMock = {
       get: async (keys?: string | string[] | Record<string, unknown> | null) => selected(localStorage, keys),
       set: async (items: Record<string, unknown>) => {
         for (const [key, value] of Object.entries(items)) localStorage[key] = clone(value);
+        if (failLocalSetAfterApply && Object.hasOwn(items, failLocalSetAfterApply)) {
+          failLocalSetAfterApply = null;
+          throw new Error("Injected local storage failure after apply");
+        }
       },
       remove: async (keys: string | string[]) => {
         for (const key of Array.isArray(keys) ? keys : [keys]) delete localStorage[key];
@@ -132,6 +137,7 @@ function resetState(): void {
   syncGetHook = null;
   syncSetHook = null;
   syncSetCount = 0;
+  failLocalSetAfterApply = null;
 }
 
 function localData(site: string, updatedAt: number): Record<string, unknown> {
@@ -568,3 +574,28 @@ await backup.importBackup(incoming61);
 assert.ok((await settingsApi61.getStartPageSettings()).updatedAt > firstRestoredRevision61,
   "Restoring the same file twice must still invalidate old optimistic edit tokens");
 console.log("Round 61 restored local revision regressions passed");
+
+resetState();
+localStorage = { ...localData("before-failure.example", REVISION_BASE + 9000), startTabPreImportBackup: { prior: true } };
+const beforeRecoveryFailure70 = clone(localStorage);
+failLocalSetAfterApply = "startTabPreImportBackup";
+await assert.rejects(() => backup.importBackup(incoming), /Injected local storage failure/);
+assert.deepEqual(localStorage, beforeRecoveryFailure70, "Recovery write failures after apply must restore the old recovery snapshot");
+assert.deepEqual(dynamicRules, []);
+assert.equal(alarms.size, 0);
+
+resetState();
+const remote70 = await buildRemoteFrame("remote-atomic.example", REVISION_BASE + 9100);
+const meta70 = clone(localStorage.startTabLocalSyncMeta);
+localStorage = { ...localData("local-atomic.example", REVISION_BASE + 9000), startTabLocalSyncMeta: meta70, startTabPreImportBackup: { prior: true } };
+syncStorage = remote70;
+const beforeMetaFailure70 = clone(localStorage);
+failLocalSetAfterApply = "startTabLocalSyncMeta";
+await assert.rejects(() => chromeSync.restoreChromeSyncBackup(), /Injected local storage failure/);
+assert.deepEqual(localStorage, beforeMetaFailure70, "Failed sync baseline commit must restore all pre-import data and metadata");
+assert.deepEqual(dynamicRules, []);
+assert.equal(alarms.size, 0);
+await chromeSync.restoreChromeSyncBackup();
+assert.deepEqual(localStorage.blockedSites, ["remote-atomic.example"]);
+assert.deepEqual(localStorage.startTabLocalSyncMeta, syncStorage.startTabSyncMeta);
+console.log("Round 70 atomic recovery and sync-baseline regressions passed");

@@ -1,5 +1,6 @@
 import {
   BACKUP_VERSION,
+  LOCAL_SYNC_META_KEY,
   exportBackupSnapshot,
   importBackup,
   migrateBackup,
@@ -18,7 +19,7 @@ import { DEFAULT_SETTINGS, isRecord, normalizeStartPageSettings } from "./start-
 import { withStorageLock } from "./storage-lock.js";
 
 const META_KEY = "startTabSyncMeta";
-const LOCAL_META_KEY = "startTabLocalSyncMeta";
+const LOCAL_META_KEY = LOCAL_SYNC_META_KEY;
 const CHUNK_PREFIX = "startTabSyncChunk";
 const DEVICE_ID_KEY = "startTabDeviceId";
 const DEFAULT_SYNC_ITEM_QUOTA_BYTES = 8192;
@@ -401,15 +402,30 @@ async function readVerifiedRemoteBundle(parsed: ParsedMeta): Promise<BackupBundl
 }
 async function restoreParsedSnapshot(parsed: ParsedMeta, guard: LocalRevisionGuard): Promise<void> {
   const bundle = await readVerifiedRemoteBundle(parsed);
+  // Capture the canonical baseline of the content actually restored, even
+  // for a legacy frame whose metadata has no semantic content checksum.
+  const restoredChecksum = await checksum(canonicalBackupContent(bundle));
   await importBackup(bundle, {
     dataRevisionAt: parsed.meta.contentUpdatedAt,
     expectedCurrentDataRevision: guard.dataRevision,
     expectedCurrentDataRevisionFallback: guard.dataRevisionFallback,
     expectedCurrentStoredDataRevision: guard.storedDataRevision,
     revisionConflictMessage: "Start Tab data changed while the Browser Sync restore was being prepared",
+    syncBaseline: parsed.legacy ? { ...parsed.meta, contentChecksum: restoredChecksum, backupVersion: bundle.version } : parsed.meta,
   });
-  if (parsed.legacy) await writeRemoteSnapshot(await prepareSnapshot(), parsed);
-  else await writeLocalMeta(parsed.meta);
+  if (parsed.legacy) {
+    // Import is already committed. Never retry the destructive decision if
+    // the optional legacy-frame upgrade conflicts with a subsequent edit.
+    try {
+      const snapshot = await prepareSnapshot();
+      if (snapshot.contentChecksum !== restoredChecksum) return;
+      await writeRemoteSnapshot(snapshot, parsed);
+    } catch (error) {
+      if (!(error instanceof StartTabDataRevisionConflictError) && !(error instanceof ChromeSyncRemoteConflictError)) {
+        throw new Error("Browser Sync restore committed, but legacy metadata upgrade failed", { cause: error });
+      }
+    }
+  }
 }
 async function restoreChromeSyncBackupInTransaction(guard: LocalRevisionGuard): Promise<void> {
   const parsed = await readRemoteMeta();

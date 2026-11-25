@@ -122,3 +122,9 @@ for (const phrase of ["browser sync", "google drive", "local json", "recovery", 
 }
 
 console.log("Round 52 static validation passed");
+
+assert.match(backup, /try \{\s*await chrome\.storage\.local\.set\(\{ \[PRE_IMPORT_BACKUP_KEY\]: recovery \}\)/);
+assert.match(backup, /ROLLBACK_KEYS = \[\.\.\.SNAPSHOT_KEYS, PRE_IMPORT_BACKUP_KEY, DATA_REVISION_KEY, LOCAL_SYNC_META_KEY\]/);
+assert.match(backup, /await markStartTabDataChanged[\s\S]*if \(options\.syncBaseline\)[\s\S]*\[LOCAL_SYNC_META_KEY\]: options\.syncBaseline/);
+assert.match(chromeSync, /syncBaseline: parsed\.legacy/);
+assert.match(chromeSync, /snapshot\.contentChecksum !== restoredChecksum/);
