@@ -44,6 +44,7 @@ interface DriveFile {
 interface DriveListResponse {
   files?: DriveFile[];
   nextPageToken?: string;
+  incompleteSearch?: boolean;
 }
 
 type AuthTokenResponse = string | { token?: string };
@@ -187,7 +188,7 @@ export async function listCalendarEvents(
 export function driveBackupListUrl(): string {
   const url = new URL(GOOGLE_DRIVE_FILES_URL);
   url.searchParams.set("spaces", "appDataFolder");
-  url.searchParams.set("fields", "nextPageToken,files(id,name,modifiedTime)");
+  url.searchParams.set("fields", "nextPageToken,incompleteSearch,files(id,name,modifiedTime)");
   url.searchParams.set("q", `name='${DRIVE_BACKUP_FILE_NAME}' and trashed=false`);
   url.searchParams.set("orderBy", "modifiedTime desc");
   url.searchParams.set("pageSize", "1");
@@ -203,6 +204,11 @@ async function findDriveBackupFile(interactive = false): Promise<DriveFile | nul
       || (payload.files !== undefined && !Array.isArray(payload.files))) {
       throw new Error("Google Drive returned an invalid backup listing");
     }
+    // Even a nonempty partial result may omit the newest backup. Never
+    // restore or overwrite a file selected from an incomplete search.
+    if (payload.incompleteSearch !== undefined && payload.incompleteSearch !== false) {
+      throw new Error("Google Drive backup search is incomplete; retry before selecting a backup");
+    }
     if (payload.files?.length) {
       const file = payload.files[0];
       if (!file || typeof file.id !== "string" || !file.id.trim()
@@ -213,7 +219,7 @@ async function findDriveBackupFile(interactive = false): Promise<DriveFile | nul
     }
     const token = payload.nextPageToken;
     if (token === undefined || token === "") return null;
-    if (typeof token !== "string" || seen.has(token)) {
+    if (typeof token !== "string" || !token.trim() || seen.has(token)) {
       throw new Error("Google Drive backup listing did not advance");
     }
     seen.add(token);
