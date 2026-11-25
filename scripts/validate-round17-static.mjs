@@ -35,3 +35,8 @@ assert.match(worker, /if \(!outcome \|\| \(!outcome\.startedWork && outcome\.int
   "Timer and Stopwatch actions must not touch unrelated focus statistics");
 
 console.log("Round 17 static validation passed");
+
+assert.match(worker, /performClockAction[\s\S]*\|\s*null>\(\(runtime, settings\) => \{\s*const now = Date\.now\(\)/);
+assert.match(worker, /occurredAt: outcome\.occurredAt/);
+assert.match(runtime, /resetAllClockRuntimeWithAlarms\(at\?: number\)[\s\S]*\(runtime, settings\) => \{\s*const now = at \?\? Date\.now\(\)/);
+assert.match(runtime, /completeClockInstance[\s\S]*\(runtime, settings\) => \{\s*now = at \?\? Date\.now\(\)/);

@@ -761,9 +761,10 @@ export function pomodoroFocusElapsedMs(clock: ClockRuntimeState, now = Date.now(
 }
 
 /** Reset every configured clock and its complete alarm set as one recoverable transaction. */
-export async function resetAllClockRuntimeWithAlarms(now = Date.now()): Promise<number[]> {
-  return mutateStartPageRuntimeStateWithAlarmsAndStorageEffect<number[]>(
+export async function resetAllClockRuntimeWithAlarms(at?: number): Promise<number[]> {
+  const outcome = await mutateStartPageRuntimeStateWithAlarmsAndStorageEffect<{ interruptedFocusTimes: number[]; occurredAt: number }>(
     (runtime, settings) => {
+      const now = at ?? Date.now();
       const interruptedFocusTimes: number[] = [];
       for (const block of settings.layout.blocks) {
         if (!isClockBlock(block)) continue;
@@ -772,17 +773,18 @@ export async function resetAllClockRuntimeWithAlarms(now = Date.now()): Promise<
         if (interruptedMs > 0) interruptedFocusTimes.push(interruptedMs);
         runtime.clocks[block.id] = resetClockState(block);
       }
-      return { state: runtime, result: interruptedFocusTimes };
+      return { state: runtime, result: { interruptedFocusTimes, occurredAt: now } };
     },
     [FOCUS_STATS_KEY],
-    async (interruptedFocusTimes) => {
+    async ({ interruptedFocusTimes, occurredAt }) => {
       if (interruptedFocusTimes.length === 0) return;
       await applyFocusClockStatsPatchInExistingTransaction({
         interruptedFocusTimesMs: interruptedFocusTimes,
-        occurredAt: now,
+        occurredAt,
       });
     },
   );
+  return outcome.interruptedFocusTimes;
 }
 
 export function clockAlarmName(instanceId: string, token: string): string {
@@ -840,8 +842,12 @@ export interface ClockCompletionResult {
   completedToken: string | null;
 }
 
-export async function completeClockInstance(instanceId: string, expectedToken: string | null, now = Date.now()): Promise<ClockCompletionResult> {
+export async function completeClockInstance(instanceId: string, expectedToken: string | null, at?: number): Promise<ClockCompletionResult> {
+  // The mutation callback runs after acquiring data-write. Do not start the
+  // next phase or attribute focus time using the earlier queued request time.
+  let now: number;
   return mutateStartPageRuntimeStateWithAlarmsAndStorageEffect<ClockCompletionResult>((runtime, settings) => {
+    now = at ?? Date.now();
     const block = settings.layout.blocks.find(
       (candidate): candidate is Extract<BlockInstance, { type: ClockBlockType }> => candidate.id === instanceId && isClockBlock(candidate),
     ) ?? null;

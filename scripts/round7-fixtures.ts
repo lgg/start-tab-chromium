@@ -511,3 +511,38 @@ try {
   Date.now = resetWallClock68;
 }
 console.log("Round 68 reset revision and draft projection regressions passed");
+
+const clockLock71 = await import("../src/lib/storage-lock.js");
+const wall71 = Date.now;
+try {
+  const currentSettings71 = await settingsApi.getStartPageSettings();
+  const timer71 = currentSettings71.layout.blocks.find((block) => block.type === "timer");
+  assert.ok(timer71);
+  const initialRuntime71 = await runtimeApi.getStartPageRuntimeState();
+  initialRuntime71.clocks[timer71.id] = runtimeApi.defaultClockForBlock(timer71);
+  await runtimeApi.setStartPageRuntimeState(initialRuntime71);
+  const queued71 = wall71();
+  let now71 = queued71;
+  Date.now = () => now71;
+  let release71!: () => void;
+  let entered71!: () => void;
+  const entered = new Promise<void>((resolve) => { entered71 = resolve; });
+  const held = clockLock71.withStorageLock("data-write", async () => {
+    entered71();
+    await new Promise<void>((resolve) => { release71 = resolve; });
+  });
+  await entered;
+  const action71 = workerMessage({ type: "clock-action", instanceId: timer71.id, action: "toggle" });
+  // Give the message handler a chance to reach the held lock.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  now71 += 30_000;
+  release71();
+  await held;
+  assert.deepEqual(await action71, { ok: true });
+  const started71 = (await runtimeApi.getStartPageRuntimeState()).clocks[timer71.id]!;
+  assert.equal(started71.startedAt, now71, "A queued timer start must not lose time waiting for a backup transaction");
+  assert.equal(started71.targetAt, now71 + timer71.config.durationSeconds * 1000);
+} finally {
+  Date.now = wall71;
+}
+console.log("Round 71 queued worker clock action passed");
