@@ -58,7 +58,7 @@ export function renderClock(
     }
   };
 
-  const startPause = actionButton("", () => runAction("toggle"), "button", context.reportError);
+  const startPause = actionButton("", () => runAction(clock.running ? "pause" : "start"), "button", context.reportError);
   const reset = actionButton(context.i18n.t("clockReset"), () => runAction("reset"), "button button--secondary", context.reportError);
   actions.append(startPause, reset);
   if (block.type === "pomodoro") container.append(phase);

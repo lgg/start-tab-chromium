@@ -11,7 +11,7 @@ import {
 import type { LocalTask, StartPageSettings } from "./start-page-types.js";
 import { isLocalePreference, type LocaleChange } from "./i18n.js";
 
-export type ClockAction = "toggle" | "reset";
+export type ClockAction = "toggle" | "start" | "pause" | "reset";
 
 export type Message =
   | { type: "block"; host: string }
@@ -94,7 +94,8 @@ export function isMessage(value: unknown): value is Message {
           && isLocalePreference(value.localeChange.preference)))
         && (value.completeOnboarding === undefined || value.completeOnboarding === true);
     case "clock-action":
-      return isSafeIdentifier(value.instanceId) && (value.action === "toggle" || value.action === "reset");
+      return isSafeIdentifier(value.instanceId) && (value.action === "toggle" || value.action === "start"
+        || value.action === "pause" || value.action === "reset");
     case "complete-clock":
       return isSafeIdentifier(value.instanceId) && isSafeIdentifier(value.token);
     case "runtime-note":

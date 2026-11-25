@@ -13,7 +13,7 @@
   let previousFocus = null;
   let catalogLoadGeneration = 0;
   let applyGeneration = 0;
-  const nativeActionGenerations = new WeakMap();
+  let nativeActionPending = false;
   const nativeStatusElements = new WeakMap();
 
   const run = (action) => {
@@ -75,21 +75,43 @@
     return status;
   }
 
+  function syncNativeButton(button) {
+    // aria-disabled keeps keyboard focus stable; runNative enforces the lease.
+    if (nativeActionPending) {
+      button.setAttribute("aria-busy", "true");
+      button.setAttribute("aria-disabled", "true");
+    } else {
+      button.removeAttribute("aria-busy");
+      button.removeAttribute("aria-disabled");
+    }
+  }
+
+  function syncNativeButtons() {
+    for (const button of document.querySelectorAll("[data-native-new-tab]")) syncNativeButton(button);
+  }
+
   async function runNative(button) {
-    const generation = (nativeActionGenerations.get(button) || 0) + 1;
-    nativeActionGenerations.set(button, generation);
-    const status = nativeStatus(button);
-    status.hidden = true;
-    status.textContent = "";
-    button.setAttribute("aria-busy", "true");
+    if (nativeActionPending || !button.isConnected) return;
+    nativeActionPending = true;
+    syncNativeButtons();
     try {
+      for (const candidate of document.querySelectorAll("[data-native-new-tab]")) {
+        const status = nativeStatusElements.get(candidate);
+        if (status) { status.hidden = true; status.textContent = ""; }
+      }
       await openNative();
     } catch {
-      if (nativeActionGenerations.get(button) !== generation) return;
-      status.textContent = text("nativeNewTabFailed", "Couldn't open the browser's native new tab. Try again.");
-      status.hidden = false;
+      // The gate may have rebuilt its overlay while the worker was busy.
+      const replacement = document.querySelector("#" + OVERLAY_ID + " [data-native-new-tab]");
+      const target = replacement || (button.isConnected ? button : document.getElementById("nativeNewTab"));
+      if (target?.isConnected) {
+        const status = nativeStatus(target);
+        status.textContent = text("nativeNewTabFailed", "Couldn't open the browser's native new tab. Try again.");
+        status.hidden = false;
+      }
     } finally {
-      if (nativeActionGenerations.get(button) === generation) button.removeAttribute("aria-busy");
+      nativeActionPending = false;
+      syncNativeButtons();
     }
   }
 
@@ -187,6 +209,8 @@
     }
     const native = document.createElement("button");
     native.type = "button";
+    native.setAttribute("data-native-new-tab", "");
+    syncNativeButton(native);
     native.textContent = text("openNativeNewTab", "Open browser new tab");
     native.addEventListener("click", () => run(() => runNative(native)));
     const settings = document.createElement("button");
@@ -246,7 +270,11 @@
 
   async function initGate() {
     const nativeButton = document.getElementById("nativeNewTab");
-    if (nativeButton) nativeButton.addEventListener("click", () => run(() => runNative(nativeButton)));
+    if (nativeButton) {
+      nativeButton.setAttribute("data-native-new-tab", "");
+      syncNativeButton(nativeButton);
+      nativeButton.addEventListener("click", () => run(() => runNative(nativeButton)));
+    }
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
       if (changes[LOCALE_OVERRIDE_KEY]) {

@@ -69,3 +69,7 @@ const scheduler86 = read("src/newtab/render-scheduler.ts");
 assert.match(scheduler86, /if \(forceRender && !this\.disposed\)/);
 assert.match(scheduler86, /new AggregateError\(\[error, renderError\]/);
 assert.match(scheduler86, /const next = this\.job\.catch\(\(\) => undefined\)\.then\(operation\)/);
+
+const clockRenderer88 = read("src/newtab/block-renderers-runtime.ts");
+assert.match(clockRenderer88, /runAction\(clock\.running \? "pause" : "start"\)/);
+assert.match(worker, /\(action === "start" && clock\.running\) \|\| \(action === "pause" && !clock\.running\)/);
