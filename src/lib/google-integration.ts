@@ -61,8 +61,8 @@ async function getToken(interactive: boolean): Promise<string> {
     throw new Error("Google OAuth client_id is not configured in manifest.json");
   }
   const response = await chrome.identity.getAuthToken({ interactive }) as AuthTokenResponse;
-  if (typeof response === "string") return response;
-  if (response.token) return response.token;
+  if (typeof response === "string" && response.trim()) return response;
+  if (typeof response !== "string" && typeof response?.token === "string" && response.token.trim()) return response.token;
   throw new Error("Unable to get Google OAuth token");
 }
 
@@ -73,6 +73,9 @@ async function googleFetch<T>(url: string, init: RequestInit = {}, interactive =
     return fetch(url, {
       ...init,
       headers,
+      // Limit both headers and body reads. Never automatically retry a
+      // timed-out POST/PATCH: the remote side may already have committed.
+      signal: AbortSignal.timeout(30_000),
     });
   };
 
@@ -101,11 +104,12 @@ function normalizedCalendarMaxResults(maxResults: number): number {
 
 function calendarEvent(payload: CalendarEventPayload): GoogleCalendarEvent {
   return {
-    id: payload.id ?? crypto.randomUUID(),
+    id: typeof payload.id === "string" && payload.id ? payload.id : crypto.randomUUID(),
     title: payload.summary?.trim() ?? "",
-    start: payload.start?.dateTime ?? payload.start?.date ?? "",
-    end: payload.end?.dateTime ?? payload.end?.date ?? "",
-    allDay: Boolean(payload.start?.date && !payload.start.dateTime),
+    start: typeof payload.start?.dateTime === "string" ? payload.start.dateTime : typeof payload.start?.date === "string" ? payload.start.date : "",
+    end: typeof payload.end?.dateTime === "string" ? payload.end.dateTime : typeof payload.end?.date === "string" ? payload.end.date : "",
+    allDay: Boolean(typeof payload.start?.date === "string" && payload.start.date
+      && !(typeof payload.start.dateTime === "string" && payload.start.dateTime)),
   };
 }
 
@@ -138,7 +142,13 @@ export async function listCalendarEvents(
     if (pageToken) url.searchParams.set("pageToken", pageToken);
 
     const payload = await googleFetch<CalendarEventsResponse>(url.toString());
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)
+      || (payload.items !== undefined && !Array.isArray(payload.items))) {
+      throw new Error("Google Calendar returned an invalid event listing");
+    }
     for (const candidate of payload.items ?? []) {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
+      if (candidate.summary !== undefined && typeof candidate.summary !== "string") continue;
       const event = calendarEvent(candidate);
       if (!titleQuery || event.title.toLocaleLowerCase().includes(titleQuery)) events.push(event);
       if (events.length >= limit) break;

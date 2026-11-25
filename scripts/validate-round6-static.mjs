@@ -43,8 +43,8 @@ assert.match(serviceWorker, /return true;/, "The runtime message listener must k
 assert.doesNotMatch(gate, /chrome\.tabs\.create|startTabNativeNewTabBypass/, "The early gate must not create native tabs or own bypass state directly");
 assert.match(gate, /runtime\.sendMessage/, "The early gate must delegate native-tab creation to the service worker");
 assert.doesNotMatch(newtab, /nativeNewTabButton\.addEventListener/, "The main new-tab runtime must not install a duplicate native-tab click handler");
-assert.match(integrations, /cachedRequest/, "Integration renderers must cache request promises across rerenders");
-assert.match(staticRenderers, /cachedRequest/, "Static external-data renderers must cache request promises across rerenders");
+assert.match(integrations, /const requestCache = new WidgetRequestCache\(\)[\s\S]*requestCache\.get\(/, "Integration renderers must cache request promises across rerenders");
+assert.match(staticRenderers, /const requestCache = new WidgetRequestCache\(\)[\s\S]*requestCache\.get\(/, "Static external-data renderers must cache request promises across rerenders");
 for (const source of [integrations, staticRenderers]) assert.match(source, /isConnected|attached\(/, "Async renderers must guard detached DOM updates");
 
 const temporary = await mkdtemp(path.join(tmpdir(), "start-tab-round6-"));
