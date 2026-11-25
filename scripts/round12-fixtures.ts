@@ -49,3 +49,30 @@ scheduler.queueRefresh();
 assert.equal(frames.length, 0, "Disposed pages must not schedule more work");
 
 console.log("Round 12 fixtures passed");
+
+const frames74: Array<() => void> = [];
+let refreshed74 = 0;
+let rendered74 = 0;
+let changed74 = false;
+const conditional74 = new RenderScheduler({
+  requestFrame: (callback) => { frames74.push(callback); },
+  refresh: async () => { refreshed74++; return changed74; },
+  render: () => { rendered74++; },
+  onError: (error) => { throw error; },
+});
+conditional74.queueRefresh(false);
+frames74.shift()?.();
+await conditional74.waitForIdle();
+assert.equal(refreshed74, 1);
+assert.equal(rendered74, 0, "Equal canonical state refreshes must avoid a full render");
+conditional74.queueRefresh(false);
+conditional74.queueRender();
+frames74.shift()?.();
+await conditional74.waitForIdle();
+assert.equal(rendered74, 1, "An explicit render must not be lost when coalesced with a conditional refresh");
+changed74 = true;
+conditional74.queueRefresh(false);
+frames74.shift()?.();
+await conditional74.waitForIdle();
+assert.equal(rendered74, 2);
+console.log("Round 74 conditional refresh regressions passed");

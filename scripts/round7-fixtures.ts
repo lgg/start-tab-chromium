@@ -548,3 +548,31 @@ try {
   Date.now = wall71;
 }
 console.log("Round 71 queued worker clock action passed");
+
+const snapshot74 = await runtimeApi.getStartPageViewSnapshot();
+const canonicalBefore74 = structuredClone(localState);
+const note74 = snapshot74.settings.layout.blocks.find((block) => block.type === "note");
+assert.ok(note74);
+let release74!: () => void;
+let entered74!: () => void;
+const entered = new Promise<void>((resolve) => { entered74 = resolve; });
+const held74 = clockLock71.withStorageLock("data-write", async () => {
+  localState.startPageRuntimeState = {
+    ...snapshot74.runtime,
+    updatedAt: snapshot74.runtime.updatedAt + 100,
+    notes: { ...snapshot74.runtime.notes, [note74.id]: "uncommitted draft" },
+  };
+  entered74();
+  await new Promise<void>((resolve) => { release74 = resolve; });
+  // Model an import that restores its exact previous runtime on failure.
+  localState.startPageRuntimeState = structuredClone(canonicalBefore74.startPageRuntimeState);
+});
+await entered;
+let resolved74 = false;
+const read74 = runtimeApi.getStartPageViewSnapshot().then((snapshot) => { resolved74 = true; return snapshot; });
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(resolved74, false, "Page snapshot must wait for an in-flight data transaction");
+release74();
+await held74;
+assert.deepEqual(await read74, snapshot74, "Page snapshot must see the rolled-back committed content, not the provisional higher revision");
+console.log("Round 74 coherent page snapshot regression passed");

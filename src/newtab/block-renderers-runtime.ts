@@ -5,6 +5,7 @@ import {
   defaultClockForBlock,
   elapsedClockMs,
   getStartPageRuntimeState,
+  getStartPageViewSnapshot,
   remainingClockMs,
 } from "../lib/start-page-runtime.js";
 import { blockTitleKey, blockUsesDefaultTitle, type BlockInstance, type LocalTask } from "../lib/start-page-settings.js";
@@ -194,7 +195,7 @@ export function renderNote(
     session.view?.();
     try {
       // Read the actual stored state, not this render's optimistic runtime.
-      const currentRuntime = await getStartPageRuntimeState();
+      const { runtime: currentRuntime } = await getStartPageViewSnapshot();
       const current = ownValue(currentRuntime.notes, block.id) ?? "";
       if (discard) {
         if (!window.confirm(context.i18n.t("noteDraftDiscardConfirm"))) return;
