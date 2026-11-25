@@ -175,13 +175,20 @@ function firstBlockOfType(settings: StartPageSettings, type: BlockInstance["type
   return settings.layout.blocks.find((block) => block.type === type) ?? null;
 }
 
-function legacyClockValue(block: Extract<BlockInstance, { type: ClockBlockType }>, primary: Record<string, unknown>, secondary: Record<string, unknown>): unknown {
+/** A type-keyed legacy value belongs to one instance only. Prefer an
+ * existing block whose actual ID is the legacy key, even if it occurs later. */
+function ownsLegacyTypeValue(settings: StartPageSettings, block: BlockInstance): boolean {
+  const owner = settings.layout.blocks.find((candidate) => candidate.type === block.type && candidate.id === block.type)
+    ?? firstBlockOfType(settings, block.type);
+  return owner?.id === block.id;
+}
+
+function legacyClockValue(block: Extract<BlockInstance, { type: ClockBlockType }>, settings: StartPageSettings, primary: Record<string, unknown>, secondary: Record<string, unknown>): unknown {
   const primaryClocks = isRecord(primary.clocks) ? primary.clocks : {};
   const secondaryClocks = isRecord(secondary.clocks) ? secondary.clocks : {};
   return ownValue(primaryClocks, block.id)
     ?? ownValue(secondaryClocks, block.id)
-    ?? ownValue(primaryClocks, block.type)
-    ?? ownValue(secondaryClocks, block.type);
+    ?? (ownsLegacyTypeValue(settings, block) ? ownValue(primaryClocks, block.type) ?? ownValue(secondaryClocks, block.type) : undefined);
 }
 
 export function isFutureRuntimeSchema(value: unknown): boolean {
@@ -208,11 +215,12 @@ export function normalizeRuntimeState(value: unknown, settings: StartPageSetting
 
   for (const block of settings.layout.blocks) {
     if (isClockBlock(block)) {
-      const candidate = version === RUNTIME_SCHEMA_VERSION ? ownValue(sourceClocks, block.id) : legacyClockValue(block, source, legacy);
+      const candidate = version === RUNTIME_SCHEMA_VERSION ? ownValue(sourceClocks, block.id) : legacyClockValue(block, settings, source, legacy);
       clocks[block.id] = normalizeClock(block, candidate);
     }
     if (block.type === "note") {
-      const candidate = ownValue(sourceNotes, block.id) ?? ownValue(sourceNotes, block.type);
+      const candidate = ownValue(sourceNotes, block.id)
+        ?? (version !== RUNTIME_SCHEMA_VERSION && ownsLegacyTypeValue(settings, block) ? ownValue(sourceNotes, block.type) : undefined);
       if (typeof candidate === "string") notes[block.id] = candidate.slice(0, MAX_NOTE_LENGTH);
     }
     if (block.type === "localTasks") {
@@ -222,8 +230,7 @@ export function normalizeRuntimeState(value: unknown, settings: StartPageSetting
     if (block.type === "links" || block.type === "startPinned") {
       const candidate = ownValue(sourceLinkPages, block.id)
         ?? ownValue(legacyLinkPages, block.id)
-        ?? (firstBlockOfType(settings, block.type)?.id === block.id ? ownValue(sourceLinkPages, block.type) : undefined)
-        ?? (block.type === "links" && firstBlockOfType(settings, "links")?.id === block.id ? ownValue(sourceLinkPages, "links") : undefined);
+        ?? (version !== RUNTIME_SCHEMA_VERSION && ownsLegacyTypeValue(settings, block) ? ownValue(sourceLinkPages, block.type) : undefined);
       linkPages[block.id] = finiteInteger(candidate, 0, 0, 10_000);
     }
   }
