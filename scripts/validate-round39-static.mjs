@@ -58,3 +58,9 @@ for (const phrase of ["clock targets", "clean active layout draft", "single-flig
 }
 
 console.log("Round 39 static validation passed");
+
+assert.match(worker, /savedSettings: await runRuntimeJob\(\(\) => replaceStartPageSettingsWithRuntime/);
+assert.match(layoutEditor, /let persisted = ack\.savedSettings/);
+assert.match(layoutEditor, /chooseAcknowledgedSettings\(this\.saved, persisted\)/);
+assert.match(layoutEditor, /if \(!this\.dirty && this\.draftVersion\.updatedAt !== this\.saved\.updatedAt\)/);
+assert.match(layoutEditor, /layoutSavedRefreshFailed/);

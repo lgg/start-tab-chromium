@@ -59,3 +59,15 @@ freeSettings.layout.mode = "free";
 freeSettings.layout.blocks = [bounded];
 assert.deepEqual(normalizeStartPageSettings(freeSettings).layout.blocks[0]?.free, bounded.free, "Editor preview and persistence must use identical geometry bounds");
 console.log("Round 59 layout version and geometry regressions passed");
+
+const { chooseAcknowledgedSettings, pointerDraftChanged } = await import("../src/newtab/layout-draft-version.js");
+const observed81 = createDefaultStartPageSettings(100);
+const acknowledged81 = createDefaultStartPageSettings(200);
+assert.equal(chooseAcknowledgedSettings(observed81, acknowledged81), acknowledged81);
+assert.equal(chooseAcknowledgedSettings(acknowledged81, observed81), acknowledged81, "An older acknowledgement cannot overwrite a newer committed observation");
+assert.equal(chooseAcknowledgedSettings(observed81), observed81, "Legacy acknowledgement fallback retains the last observed canonical settings");
+const gesture81 = createBlockInstance("note");
+assert.equal(pointerDraftChanged(gesture81, structuredClone(gesture81)), false);
+assert.equal(pointerDraftChanged(gesture81, { ...gesture81, free: { ...gesture81.free, x: gesture81.free.x + 20 } }), true);
+assert.equal(pointerDraftChanged(gesture81, undefined), true);
+console.log("Round 81 acknowledgement and no-op gesture regressions passed");

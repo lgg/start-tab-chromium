@@ -82,5 +82,8 @@
   },
   "hiddenNoteDiscard": {
     "message": "Discard draft"
+  },
+  "layoutSavedRefreshFailed": {
+    "message": "Layout saved, but the latest view could not be loaded. The page will refresh its saved state; do not repeat the save."
   }
 }

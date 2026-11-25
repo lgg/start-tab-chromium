@@ -3,7 +3,8 @@ import { placeGridBlock, placeGridBlocks } from "../lib/grid-layout.js";
 import type { I18n } from "../lib/i18n.js";
 import { sendMessage } from "../lib/messages.js";
 import { MAX_START_PAGE_BLOCKS } from "../lib/platform-limits.js";
-import { clampFreeGeometry, LayoutDraftVersion } from "./layout-draft-version.js";
+import { clampFreeGeometry, LayoutDraftVersion, chooseAcknowledgedSettings, pointerDraftChanged } from "./layout-draft-version.js";
+import { getStartPageViewSnapshot } from "../lib/start-page-runtime.js";
 import { jsonContentEqual } from "../lib/json-content.js";
 import {
   BLOCK_DESCRIPTORS,
@@ -14,7 +15,6 @@ import {
   cloneBlock,
   cloneSettings,
   createBlockInstance,
-  getStartPageSettings,
   blockDeletionRequiresDataConfirmation,
   isSingletonBlockType,
   type BlockInstance,
@@ -147,13 +147,21 @@ export class LayoutEditor {
     this.renderControls();
     this.options.requestRender();
     try {
-      await sendMessage({
+      const ack = await sendMessage({
         type: "replace-start-page-settings",
         settings: this.draft,
         expectedSettingsUpdatedAt: this.draftVersion.updatedAt,
         expectedRuntimeUpdatedAt: this.destructiveRuntimeUpdatedAt ?? this.options.getRuntime().updatedAt,
       });
-      const persisted = await getStartPageSettings();
+      // A successful worker acknowledgement is the commit boundary.
+      // A later read failure must not leave a saved draft looking unsaved.
+      let persisted = ack.savedSettings;
+      let refreshFailure: unknown;
+      if (!persisted) {
+        try { persisted = (await getStartPageViewSnapshot()).settings; }
+        catch (error) { refreshFailure = error; }
+      }
+      persisted = chooseAcknowledgedSettings(this.saved, persisted);
       this.saved = cloneSettings(persisted);
       this.draft = cloneSettings(persisted);
       this.draftVersion.reset(persisted.updatedAt);
@@ -161,6 +169,9 @@ export class LayoutEditor {
       this.dirty = false;
       this.destructiveRuntimeUpdatedAt = null;
       this.options.onSaved(cloneSettings(this.saved));
+      if (refreshFailure) {
+        this.options.onError(new Error(this.options.i18n.t("layoutSavedRefreshFailed"), { cause: refreshFailure }));
+      }
     } finally {
       this.savePending = false;
       this.renderControls();
@@ -464,6 +475,15 @@ export class LayoutEditor {
         this.updateBlockWithoutRender(blockId, startBlock);
         this.draft.layout.profile = previousProfile;
         this.dirty = previousDirty;
+      } else if (!pointerDraftChanged(startBlock, this.draft.layout.blocks.find((block) => block.id === blockId))) {
+        // A gesture that returns to its original position is not an edit.
+        this.draft.layout.profile = previousProfile;
+        this.dirty = previousDirty;
+      }
+      if (!this.dirty && this.draftVersion.updatedAt !== this.saved.updatedAt) {
+        // A clean cancelled gesture may have deferred an external update.
+        this.draft = cloneSettings(this.saved);
+        this.draftVersion.reset(this.saved.updatedAt);
       }
       try {
         if (card.hasPointerCapture(pointerId)) card.releasePointerCapture(pointerId);

@@ -641,3 +641,16 @@ assert.equal((await workerMessage(second80)).ok, false, "A second wizard cannot 
 assert.deepEqual(localState, committed80);
 assert.equal((await workerMessage({ ...second80, completeOnboarding: false })).ok, false, "Invalid onboarding flags must be rejected");
 console.log("Round 80 atomic onboarding regression passed");
+
+const before81 = await runtimeApi.getStartPageViewSnapshot();
+const next81 = settingsApi.cloneSettings(before81.settings);
+next81.layout.gap = next81.layout.gap === 20 ? 21 : 20;
+const saved81 = await workerMessage({
+  type: "replace-start-page-settings", settings: next81,
+  expectedSettingsUpdatedAt: before81.settings.updatedAt,
+  expectedRuntimeUpdatedAt: before81.runtime.updatedAt,
+}) as { ok: boolean; savedSettings?: import("../src/lib/start-page-types.js").StartPageSettings };
+assert.equal(saved81.ok, true);
+assert.deepEqual(saved81.savedSettings, await settingsApi.getStartPageSettings(), "Worker must acknowledge the exact committed normalized settings");
+assert.ok(saved81.savedSettings!.updatedAt > before81.settings.updatedAt);
+console.log("Round 81 committed settings acknowledgement regression passed");
