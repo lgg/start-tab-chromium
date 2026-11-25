@@ -17,3 +17,29 @@ export class TaskSubmissionGate {
 
   finish(): void { this.active = false; }
 }
+
+/** A task form's input and outstanding submission survive DOM replacement. */
+export class TaskFormSession extends TaskSubmissionGate {
+  draft = "";
+  view: (() => void) | undefined;
+  acknowledge(submittedDraft: string): void {
+    this.draft = this.afterSuccess(this.draft, submittedDraft);
+  }
+}
+
+export class TaskFormSessions {
+  private readonly sessions = new Map<string, TaskFormSession>();
+  get(id: string): TaskFormSession {
+    let session = this.sessions.get(id);
+    if (!session) {
+      session = new TaskFormSession();
+      this.sessions.set(id, session);
+    }
+    return session;
+  }
+  prune(retained: ReadonlySet<string>): void {
+    for (const [id, session] of this.sessions) {
+      if (!retained.has(id) && !session.pending) this.sessions.delete(id);
+    }
+  }
+}
