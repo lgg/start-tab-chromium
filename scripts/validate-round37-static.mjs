@@ -106,3 +106,14 @@ assert.match(newtab, /if \(onboardingBlocked\(\)\) return;[\s\S]*if \(await onbo
   "Recheck page-local guards after waiting for committed onboarding state");
 assert.match(newtab, /function handleBeforeUnload[\s\S]*!hasPendingTaskDrafts\(\)\) return;/,
   "Closing or navigating away must warn about pending task work as well as notes and layout edits");
+
+const blockedPage92 = read("src/blocked/blocked.ts");
+const navigation92 = read("src/lib/blocked-navigation.ts");
+assert.match(worker, /new BlockedNavigationRegistry\(\(\) => chrome\.storage\.session\)/);
+assert.match(worker, /rememberIfBlocked\(details\.tabId, details\.url\)/);
+assert.match(worker, /blockedNavigations\.lookup\(sender\.tab\?\.id, message\.host\)/);
+assert.match(worker, /isBlockedPageNavigation\(sender\.url, blockedPageUrl\(\)\)/);
+assert.match(worker, /blockedNavigations\.forget\(tabId\)/);
+assert.match(blockedPage92, /sendMessage\(\{ type: "blocked-original-url", host \}\)/);
+assert.doesNotMatch(blockedPage92, /getLastBlockedUrl/, "The blocked page cannot redirect to a different tab's last URL");
+assert.match(navigation92, /return this\.enqueue\(tabId, async \(\) =>/);

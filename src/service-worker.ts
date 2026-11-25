@@ -30,6 +30,7 @@ import { changedTabNavigationUrl, currentTabNavigationUrl, NewTabRedirectGuard }
 import { assertRuntimeMutationTarget } from "./lib/runtime-mutation-target.js";
 import { isMessage, type Ack, type ClockAction, type Message } from "./lib/messages.js";
 import { consumeNativeNewTabBypass, openNativeNewTab } from "./lib/native-new-tab.js";
+import { BlockedNavigationRegistry, isBlockedPageNavigation } from "./lib/blocked-navigation.js";
 import {
   completeClockInstance,
   defaultClockForBlock,
@@ -78,6 +79,7 @@ interface HandlerResult {
   changed?: boolean;
   runtimeUpdatedAt?: number;
   savedSettings?: StartPageSettings;
+  blockedUrl?: string;
 }
 
 type ClockBlock = Extract<BlockInstance, { type: "timer" | "stopwatch" | "pomodoro" }>;
@@ -85,6 +87,8 @@ type ClockBlock = Extract<BlockInstance, { type: "timer" | "stopwatch" | "pomodo
 let runtimeJob: Promise<unknown> = Promise.resolve();
 let statsJob: Promise<void> = Promise.resolve();
 let nativeTabJob: Promise<void> = Promise.resolve();
+const blockedNavigations = new BlockedNavigationRegistry(() => chrome.storage.session);
+const blockedPageUrl = (): string => chrome.runtime.getURL("blocked.html");
 
 const newTabRedirectGuard = new NewTabRedirectGuard({
   isEligible: (url) => !isStartTabUrl(url) && isBrowserNewTabUrl(url) && !isNativeSplitViewPickerUrl(url),
@@ -139,10 +143,13 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => newTabRedirectGuard.cancel(tabId));
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void blockedNavigations.forget(tabId).catch(ignoreBackgroundError);
+});
 
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
-  if (details.frameId !== 0 || !details.url) return;
-  void rememberIfBlocked(details.url).catch(ignoreBackgroundError);
+  if (details.frameId !== 0 || !details.url || isBlockedPageNavigation(details.url, blockedPageUrl())) return;
+  void rememberIfBlocked(details.tabId, details.url).catch(ignoreBackgroundError);
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -152,12 +159,12 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 chrome.runtime.onMessage.addListener(
-  (message: unknown, _sender, sendResponse: (ack: Ack) => void) => {
+  (message: unknown, sender, sendResponse: (ack: Ack) => void) => {
     if (!isMessage(message)) {
       sendResponse({ ok: false, error: "Unsupported message" });
       return false;
     }
-    handle(message)
+    handle(message, sender)
       .then((result) => sendResponse({ ok: true, ...(result ?? {}) }))
       .catch((error: unknown) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
     return true;
@@ -170,7 +177,7 @@ function runNativeTabJob(operation: () => Promise<void>): Promise<void> {
   return next;
 }
 
-async function handle(message: Message): Promise<HandlerResult | void> {
+async function handle(message: Message, sender: chrome.runtime.MessageSender): Promise<HandlerResult | void> {
   switch (message.type) {
     case "block": await blockHost(message.host); break;
     case "unblock": return { changed: await unblockHost(message.host) };
@@ -198,6 +205,12 @@ async function handle(message: Message): Promise<HandlerResult | void> {
       message.expectedBlockUpdatedAt,
       message.expectedRuntimeUpdatedAt,
     )); break;
+    case "blocked-original-url": {
+      // Only the actual blocked page can retrieve its own tab's destination.
+      if (!sender.url || !isBlockedPageNavigation(sender.url, blockedPageUrl())) return {};
+      const blockedUrl = await blockedNavigations.lookup(sender.tab?.id, message.host);
+      return blockedUrl ? { blockedUrl } : {};
+    }
     case "record-unblock": await runStatsJob(() => recordUnblockAfterCountdown(message.host)); break;
     case "reset-stats": await runStatsJob(resetFocusStats); break;
   }
@@ -378,10 +391,18 @@ function isNativeSplitViewPickerUrl(url: string): boolean {
   }
 }
 
-async function rememberIfBlocked(url: string): Promise<void> {
-  const host = await rememberBlockedNavigation(url);
-  if (!host) return;
-  await runStatsJob(() => recordBlockedNavigation(host));
+async function rememberIfBlocked(tabId: number, url: string): Promise<void> {
+  let matched: string | null = null;
+  try {
+    await blockedNavigations.observe(tabId, url, async (destination) => {
+      matched = await rememberBlockedNavigation(destination);
+      return matched;
+    });
+  } finally {
+    // Preserve statistics independently if session storage failed after
+    // matching/remembering the host in the existing local transaction.
+    if (matched) await runStatsJob(() => recordBlockedNavigation(matched!));
+  }
 }
 
 async function migrateAndSyncRules(): Promise<void> {

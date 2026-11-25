@@ -1,4 +1,4 @@
-import { blockedSiteForUrl, getLastBlockedUrl, hostFromUrl, normalizeHost } from "../lib/blocklist.js";
+import { blockedSiteForUrl, hostFromUrl, normalizeHost } from "../lib/blocklist.js";
 import { loadI18n, type I18n } from "../lib/i18n.js";
 import { sendMessage } from "../lib/messages.js";
 import { remainingCountdownSeconds } from "./countdown.js";
@@ -127,7 +127,11 @@ async function requestUnblock(): Promise<UnblockResult> {
 
 async function redirectUrlAfterUnblock(): Promise<string> {
   try {
-    return (await getLastBlockedUrl(host)) ?? `https://${host}/`;
+    const { blockedUrl } = await sendMessage({ type: "blocked-original-url", host });
+    const originalHost = blockedUrl ? hostFromUrl(blockedUrl) : null;
+    // Never fall back to the shared historical URL from a different tab.
+    if (blockedUrl && originalHost && (originalHost === host || originalHost.endsWith("." + host))) return blockedUrl;
+    return `https://${host}/`;
   } catch {
     return `https://${host}/`;
   }

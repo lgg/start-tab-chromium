@@ -149,3 +149,53 @@ beforeGet = () => { if (liveReads === 2) guard.cancel(7); };
 await guard.observe(7, ntp);
 assert.deepEqual(redirected, [], "Cancellation during the final tabs.get must prevent the update");
 console.log("Round 56 stale native-tab redirect regressions passed");
+
+const { BlockedNavigationRegistry, isBlockedPageNavigation } = await import("../src/lib/blocked-navigation.js");
+const session92: Record<string, unknown> = {};
+const store92 = {
+  async get(key: string) { return Object.hasOwn(session92, key) ? { [key]: structuredClone(session92[key]) } : {}; },
+  async set(items: Record<string, unknown>) { Object.assign(session92, structuredClone(items)); },
+  async remove(key: string) { delete session92[key]; },
+};
+const registry92 = new BlockedNavigationRegistry(() => store92);
+const match92 = async (url: string): Promise<string | null> => url.includes("example.com") ? "example.com" : null;
+await Promise.all([
+  registry92.observe(91, "https://example.com/first?x=1", match92),
+  registry92.observe(92, "https://sub.example.com/second", match92),
+]);
+assert.equal(await registry92.lookup(91, "example.com"), "https://example.com/first?x=1");
+assert.equal(await registry92.lookup(92, "example.com"), "https://sub.example.com/second");
+assert.equal(await registry92.lookup(92, "other.example"), null);
+assert.equal(await registry92.lookup(undefined, "example.com"), null);
+const restarted92 = new BlockedNavigationRegistry(() => store92);
+assert.equal(await restarted92.lookup(91, "example.com"), "https://example.com/first?x=1", "Session storage survives MV3 worker restart");
+let entered92!: () => void;
+let release92!: () => void;
+const ready92 = new Promise<void>((resolve) => { entered92 = resolve; });
+const recording92 = registry92.observe(91, "https://example.com/new", async () => {
+  entered92();
+  await new Promise<void>((resolve) => { release92 = resolve; });
+  return "example.com";
+});
+await ready92;
+let lookupDone92 = false;
+const lookup92 = registry92.lookup(91, "example.com").then((url) => { lookupDone92 = true; return url; });
+await Promise.resolve();
+assert.equal(lookupDone92, false, "Blocked-page lookup must wait for its navigation event");
+release92();
+await recording92;
+assert.equal(await lookup92, "https://example.com/new");
+await registry92.observe(91, "https://allowed.example/", async () => null);
+assert.equal(await registry92.lookup(91, "example.com"), null, "Ordinary navigation invalidates a previous blocked URL");
+await assert.rejects(() => registry92.observe(92, "https://example.com/fail", async () => { throw new Error("match failed"); }), /match failed/);
+assert.equal(await registry92.lookup(92, "example.com"), null, "A failed match cannot resurrect an old URL");
+await registry92.observe(92, "https://attacker.invalid/path", async () => "example.com");
+assert.equal(await registry92.lookup(92, "example.com"), null, "Validate the actual destination host");
+await registry92.observe(92, "https://example.com/closed", match92);
+await registry92.forget(92);
+assert.equal(await registry92.lookup(92, "example.com"), null, "Tab closure removes the session destination");
+const page92 = "chrome-extension://starttab/blocked.html";
+assert.equal(isBlockedPageNavigation(page92 + "?site=example.com", page92), true);
+assert.equal(isBlockedPageNavigation("chrome-extension://another/blocked.html", page92), false);
+assert.equal(isBlockedPageNavigation("https://starttab/blocked.html", page92), false);
+console.log("Round 92 per-tab blocked navigation regressions passed");
