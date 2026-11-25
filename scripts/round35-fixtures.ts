@@ -291,3 +291,21 @@ assert.equal(forms85.discard("removed", hidden85, hidden85.snapshotDraft()), tru
 forms85.prune(new Set());
 assert.equal(forms85.hasPendingDrafts(), false);
 console.log("Round 85 hidden widget text regressions passed");
+
+const { refreshAfterAcknowledgedRuntimeWrite } = await import("../src/newtab/runtime-mutation-recovery.js");
+const acknowledged87 = new TaskFormSessions().get("legacy-worker");
+acknowledged87.draft = "committed task";
+assert.equal(acknowledged87.begin(), true);
+const submitted87 = acknowledged87.snapshotDraft();
+const refreshError87 = new Error("storage read failed");
+const warnings87: unknown[] = [];
+await refreshAfterAcknowledgedRuntimeWrite(async () => { throw refreshError87; }, (error) => warnings87.push(error));
+acknowledged87.acknowledge(submitted87);
+acknowledged87.finish();
+assert.equal(acknowledged87.draft, "", "A failed post-commit read must not keep a successfully submitted task ready to submit again");
+assert.deepEqual(warnings87, [refreshError87], "The independent refresh failure remains observable");
+let refreshed87 = false;
+await refreshAfterAcknowledgedRuntimeWrite(async () => { refreshed87 = true; }, (error) => warnings87.push(error));
+assert.equal(refreshed87, true);
+assert.equal(warnings87.length, 1);
+console.log("Round 87 acknowledged runtime refresh regressions passed");

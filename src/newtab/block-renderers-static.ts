@@ -4,6 +4,7 @@ import { createDatePartsFormatter, formatDateParts } from "./date-pattern.js";
 import type { I18n } from "../lib/i18n.js";
 import { blockTitleKey, blockUsesDefaultTitle, type BlockInstance, type StartLink } from "../lib/start-page-settings.js";
 import type { HiddenTextDraft } from "./hidden-text-drafts.js";
+import { refreshAfterAcknowledgedRuntimeWrite } from "./runtime-mutation-recovery.js";
 import { actionButton, element } from "./block-renderer-common.js";
 import type { BlockRenderContext } from "./block-renderer-types.js";
 import { WidgetRequestCache } from "./widget-request-cache.js";
@@ -194,8 +195,10 @@ export function renderLinkCollection(
       const revision = await context.setRuntime({ kind: "linkPage", instanceId: block.id, page: nextPage, expectedPage });
       if (revision !== undefined) session.committed.observe(nextPage, revision);
       else {
-        const { runtime } = await getStartPageViewSnapshot();
-        session.committed.observe(ownValue(runtime.linkPages, block.id) ?? 0, runtime.updatedAt);
+        await refreshAfterAcknowledgedRuntimeWrite(async () => {
+          const { runtime } = await getStartPageViewSnapshot();
+          session.committed.observe(ownValue(runtime.linkPages, block.id) ?? 0, runtime.updatedAt);
+        }, (error) => context.reportError(new Error(context.i18n.t("runtimeSavedRefreshFailed"), { cause: error })));
       }
     } finally {
       session.finish();

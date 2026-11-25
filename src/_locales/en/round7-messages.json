@@ -97,5 +97,8 @@
   },
   "hiddenWidgetDiscardConfirm": {
     "message": "Discard this unsubmitted text?"
+  },
+  "runtimeSavedRefreshFailed": {
+    "message": "Change saved, but the latest widget state could not be loaded. The page will refresh; do not repeat the action."
   }
 }

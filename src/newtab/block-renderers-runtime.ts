@@ -16,6 +16,7 @@ import { TaskFormSessions, type TaskFormSession } from "./task-submission-gate.j
 import { NoteDraft } from "./note-draft.js";
 import { hiddenDraftIds } from "./protected-page-drafts.js";
 import type { HiddenTextDraft } from "./hidden-text-drafts.js";
+import { refreshAfterAcknowledgedRuntimeWrite } from "./runtime-mutation-recovery.js";
 
 const clockRequests = new ClockRequestGate();
 
@@ -340,8 +341,10 @@ async function saveTasks(
   if (revision !== undefined) {
     submissions.committed.observe(nextTasks, revision);
   } else {
-    const { runtime } = await getStartPageViewSnapshot();
-    submissions.committed.observe(ownValue(runtime.tasks, block.id) ?? [], runtime.updatedAt);
+    await refreshAfterAcknowledgedRuntimeWrite(async () => {
+      const { runtime } = await getStartPageViewSnapshot();
+      submissions.committed.observe(ownValue(runtime.tasks, block.id) ?? [], runtime.updatedAt);
+    }, (error) => context.reportError(new Error(context.i18n.t("runtimeSavedRefreshFailed"), { cause: error })));
   }
 }
 
