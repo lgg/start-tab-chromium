@@ -211,7 +211,7 @@ async function uploadDriveBackupInTransaction(): Promise<void> {
   const snapshot = await exportBackupSnapshot();
   const body = JSON.stringify(snapshot.bundle, null, 2);
   const assertCurrent = (message: string) => withStorageLock("data-write", () =>
-    assertStartTabDataRevisionUnchanged(snapshot.dataRevision, snapshot.dataRevisionFallback, message));
+    assertStartTabDataRevisionUnchanged(snapshot.dataRevision, snapshot.dataRevisionFallback, message, snapshot.storedDataRevision));
   await assertCurrent("Start Tab data changed before the Google Drive backup could be uploaded");
 
   if (existing) {
@@ -257,6 +257,7 @@ export async function restoreDriveBackup(): Promise<void> {
     await importBackup(bundle, {
       expectedCurrentDataRevision: localBeforeNetwork.dataRevision,
       expectedCurrentDataRevisionFallback: localBeforeNetwork.dataRevisionFallback,
+      expectedCurrentStoredDataRevision: localBeforeNetwork.storedDataRevision,
       revisionConflictMessage: "Start Tab data changed while the Google Drive restore was being downloaded",
     });
   });

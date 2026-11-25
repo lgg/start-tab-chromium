@@ -31,17 +31,26 @@ export function isFutureDataRevisionSchema(value: unknown): boolean {
     && value.version > DATA_REVISION_SCHEMA_VERSION;
 }
 
-function revisionValue(value: unknown, fallback = 0): number {
-  if (isRecord(value)
+function storedRevisionValue(value: unknown): number | null {
+  return isRecord(value)
     && value.version === DATA_REVISION_SCHEMA_VERSION
     && typeof value.updatedAt === "number"
-    && Number.isFinite(value.updatedAt)) {
-    return Math.max(0, value.updatedAt, fallback);
-  }
-  return Math.max(0, fallback);
+    && Number.isFinite(value.updatedAt) ? value.updatedAt : null;
 }
 
-export async function readStartTabDataRevision(fallback = 0): Promise<number> {
+function revisionValue(value: unknown, fallback = 0): number {
+  const stored = storedRevisionValue(value);
+  // The fallback belongs only to legacy profiles without a valid stored
+  // counter. Taking max(stored, fallback) can hide real revision increments.
+  return Math.max(0, stored ?? fallback);
+}
+
+export interface StartTabDataRevisionSnapshot {
+  dataRevision: number;
+  storedDataRevision: number | null;
+}
+
+export async function readStartTabDataRevisionSnapshot(fallback = 0): Promise<StartTabDataRevisionSnapshot> {
   const items = await chrome.storage.local.get(DATA_REVISION_KEY);
   const revision = items[DATA_REVISION_KEY];
   if (isFutureDataRevisionSchema(revision)) {
@@ -51,22 +60,32 @@ export async function readStartTabDataRevision(fallback = 0): Promise<number> {
   if (!Number.isSafeInteger(current) || current >= Number.MAX_SAFE_INTEGER) {
     throw new Error("Start Tab data revision exceeds the safe integer range");
   }
-  return current;
+  return { dataRevision: current, storedDataRevision: storedRevisionValue(revision) };
+}
+
+export async function readStartTabDataRevision(fallback = 0): Promise<number> {
+  return (await readStartTabDataRevisionSnapshot(fallback)).dataRevision;
 }
 
 /**
  * Optimistic-concurrency guard for callers that already own any stronger lock
  * required by their transaction. The fallback must be the same value used when
  * the expected revision was captured so legacy states without a revision key
- * remain comparable until their first revisioned mutation.
+ * remain comparable until their first revisioned mutation. Capture the
+ * stored token too: a legacy profile's first stored revision can be exactly
+ * equal to the fallback, but that transition still represents a mutation.
  */
 export async function assertStartTabDataRevisionUnchanged(
   expected: number,
   fallback = 0,
   message = "Start Tab data changed in another extension context; retry the operation",
+  expectedStoredRevision?: number | null,
 ): Promise<void> {
-  const current = await readStartTabDataRevision(fallback);
-  if (current !== expected) throw new StartTabDataRevisionConflictError(message);
+  const current = await readStartTabDataRevisionSnapshot(fallback);
+  if (current.dataRevision !== expected
+    || (expectedStoredRevision !== undefined && current.storedDataRevision !== expectedStoredRevision)) {
+    throw new StartTabDataRevisionConflictError(message);
+  }
 }
 
 export async function markStartTabDataChanged(

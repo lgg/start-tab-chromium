@@ -33,7 +33,13 @@ export interface SyncMeta {
   checksum: string; contentChecksum: string; chunks: number; backupVersion: number;
 }
 interface ParsedMeta { meta: SyncMeta; legacy: boolean }
-interface LocalRevisionGuard { dataRevision: number; dataRevisionFallback: number }
+interface LocalRevisionGuard { dataRevision: number; dataRevisionFallback: number; storedDataRevision: number | null }
+class ChromeSyncRemoteConflictError extends Error {
+  constructor() {
+    super("Chrome sync remote backup changed before the selected upload could commit");
+    this.name = "ChromeSyncRemoteConflictError";
+  }
+}
 export type ChromeSyncResult = "uploaded" | "restored" | "unchanged";
 export { DATA_REVISION_KEY, markStartTabDataChanged };
 
@@ -232,8 +238,9 @@ function syncMetaEqual(left: SyncMeta, right: SyncMeta): boolean {
     && left.chunks === right.chunks
     && left.backupVersion === right.backupVersion;
 }
-function parsedMetaEqual(left: ParsedMeta | null, right: ParsedMeta): boolean {
-  return left !== null && left.legacy === right.legacy && syncMetaEqual(left.meta, right.meta);
+function parsedMetaEqual(left: ParsedMeta | null, right: ParsedMeta | null): boolean {
+  if (left === null || right === null) return left === right;
+  return left.legacy === right.legacy && syncMetaEqual(left.meta, right.meta);
 }
 function assertCompatibleSyncMeta(value: unknown, location: "remote" | "local"): void {
   if (isFutureSyncMeta(value)) {
@@ -263,7 +270,7 @@ export async function getChromeSyncBackupMeta(): Promise<SyncMeta | null> { retu
 
 async function prepareSnapshot(): Promise<{
   bundle: BackupBundle; json: string; chunks: string[]; checksum: string; contentChecksum: string; contentUpdatedAt: number;
-  dataRevisionFallback: number;
+  dataRevisionFallback: number; storedDataRevision: number | null;
 }> {
   const captured = await exportBackupSnapshot();
   if (!Number.isSafeInteger(captured.dataRevision) || captured.dataRevision < 0
@@ -275,43 +282,53 @@ async function prepareSnapshot(): Promise<{
   const chunks = chunkForChromeSync(json, syncItemQuotaBytes());
   if (chunks.length > MAX_SYNC_CHUNKS) throw new Error("Start Tab backup is too large for browser sync. Use JSON export or Google Drive backup instead.");
   return { bundle, json, chunks, checksum: await checksum(json), contentChecksum: await checksum(canonicalBackupContent(bundle)),
-    contentUpdatedAt: captured.dataRevision, dataRevisionFallback: captured.dataRevisionFallback };
+    contentUpdatedAt: captured.dataRevision, dataRevisionFallback: captured.dataRevisionFallback, storedDataRevision: captured.storedDataRevision };
 }
 
 async function captureLocalRevisionGuard(): Promise<LocalRevisionGuard> {
   const captured: ExportedBackupSnapshot = await exportBackupSnapshot();
-  return { dataRevision: captured.dataRevision, dataRevisionFallback: captured.dataRevisionFallback };
+  return { dataRevision: captured.dataRevision, dataRevisionFallback: captured.dataRevisionFallback, storedDataRevision: captured.storedDataRevision };
 }
 
 async function assertLocalRevisionGuard(
   guard: LocalRevisionGuard,
   message: string,
+  meta?: SyncMeta,
 ): Promise<void> {
   await withStorageLock("data-write", async () => {
-    await assertStartTabDataRevisionUnchanged(guard.dataRevision, guard.dataRevisionFallback, message);
+    await assertStartTabDataRevisionUnchanged(guard.dataRevision, guard.dataRevisionFallback, message, guard.storedDataRevision);
+    // Do not release the local data lock between accepting a snapshot and
+    // persisting its sync metadata.
+    if (meta) await writeLocalMeta(meta);
   });
 }
 
 function snapshotRevisionGuard(snapshot: Awaited<ReturnType<typeof prepareSnapshot>>): LocalRevisionGuard {
-  return { dataRevision: snapshot.contentUpdatedAt, dataRevisionFallback: snapshot.dataRevisionFallback };
+  return { dataRevision: snapshot.contentUpdatedAt, dataRevisionFallback: snapshot.dataRevisionFallback, storedDataRevision: snapshot.storedDataRevision };
 }
 
-async function retryLocalRevisionConflicts<T>(operation: () => Promise<T>): Promise<T> {
-  let lastConflict: StartTabDataRevisionConflictError | null = null;
+async function retrySyncConflicts<T>(operation: () => Promise<T>): Promise<T> {
+  let lastConflict: StartTabDataRevisionConflictError | ChromeSyncRemoteConflictError | null = null;
   for (let attempt = 0; attempt < MAX_LOCAL_REVISION_RETRIES; attempt += 1) {
     try {
       return await operation();
     } catch (error) {
-      if (!(error instanceof StartTabDataRevisionConflictError)) throw error;
+      if (!(error instanceof StartTabDataRevisionConflictError) && !(error instanceof ChromeSyncRemoteConflictError)) throw error;
       lastConflict = error;
     }
   }
   throw lastConflict ?? new StartTabDataRevisionConflictError("Start Tab data kept changing during Browser Sync; retry when edits are complete");
 }
 
-async function writeRemoteSnapshot(snapshot: Awaited<ReturnType<typeof prepareSnapshot>>): Promise<SyncMeta> {
+async function writeRemoteSnapshot(
+  snapshot: Awaited<ReturnType<typeof prepareSnapshot>>,
+  expectedRemote?: ParsedMeta | null,
+): Promise<SyncMeta> {
   const existing = await chrome.storage.sync.get(null);
   assertCompatibleSyncMeta(existing[META_KEY], "remote");
+  if (expectedRemote !== undefined && !parsedMetaEqual(parseMeta(existing[META_KEY]), expectedRemote)) {
+    throw new ChromeSyncRemoteConflictError();
+  }
   const meta: SyncMeta = { version: SYNC_META_VERSION, updatedAt: new Date().toISOString(), contentUpdatedAt: snapshot.contentUpdatedAt,
     deviceId: await deviceId(), snapshotId: snapshot.bundle.snapshotId, checksum: snapshot.checksum,
     contentChecksum: snapshot.contentChecksum, chunks: snapshot.chunks.length, backupVersion: snapshot.bundle.version };
@@ -324,21 +341,27 @@ async function writeRemoteSnapshot(snapshot: Awaited<ReturnType<typeof prepareSn
 
   const guard = snapshotRevisionGuard(snapshot);
   await assertLocalRevisionGuard(guard, "Start Tab data changed before the Browser Sync upload could commit");
+  // Chrome Sync is not a distributed CAS service. Revalidate any remotely
+  // observed decision as late as possible, before overwriting the frame.
+  if (expectedRemote !== undefined && !parsedMetaEqual(await readRemoteMeta(), expectedRemote)) {
+    throw new ChromeSyncRemoteConflictError();
+  }
   await chrome.storage.sync.set(payload);
   const committed = await readRemoteMeta();
   if (!committed || committed.legacy || !syncMetaEqual(committed.meta, meta)) {
     throw new Error("Chrome sync backup changed concurrently before the upload commit was confirmed");
   }
   await readVerifiedRemoteBundle(committed);
-  await assertLocalRevisionGuard(guard, "Start Tab data changed while the Browser Sync upload was committing");
-  await writeLocalMeta(meta);
+  await assertLocalRevisionGuard(guard, "Start Tab data changed while the Browser Sync upload was committing", meta);
   return meta;
 }
-async function uploadChromeSyncBackupInTransaction(): Promise<void> { await writeRemoteSnapshot(await prepareSnapshot()); }
+async function uploadChromeSyncBackupInTransaction(expectedRemote?: ParsedMeta | null): Promise<void> {
+  await writeRemoteSnapshot(await prepareSnapshot(), expectedRemote);
+}
 export async function uploadChromeSyncBackup(): Promise<void> {
   await withStorageLock("chrome-sync", async () => {
     await assertCompatibleSyncMetadata();
-    await retryLocalRevisionConflicts(uploadChromeSyncBackupInTransaction);
+    await retrySyncConflicts(uploadChromeSyncBackupInTransaction);
   });
 }
 async function readRemoteBundle(parsed: ParsedMeta): Promise<BackupBundle> {
@@ -382,9 +405,10 @@ async function restoreParsedSnapshot(parsed: ParsedMeta, guard: LocalRevisionGua
     dataRevisionAt: parsed.meta.contentUpdatedAt,
     expectedCurrentDataRevision: guard.dataRevision,
     expectedCurrentDataRevisionFallback: guard.dataRevisionFallback,
+    expectedCurrentStoredDataRevision: guard.storedDataRevision,
     revisionConflictMessage: "Start Tab data changed while the Browser Sync restore was being prepared",
   });
-  if (parsed.legacy) await writeRemoteSnapshot(await prepareSnapshot());
+  if (parsed.legacy) await writeRemoteSnapshot(await prepareSnapshot(), parsed);
   else await writeLocalMeta(parsed.meta);
 }
 async function restoreChromeSyncBackupInTransaction(guard: LocalRevisionGuard): Promise<void> {
@@ -401,17 +425,17 @@ export async function restoreChromeSyncBackup(): Promise<void> {
 }
 async function syncChromeSyncBackupInTransaction(): Promise<ChromeSyncResult> {
   const remote = await readRemoteMeta();
-  if (!remote) { await uploadChromeSyncBackupInTransaction(); return "uploaded"; }
+  if (!remote) { await uploadChromeSyncBackupInTransaction(null); return "uploaded"; }
   const localSnapshot = await prepareSnapshot();
   const guard = snapshotRevisionGuard(localSnapshot);
   if (remote.legacy) {
     const remoteBundle = await readVerifiedRemoteBundle(remote);
     const remoteChecksum = await checksum(canonicalBackupContent(remoteBundle));
-    if (remoteChecksum === localSnapshot.contentChecksum) { await writeRemoteSnapshot(localSnapshot); return "unchanged"; }
+    if (remoteChecksum === localSnapshot.contentChecksum) { await writeRemoteSnapshot(localSnapshot, remote); return "unchanged"; }
     if (isPristineBackup(localSnapshot.bundle) || remote.meta.contentUpdatedAt > localSnapshot.contentUpdatedAt) {
       await restoreParsedSnapshot(remote, guard); return "restored";
     }
-    await writeRemoteSnapshot(localSnapshot); return "uploaded";
+    await writeRemoteSnapshot(localSnapshot, remote); return "uploaded";
   }
   if (localSnapshot.contentChecksum === remote.meta.contentChecksum) {
     try {
@@ -426,30 +450,29 @@ async function syncChromeSyncBackupInTransaction(): Promise<ChromeSyncResult> {
       if (!parsedMetaEqual(currentRemote, remote)) {
         throw new AggregateError([error], "Chrome sync backup changed concurrently while matching content was being verified");
       }
-      await writeRemoteSnapshot(localSnapshot);
+      await writeRemoteSnapshot(localSnapshot, remote);
       return "uploaded";
     }
-    await assertLocalRevisionGuard(guard, "Start Tab data changed while Browser Sync was confirming matching content");
-    await writeLocalMeta(remote.meta);
+    await assertLocalRevisionGuard(guard, "Start Tab data changed while Browser Sync was confirming matching content", remote.meta);
     return "unchanged";
   }
   const local = await readLocalMeta();
   if (!local || local.legacy) {
     if (isPristineBackup(localSnapshot.bundle) || remoteWins(remote.meta, localSnapshot)) { await restoreParsedSnapshot(remote, guard); return "restored"; }
-    await writeRemoteSnapshot(localSnapshot); return "uploaded";
+    await writeRemoteSnapshot(localSnapshot, remote); return "uploaded";
   }
   const localChanged = localSnapshot.contentChecksum !== local.meta.contentChecksum;
   const remoteChanged = remote.meta.contentChecksum !== local.meta.contentChecksum;
   if (!localChanged && remoteChanged) { await restoreParsedSnapshot(remote, guard); return "restored"; }
-  if (localChanged && !remoteChanged) { await writeRemoteSnapshot(localSnapshot); return "uploaded"; }
+  if (localChanged && !remoteChanged) { await writeRemoteSnapshot(localSnapshot, remote); return "uploaded"; }
 
   if (remoteWins(remote.meta, localSnapshot)) { await restoreParsedSnapshot(remote, guard); return "restored"; }
-  await writeRemoteSnapshot(localSnapshot);
+  await writeRemoteSnapshot(localSnapshot, remote);
   return "uploaded";
 }
 export async function syncChromeSyncBackup(): Promise<ChromeSyncResult> {
   return withStorageLock("chrome-sync", async () => {
     await assertCompatibleSyncMetadata();
-    return retryLocalRevisionConflicts(syncChromeSyncBackupInTransaction);
+    return retrySyncConflicts(syncChromeSyncBackupInTransaction);
   });
 }

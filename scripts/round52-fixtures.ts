@@ -438,3 +438,85 @@ assert.equal((syncStorage.startTabSyncMeta as { contentUpdatedAt: number }).cont
 
 console.log("Round 52 remote backup concurrency fixtures passed");
 console.log("Round 53 Drive pagination, upload serialization and safe revision fixtures passed");
+
+// Round 55: a persisted counter is authoritative, even if legacy settings
+// or runtime timestamps are much larger than it.
+resetState();
+const legacyTime = REVISION_BASE + 2100;
+localStorage = {
+  startPageSettings: { schemaVersion: 4, updatedAt: legacyTime },
+  blockedSites: ["legacy-before.example"],
+  startTabDataRevision: { version: 1, updatedAt: 100 },
+};
+const smallerCounter = await backup.exportBackupSnapshot();
+assert.equal(smallerCounter.dataRevisionFallback, legacyTime);
+assert.equal(smallerCounter.dataRevision, 100, "A legacy fallback must not mask a valid persisted counter");
+assert.equal(smallerCounter.storedDataRevision, 100);
+await assert.rejects(() => backup.importBackupAfterRead(async () => {
+  localStorage.blockedSites = ["counter-new.example"];
+  localStorage.startTabDataRevision = { version: 1, updatedAt: 101 };
+  return incoming;
+}), (error: unknown) => error instanceof revision.StartTabDataRevisionConflictError);
+assert.deepEqual(localStorage.blockedSites, ["counter-new.example"]);
+assert.equal(localStorage.startTabPreImportBackup, undefined);
+
+// The first stored counter may equal the legacy fallback exactly. The
+// presence transition must still invalidate the old destructive snapshot.
+resetState();
+localStorage = {
+  startPageSettings: { schemaVersion: 4, updatedAt: legacyTime },
+  blockedSites: ["first-counter-old.example"],
+};
+const beforeFirstCounter = await backup.exportBackupSnapshot();
+assert.equal(beforeFirstCounter.dataRevision, legacyTime);
+assert.equal(beforeFirstCounter.storedDataRevision, null);
+await assert.rejects(() => backup.importBackupAfterRead(async () => {
+  localStorage.blockedSites = ["first-counter-new.example"];
+  localStorage.startTabDataRevision = { version: 1, updatedAt: legacyTime };
+  return incoming;
+}), (error: unknown) => error instanceof revision.StartTabDataRevisionConflictError);
+assert.deepEqual(localStorage.blockedSites, ["first-counter-new.example"]);
+assert.equal(localStorage.startTabPreImportBackup, undefined);
+
+// Smart Sync initially observes no remote frame. A newer remote backup
+// arrives before the selected upload reads the quota/current frame. The
+// stale no-remote decision must not overwrite it.
+resetState();
+const newlyArrivingFrame = await buildRemoteFrame("newly-arriving-remote.example", REVISION_BASE + 2300);
+syncStorage = {};
+localStorage = localData("older-local-race.example", REVISION_BASE + 2200);
+syncSetCount = 0;
+let remoteArrived = false;
+syncGetHook = (keys) => {
+  if (keys === null && !remoteArrived) {
+    remoteArrived = true;
+    syncStorage = clone(newlyArrivingFrame);
+  }
+};
+assert.equal(await chromeSync.syncChromeSyncBackup(), "restored");
+assert.ok(remoteArrived);
+assert.equal(syncSetCount, 0, "A newly arrived remote snapshot must not be overwritten by a stale upload decision");
+assert.deepEqual(localStorage.blockedSites, ["newly-arriving-remote.example"]);
+
+// A previously observed remote exists, but another device supplies a newer
+// frame immediately before the last pre-write metadata check.
+resetState();
+const oldObservedFrame = await buildRemoteFrame("old-observed.example", REVISION_BASE + 2400);
+const newestRemoteFrame = await buildRemoteFrame("newest-remote.example", REVISION_BASE + 2600);
+syncStorage = clone(oldObservedFrame);
+localStorage = localData("intermediate-local.example", REVISION_BASE + 2500);
+syncSetCount = 0;
+let quotaRead = false;
+let newerRemoteArrived = false;
+syncGetHook = (keys) => {
+  if (keys === null) quotaRead = true;
+  else if (quotaRead && keys === "startTabSyncMeta" && !newerRemoteArrived) {
+    newerRemoteArrived = true;
+    syncStorage = clone(newestRemoteFrame);
+  }
+};
+assert.equal(await chromeSync.syncChromeSyncBackup(), "restored");
+assert.ok(newerRemoteArrived);
+assert.equal(syncSetCount, 0, "A changed remote decision must be recalculated before upload");
+assert.deepEqual(localStorage.blockedSites, ["newest-remote.example"]);
+console.log("Round 55 exact legacy revision and remote decision fixtures passed");

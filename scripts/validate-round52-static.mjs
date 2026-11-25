@@ -16,15 +16,17 @@ const manualQa = await readFile("docs/manual-qa-round52.md", "utf8");
 
 assert.match(revision, /export class StartTabDataRevisionConflictError extends Error/);
 assert.match(revision, /export async function assertStartTabDataRevisionUnchanged/);
-assert.match(revision, /const current = await readStartTabDataRevision\(fallback\)/);
-assert.match(revision, /if \(current !== expected\) throw new StartTabDataRevisionConflictError/,
+assert.match(revision, /const current = await readStartTabDataRevisionSnapshot\(fallback\)/);
+assert.match(revision, /current\.dataRevision !== expected[\s\S]*current\.storedDataRevision !== expectedStoredRevision[\s\S]*throw new StartTabDataRevisionConflictError/,
   "Revision CAS must reject an obsolete local snapshot");
 
 assert.match(backup, /expectedCurrentDataRevision\?: number/);
 assert.match(backup, /expectedCurrentDataRevisionFallback\?: number/);
 assert.match(backup, /dataRevisionFallback: number/);
 assert.match(backup, /const dataRevisionFallback = backupModifiedAt\(bundle\)/);
-assert.match(backup, /return \{ bundle, dataRevision, dataRevisionFallback \}/);
+assert.match(backup, /return \{ bundle, dataRevision, dataRevisionFallback, storedDataRevision \}/);
+assert.match(backup, /expectedCurrentStoredDataRevision: localBeforeRead\.storedDataRevision/);
+assert.match(backup, /options\.expectedCurrentStoredDataRevision/);
 const importLock = backup.indexOf('return withStorageLock("data-write"');
 const importGuard = backup.indexOf("assertStartTabDataRevisionUnchanged(", importLock);
 const recoveryWrite = backup.indexOf("PRE_IMPORT_BACKUP_KEY", importGuard);
@@ -44,10 +46,10 @@ assert.match(chromeSync, /const MAX_LOCAL_REVISION_RETRIES = 3/);
 assert.match(chromeSync, /dataRevisionFallback: captured\.dataRevisionFallback/);
 assert.match(chromeSync, /async function assertLocalRevisionGuard[\s\S]*withStorageLock\("data-write"/,
   "Non-destructive remote upload checks must observe revision under the data-write boundary");
-assert.match(chromeSync, /async function retryLocalRevisionConflicts/);
+assert.match(chromeSync, /async function retrySyncConflicts/);
 assert.match(chromeSync, /error instanceof StartTabDataRevisionConflictError/);
 assert.match(chromeSync,
-  /assertLocalRevisionGuard\(guard, "Start Tab data changed before the Browser Sync upload could commit"\)[\s\S]*chrome\.storage\.sync\.set\(payload\)[\s\S]*assertLocalRevisionGuard\(guard, "Start Tab data changed while the Browser Sync upload was committing"\)/,
+  /assertLocalRevisionGuard\(guard, "Start Tab data changed before the Browser Sync upload could commit"\)[\s\S]*chrome\.storage\.sync\.set\(payload\)[\s\S]*assertLocalRevisionGuard\(guard, "Start Tab data changed while the Browser Sync upload was committing", meta\)/,
   "Browser Sync upload must verify the captured revision on both sides of its remote commit window");
 assert.match(chromeSync, /async function restoreParsedSnapshot\(parsed: ParsedMeta, guard: LocalRevisionGuard\)/);
 assert.match(chromeSync, /expectedCurrentDataRevision: guard\.dataRevision/);
@@ -55,17 +57,26 @@ assert.match(chromeSync, /expectedCurrentDataRevisionFallback: guard\.dataRevisi
 assert.match(chromeSync,
   /export async function restoreChromeSyncBackup\(\): Promise<void> \{\s*const guard = await captureLocalRevisionGuard\(\);\s*await withStorageLock\("chrome-sync", async \(\) => \{\s*await assertCompatibleSyncMetadata\(\);\s*await restoreChromeSyncBackupInTransaction\(guard\)/,
   "Explicit Browser Sync Restore must capture its local revision before waiting for the sync lock or performing remote metadata I/O");
-assert.match(chromeSync, /return retryLocalRevisionConflicts\(syncChromeSyncBackupInTransaction\)/,
+assert.match(chromeSync, /return retrySyncConflicts\(syncChromeSyncBackupInTransaction\)/,
   "Smart Sync must recalculate its decision after a local revision conflict");
-assert.match(chromeSync, /retryLocalRevisionConflicts\(uploadChromeSyncBackupInTransaction\)/,
+assert.match(chromeSync, /retrySyncConflicts\(uploadChromeSyncBackupInTransaction\)/,
   "Manual Browser Sync Upload must converge to a stable local snapshot before reporting success");
-assert.match(chromeSync, /assertLocalRevisionGuard\(guard, "Start Tab data changed while Browser Sync was confirming matching content"\)/,
+assert.match(chromeSync, /assertLocalRevisionGuard\(guard, "Start Tab data changed while Browser Sync was confirming matching content", remote\.meta\)/,
   "The unchanged result must also validate that the local snapshot used for the decision stayed current");
 
 assert.match(google, /const localBeforeNetwork = await exportBackupSnapshot\(\)/);
 assert.match(google, /expectedCurrentDataRevision: localBeforeNetwork\.dataRevision/);
 assert.match(google, /expectedCurrentDataRevisionFallback: localBeforeNetwork\.dataRevisionFallback/,
   "Google Drive Restore must CAS the local revision captured before network I/O");
+
+// Round 55 retains the older contracts and strengthens the same transaction boundary.
+assert.match(chromeSync, /storedDataRevision: captured\.storedDataRevision/);
+assert.match(chromeSync, /expectedCurrentStoredDataRevision: guard\.storedDataRevision/);
+assert.match(chromeSync, /assertStartTabDataRevisionUnchanged\(guard\.dataRevision, guard\.dataRevisionFallback, message, guard\.storedDataRevision\)/);
+assert.match(chromeSync, /withStorageLock\("data-write",[\s\S]*if \(meta\) await writeLocalMeta\(meta\)/);
+assert.match(chromeSync, /expectedRemote !== undefined && !parsedMetaEqual\(await readRemoteMeta\(\), expectedRemote\)/);
+assert.match(google, /expectedCurrentStoredDataRevision: localBeforeNetwork\.storedDataRevision/);
+assert.match(google, /snapshot\.storedDataRevision\)\)/);
 
 for (const marker of [
   "A stale backup CAS must reject before destructive import work",
