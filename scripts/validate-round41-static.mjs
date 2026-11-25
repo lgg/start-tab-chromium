@@ -98,3 +98,8 @@ assert.match(popup, /return readStablePopupTarget\(getActiveTab, blockedSiteForU
 assert.match(popupTarget, /const url = currentTabNavigationUrl\(tab\)/);
 assert.match(popupTarget, /const blockedHost = await blockedSiteForUrl\(initial\.url\);\s*const current = tabTarget\(await readTab\(\)\)/);
 assert.match(popup, /const tab = await chrome\.tabs\.get\(target\.tabId\);\s*if \(!mayReloadPopupTarget\(target, tab\)\) return;\s*await chrome\.tabs\.reload\(target\.tabId\)/);
+
+const registry103 = read("src/lib/blocked-navigation.ts");
+assert.match(registry103, /await this\.persist\(tabId, null\);\s*const host = await resolveHost\(url\)/);
+assert.match(registry103, /this\.unsaved\.has\(tabId\)/);
+assert.match(registry103, /await this\.storage\(\)\.set\(\{ \[key\]: null \}\)/);
