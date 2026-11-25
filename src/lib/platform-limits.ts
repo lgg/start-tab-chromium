@@ -10,3 +10,6 @@ export const MAX_NOTE_LENGTH = 200_000;
 // maximum height without overlap, even when all blocks share one column.
 export const MAX_GRID_BLOCK_HEIGHT = 80;
 export const MAX_GRID_ROW = MAX_START_PAGE_BLOCKS * MAX_GRID_BLOCK_HEIGHT + 1;
+
+/** Maximum coordinate or extent accepted by persisted free layout geometry. */
+export const MAX_FREE_GEOMETRY = 100_000;

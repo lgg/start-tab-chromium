@@ -3,6 +3,8 @@ import { placeGridBlock, placeGridBlocks } from "../lib/grid-layout.js";
 import type { I18n } from "../lib/i18n.js";
 import { sendMessage } from "../lib/messages.js";
 import { MAX_START_PAGE_BLOCKS } from "../lib/platform-limits.js";
+import { clampFreeGeometry, LayoutDraftVersion } from "./layout-draft-version.js";
+import { jsonContentEqual } from "../lib/json-content.js";
 import {
   BLOCK_DESCRIPTORS,
   blockDescriptor,
@@ -46,6 +48,7 @@ interface PointerSession {
   startY: number;
   startBlock: BlockInstance;
   card: HTMLElement;
+  finish: (commit: boolean) => void;
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text = ""): HTMLElementTagNameMap[K] {
@@ -84,11 +87,13 @@ export class LayoutEditor {
   private savePending = false;
   private destructiveRuntimeUpdatedAt: number | null = null;
   private pointerSession: PointerSession | null = null;
+  private readonly draftVersion: LayoutDraftVersion;
   private readonly options: LayoutEditorOptions;
 
   constructor(settings: StartPageSettings, options: LayoutEditorOptions) {
     this.saved = cloneSettings(settings);
     this.draft = cloneSettings(settings);
+    this.draftVersion = new LayoutDraftVersion(settings.updatedAt);
     this.options = options;
     this.renderControls();
   }
@@ -102,32 +107,41 @@ export class LayoutEditor {
   }
 
   get hasUnsavedChanges(): boolean {
-    return this.active && (this.dirty || this.savePending);
+    return this.active && (this.dirty || this.savePending || this.isPointerActive);
   }
+
+  get isPointerActive(): boolean { return this.pointerSession !== null; }
+
+  cancelPointer(): void { this.pointerSession?.finish(false); }
 
   private displayTitle(block: BlockInstance): string {
     return blockUsesDefaultTitle(block) ? this.options.i18n.t(blockTitleKey(block.type)) : block.title;
   }
 
   replaceSavedSettings(settings: StartPageSettings): void {
-    const refreshDraft = shouldRefreshLayoutDraft(this.active, this.dirty, this.savePending);
+    const refreshDraft = shouldRefreshLayoutDraft(this.active, this.dirty, this.savePending) && !this.isPointerActive;
     this.saved = cloneSettings(settings);
-    if (refreshDraft) this.draft = cloneSettings(settings);
+    if (refreshDraft) {
+      this.draft = cloneSettings(settings);
+      this.draftVersion.reset(settings.updatedAt);
+    }
     this.renderControls();
   }
 
   enter(): void {
-    if (this.savePending) return;
+    if (this.savePending || this.active) return;
     this.active = true;
     this.dirty = false;
     this.destructiveRuntimeUpdatedAt = null;
     this.draft = cloneSettings(this.saved);
+    this.draftVersion.reset(this.saved.updatedAt);
     this.renderControls();
     this.options.requestRender();
   }
 
   async save(): Promise<void> {
     if (!this.active || this.savePending) return;
+    if (this.isPointerActive) return;
     this.savePending = true;
     this.renderControls();
     this.options.requestRender();
@@ -135,12 +149,13 @@ export class LayoutEditor {
       await sendMessage({
         type: "replace-start-page-settings",
         settings: this.draft,
-        expectedSettingsUpdatedAt: this.saved.updatedAt,
+        expectedSettingsUpdatedAt: this.draftVersion.updatedAt,
         expectedRuntimeUpdatedAt: this.destructiveRuntimeUpdatedAt ?? this.options.getRuntime().updatedAt,
       });
       const persisted = await getStartPageSettings();
       this.saved = cloneSettings(persisted);
       this.draft = cloneSettings(persisted);
+      this.draftVersion.reset(persisted.updatedAt);
       this.active = false;
       this.dirty = false;
       this.destructiveRuntimeUpdatedAt = null;
@@ -153,9 +168,10 @@ export class LayoutEditor {
   }
 
   cancel(): void {
-    if (!this.active || this.savePending) return;
+    if (!this.active || this.savePending || this.isPointerActive) return;
     if (this.dirty && !window.confirm(this.options.i18n.t("discardChangesConfirm"))) return;
     this.draft = cloneSettings(this.saved);
+    this.draftVersion.reset(this.saved.updatedAt);
     this.active = false;
     this.dirty = false;
     this.destructiveRuntimeUpdatedAt = null;
@@ -218,8 +234,11 @@ export class LayoutEditor {
   }
 
   private mutate(mutator: (settings: StartPageSettings) => StartPageSettings): void {
-    if (this.savePending) return;
-    this.draft = mutator(cloneSettings(this.draft));
+    if (!this.active || this.savePending || this.isPointerActive) return;
+    const next = mutator(cloneSettings(this.draft));
+    if (jsonContentEqual(next, this.draft)) return;
+    this.draft = next;
+    this.draftVersion.change();
     this.draft.layout.profile = "custom";
     this.dirty = true;
     this.renderControls();
@@ -255,16 +274,20 @@ export class LayoutEditor {
   }
 
   private async configure(id: string): Promise<void> {
-    if (this.savePending) return;
+    if (!this.active || this.savePending || this.isPointerActive) return;
     const block = this.draft.layout.blocks.find((candidate) => candidate.id === id);
     if (!block) return;
     const expectedSettingsUpdatedAt = this.saved.updatedAt;
-    const configured = await editBlockInstance(block, this.options.i18n);
+    const epoch = this.draftVersion.epoch;
+    const configured = await editBlockInstance(cloneBlock(block), this.options.i18n);
     if (!configured) return;
-    if (this.saved.updatedAt !== expectedSettingsUpdatedAt) {
+    if (this.saved.updatedAt !== expectedSettingsUpdatedAt || !this.active
+      || this.savePending || this.isPointerActive || !this.draftVersion.isCurrent(epoch)) {
       throw new Error("Start Tab settings changed in another extension context; reload before saving");
     }
-    this.updateBlock(id, () => configured);
+    this.updateBlock(id, () => this.draft.layout.mode === "grid"
+      ? placeGridBlock(configured, this.draft.layout.blocks, this.draft.layout.columns)
+      : clampFreeGeometry(configured));
   }
 
   private duplicate(id: string): void {
@@ -282,7 +305,7 @@ export class LayoutEditor {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     });
-    const placed = this.draft.layout.mode === "grid" ? placeGridBlock(copy, this.draft.layout.blocks, this.draft.layout.columns) : copy;
+    const placed = this.draft.layout.mode === "grid" ? placeGridBlock(copy, this.draft.layout.blocks, this.draft.layout.columns) : clampFreeGeometry(copy);
     this.mutate((settings) => ({ ...settings, layout: { ...settings.layout, blocks: [...settings.layout.blocks, placed] } }));
   }
 
@@ -325,6 +348,7 @@ export class LayoutEditor {
       },
     });
     if (this.draft.layout.mode === "grid") block = placeGridBlock(block, this.draft.layout.blocks, this.draft.layout.columns);
+    else block = clampFreeGeometry(block);
     this.mutate((settings) => ({ ...settings, layout: { ...settings.layout, blocks: [...settings.layout.blocks, block] } }));
   }
 
@@ -410,26 +434,48 @@ export class LayoutEditor {
   }
 
   private startPointerSession(event: PointerEvent, blockId: string, card: HTMLElement, kind: PointerSession["kind"]): void {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || !this.active || this.savePending || this.isPointerActive) return;
     const block = this.draft.layout.blocks.find((candidate) => candidate.id === blockId);
     if (!block) return;
     event.preventDefault();
     event.stopPropagation();
-    card.setPointerCapture(event.pointerId);
-    this.pointerSession = { pointerId: event.pointerId, blockId, kind, startX: event.clientX, startY: event.clientY, startBlock: cloneBlock(block), card };
-    card.classList.add(kind === "move" ? "card--moving" : "card--resizing");
+    try { card.setPointerCapture(event.pointerId); } catch { return; }
+    const previousDirty = this.dirty;
+    const previousProfile = this.draft.layout.profile;
+    const startBlock = cloneBlock(block);
+    const pointerId = event.pointerId;
     const move = (moveEvent: PointerEvent): void => this.handlePointerMove(moveEvent);
     const end = (endEvent: PointerEvent): void => {
-      if (endEvent.pointerId !== this.pointerSession?.pointerId) return;
+      if (endEvent.pointerId !== pointerId || this.pointerSession?.pointerId !== pointerId) return;
+      // pointerup may carry a final coordinate not delivered by pointermove.
+      if (endEvent.type === "pointerup") this.handlePointerMove(endEvent);
+      finish(endEvent.type === "pointerup");
+    };
+    const finish = (commit: boolean): void => {
+      if (this.pointerSession?.finish !== finish) return;
       card.removeEventListener("pointermove", move);
       card.removeEventListener("pointerup", end);
       card.removeEventListener("pointercancel", end);
       card.removeEventListener("lostpointercapture", end);
       card.classList.remove("card--moving", "card--resizing");
       this.pointerSession = null;
+      if (!commit) {
+        this.updateBlockWithoutRender(blockId, startBlock);
+        this.draft.layout.profile = previousProfile;
+        this.dirty = previousDirty;
+      }
+      try {
+        if (card.hasPointerCapture(pointerId)) card.releasePointerCapture(pointerId);
+      } catch {
+        // Browser may already have released capture.
+      }
       this.renderControls();
+      // Always flush any render that was deferred during the gesture.
       this.options.requestRender();
     };
+    this.pointerSession = { pointerId, blockId, kind, startX: event.clientX, startY: event.clientY, startBlock, card, finish };
+    this.draftVersion.change(); // invalidate a dialog opened before the gesture
+    card.classList.add(kind === "move" ? "card--moving" : "card--resizing");
     card.addEventListener("pointermove", move);
     card.addEventListener("pointerup", end);
     card.addEventListener("pointercancel", end);
@@ -454,6 +500,7 @@ export class LayoutEditor {
         candidate.free.width = Math.max(descriptor.minFreeWidth, session.startBlock.free.width + deltaX);
         candidate.free.height = Math.max(descriptor.minFreeHeight, session.startBlock.free.height + deltaY);
       }
+      candidate = clampFreeGeometry(candidate);
     } else {
       const bounds = gridElement.getBoundingClientRect();
       const columnWidth = Math.max(1, (bounds.width - layout.gap * (layout.columns - 1)) / layout.columns);
@@ -468,7 +515,10 @@ export class LayoutEditor {
       }
       candidate = placeGridBlock(candidate, layout.blocks, layout.columns);
     }
+    const current = layout.blocks.find((block) => block.id === session.blockId);
+    if (!current || jsonContentEqual(current, candidate)) return;
     this.updateBlockWithoutRender(session.blockId, candidate);
+    this.draftVersion.change();
     this.dirty = true;
     this.options.previewBlock(session.card, candidate, this.draft);
   }
@@ -480,7 +530,7 @@ export class LayoutEditor {
 
   private handleCardKeydown(event: KeyboardEvent, id: string): void {
     if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
-    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLButtonElement || event.target instanceof HTMLSelectElement) return;
+    if (!this.active || this.savePending || this.isPointerActive || event.target !== event.currentTarget) return;
     const block = this.draft.layout.blocks.find((candidate) => candidate.id === id);
     if (!block) return;
     event.preventDefault();
@@ -506,6 +556,7 @@ export class LayoutEditor {
         candidate.free.x = Math.max(0, candidate.free.x + directionX * step);
         candidate.free.y = Math.max(0, candidate.free.y + directionY * step);
       }
+      candidate = clampFreeGeometry(candidate);
     }
     this.updateBlock(id, () => candidate);
   }

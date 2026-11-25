@@ -9,6 +9,7 @@ const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 const runtimeTarget = read("src/lib/runtime-mutation-target.ts");
 const worker = read("src/service-worker.ts");
 const layoutEditor = read("src/newtab/layout-editor.ts");
+const newtab = read("src/newtab/newtab.ts");
 const packageJson = JSON.parse(read("package.json"));
 const workflow = read(".github/workflows/ci.yml");
 const selfHosted = read("scripts/validate-self-hosted-ci.mjs");
@@ -22,7 +23,7 @@ assert.match(worker, /performClockAction[\s\S]*assertRuntimeMutationTarget\(sett
 assert.match(layoutEditor, /export function shouldRefreshLayoutDraft\(active: boolean, dirty: boolean, savePending: boolean\)/);
 assert.match(layoutEditor, /return !active \|\| \(!dirty && !savePending\)/);
 assert.match(layoutEditor, /const refreshDraft = shouldRefreshLayoutDraft\(this\.active, this\.dirty, this\.savePending\)/);
-assert.match(layoutEditor, /if \(refreshDraft\) this\.draft = cloneSettings\(settings\)/,
+assert.match(layoutEditor, /if \(refreshDraft\) \{\s*this\.draft = cloneSettings\(settings\);\s*this\.draftVersion\.reset\(settings\.updatedAt\)/,
   "A clean active editor must refresh both its saved baseline and editable draft");
 assert.match(layoutEditor, /if \(!this\.active \|\| this\.savePending\) return;[\s\S]*this\.savePending = true/,
   "Layout save must be single-flight");
@@ -32,6 +33,14 @@ assert.match(layoutEditor, /const expectedSettingsUpdatedAt = this\.saved\.updat
   "A block settings dialog must not apply a stale result over a refreshed external baseline");
 assert.match(layoutEditor, /if \(!this\.active \|\| this\.savePending\) return;[\s\S]*card\.classList\.add\("card--editing"\)/,
   "Card mutation controls must disappear while a save is in flight");
+
+assert.match(layoutEditor, /expectedSettingsUpdatedAt: this\.draftVersion\.updatedAt/);
+assert.match(layoutEditor, /this\.draftVersion\.isCurrent\(epoch\)/);
+assert.match(layoutEditor, /event\.button !== 0[\s\S]*this\.isPointerActive/);
+assert.match(layoutEditor, /finish\(endEvent\.type === "pointerup"\)/);
+assert.match(layoutEditor, /if \(!commit\) \{[\s\S]*this\.draft\.layout\.profile = previousProfile;[\s\S]*this\.dirty = previousDirty/);
+assert.match(layoutEditor, /candidate = clampFreeGeometry\(candidate\)/);
+assert.match(newtab, /if \(disposed \|\| editor\.isPointerActive\) return/);
 
 for (const command of ["node scripts/run-round39-fixtures.mjs", "node scripts/validate-round39-static.mjs"]) {
   assert.ok(packageJson.scripts.test.includes(command), `npm test must include ${command}`);

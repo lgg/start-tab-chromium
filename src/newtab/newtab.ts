@@ -229,8 +229,10 @@ function updateSettingsButton(settings: StartPageSettings): void {
 }
 
 function render(): void {
-  if (disposed) return;
+  if (disposed || editor.isPointerActive) return;
   const active = document.activeElement;
+  const cardFocus = active instanceof HTMLElement && grid.contains(active) && active.classList.contains("card--editing")
+    ? active.dataset.blockId : undefined;
   const noteFocus = active instanceof HTMLTextAreaElement && grid.contains(active) && active.dataset.noteId
     ? { id: active.dataset.noteId, start: active.selectionStart, end: active.selectionEnd, direction: active.selectionDirection, scrollTop: active.scrollTop }
     : null;
@@ -301,6 +303,9 @@ function render(): void {
       replacement.setSelectionRange(noteFocus.start, noteFocus.end, noteFocus.direction);
       replacement.scrollTop = noteFocus.scrollTop;
     }
+  } else if (cardFocus && document.activeElement === document.body && !page.hasAttribute("inert")) {
+    Array.from(grid.querySelectorAll<HTMLElement>(".card--editing"))
+      .find((candidate) => candidate.dataset.blockId === cardFocus)?.focus({ preventScroll: true });
   }
 }
 
@@ -485,6 +490,7 @@ function handleBeforeUnload(event: BeforeUnloadEvent): void {
 function dispose(): void {
   if (disposed) return;
   disposed = true;
+  editor.cancelPointer();
   clearRenderCleanups();
   renderScheduler.dispose();
   chrome.storage.onChanged.removeListener(handleStorageChange);
