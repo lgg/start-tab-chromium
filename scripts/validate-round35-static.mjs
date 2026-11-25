@@ -102,7 +102,7 @@ assert.match(runtimeRenderer, /submissions\.acknowledge\(submittedDraft\)/);
 assert.match(runtimeRenderer, /submissions\.view = redraw/);
 assert.match(runtimeRenderer, /if \(submissions\.view !== redraw\) return/);
 assert.match(newtab, /input\[data-widget-draft\][\s\S]*setSelectionRange/);
-assert.match(newtab, /if \(!editor\.isActive\) \{[\s\S]*pruneTaskForms[\s\S]*pruneSearchDrafts/);
+assert.match(newtab, /if \(!editor\.isActive\) \{[\s\S]*pruneTaskForms[\s\S]*pruneLinkPages/);
 assert.match(runtimeRenderer, /const settle = \(\): void => \{\s*submissions\.finish\(\)/);
 assert.match(runtimeRenderer, /finally\(\(\) => \{\s*settle\(\)/);
 assert.doesNotMatch(runtimeRenderer, /context\.runtime\.tasks\[block\.id\] = cloneTasks/);
@@ -176,3 +176,7 @@ for (const source of [editor, themeEditor69, options]) {
 const taskGate82 = read("src/newtab/task-submission-gate.ts");
 assert.match(taskGate82, /submittedDraft\.generation !== this\.draftGeneration/);
 assert.match(runtimeRenderer, /const submittedDraft = submissions\.snapshotDraft\(\)/);
+
+assert.match(taskGate82, /!retained\.has\(id\) && !session\.pending && !session\.draft/);
+assert.match(newtab, /renderHiddenTextDrafts\(hiddenTextHost,[\s\S]*hiddenTaskDrafts[\s\S]*hiddenSearchDrafts/);
+assert.doesNotMatch(newtab, /pruneSearchDrafts/);

@@ -34,6 +34,7 @@ export class TaskFormSession extends TaskSubmissionGate {
   private draftValue = "";
   private draftGeneration = 0;
   view: (() => void) | undefined;
+  title = "";
 
   get draft(): string { return this.draftValue; }
   set draft(value: string) {
@@ -66,9 +67,19 @@ export class TaskFormSessions {
   hasPendingDrafts(): boolean {
     return [...this.sessions.values()].some((session) => session.pending || session.draft.length > 0);
   }
+  hidden(visible: ReadonlySet<string>): Array<[string, TaskFormSession]> {
+    return [...this.sessions].filter(([id, session]) => !visible.has(id) && session.draft.length > 0);
+  }
+  discard(id: string, session: TaskFormSession, snapshot: TaskDraftSnapshot): boolean {
+    if (this.sessions.get(id) !== session || session.pending) return false;
+    const current = session.snapshotDraft();
+    if (current.generation !== snapshot.generation || current.value !== snapshot.value) return false;
+    session.draft = "";
+    return true;
+  }
   prune(retained: ReadonlySet<string>): void {
     for (const [id, session] of this.sessions) {
-      if (!retained.has(id) && !session.pending) this.sessions.delete(id);
+      if (!retained.has(id) && !session.pending && !session.draft) this.sessions.delete(id);
     }
   }
 }

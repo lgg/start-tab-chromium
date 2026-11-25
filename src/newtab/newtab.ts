@@ -25,8 +25,9 @@ import {
   type StartPageSettings,
 } from "../lib/start-page-settings.js";
 import { renderBlockContent, type BlockRenderContext } from "./block-renderers.js";
-import { hasUnsavedNoteDrafts, hasPendingTaskDrafts, pruneTaskForms, renderHiddenNoteDrafts } from "./block-renderers-runtime.js";
-import { pruneSearchDrafts, pruneLinkPages, hasSearchDrafts } from "./block-renderers-static.js";
+import { hasUnsavedNoteDrafts, hasPendingTaskDrafts, pruneTaskForms, renderHiddenNoteDrafts, hiddenTaskDrafts } from "./block-renderers-runtime.js";
+import { hiddenSearchDrafts, pruneLinkPages, hasSearchDrafts } from "./block-renderers-static.js";
+import { renderHiddenTextDrafts } from "./hidden-text-drafts.js";
 import { localeReloadDecision } from "./protected-page-drafts.js";
 import { LayoutEditor } from "./layout-editor.js";
 import { RenderScheduler } from "./render-scheduler.js";
@@ -85,6 +86,9 @@ const hiddenNotesHost = element("section", "draft-recovery");
 hiddenNotesHost.hidden = true;
 page.insertBefore(localeNotice, grid);
 page.insertBefore(hiddenNotesHost, grid);
+const hiddenTextHost = element("section", "draft-recovery");
+hiddenTextHost.hidden = true;
+page.insertBefore(hiddenTextHost, grid);
 
 function hasProtectedWork(): boolean {
   return editor.isActive || hasUnsavedNoteDrafts() || hasPendingTaskDrafts()
@@ -282,7 +286,6 @@ function render(): void {
   // Only prune against committed layouts, not transient editor drafts.
   if (!editor.isActive) {
     pruneTaskForms(new Set(settings.layout.blocks.filter((block) => block.type === "localTasks").map((block) => block.id)));
-    pruneSearchDrafts(new Set(settings.layout.blocks.filter((block) => block.type === "search").map((block) => block.id)));
     pruneLinkPages(new Set(settings.layout.blocks.filter((block) => block.type === "links" || block.type === "startPinned").map((block) => block.id)));
   }
   const blocks = visibleBlocks(settings);
@@ -338,6 +341,10 @@ function render(): void {
   };
   grid.replaceChildren(...blocks.map((block) => cardFor(block, context)));
   renderHiddenNoteDrafts(hiddenNotesHost, new Set(blocks.filter((block) => block.type === "note" && block.enabled).map((block) => block.id)), new Set(savedSettings.layout.blocks.filter((block) => block.type === "note").map((block) => block.id)), context);
+  renderHiddenTextDrafts(hiddenTextHost, [
+    ...hiddenTaskDrafts(new Set(blocks.filter((block) => block.type === "localTasks" && block.enabled).map((block) => block.id))),
+    ...hiddenSearchDrafts(new Set(blocks.filter((block) => block.type === "search" && block.enabled).map((block) => block.id))),
+  ], context);
   if (blocks.length === 0) grid.append(element("p", "empty-layout", i18n.t("emptyLayout")));
   if (noteFocus && (document.activeElement === document.body || document.activeElement === null)
     && !page.hasAttribute("inert")) {
