@@ -260,6 +260,11 @@ async function performClockAction(instanceId: string, action: ClockAction): Prom
     ) ?? null;
     if (!block) return { state: null, result: null };
     const clock = ownValue(runtime.clocks, instanceId) ?? defaultClockForBlock(block);
+    // Two pages can display the same Start/Pause button. Apply the intended
+    // state under the lock instead of inverting an already changed clock.
+    if ((action === "start" && clock.running) || (action === "pause" && !clock.running)) {
+      return { state: null, result: null };
+    }
     let next: ClockRuntimeState;
     let interruptedMs = 0;
     let startedWork = false;

@@ -48,13 +48,18 @@ assert.match(gate, /return browserLocale\.startsWith\("ru"\) \? "ru" : "en"/);
 assert.match(gate, /const locale = resolvedGateLocale\(items\[LOCALE_OVERRIDE_KEY\]\)/);
 assert.match(gate, /Promise\.all\(catalogFiles\.map/,
   "Every gate locale mode must merge all catalog fragments, not only explicit overrides");
-assert.match(gate, /const nativeActionGenerations = new WeakMap\(\)/,
-  "Rapid native-tab requests need a per-button result generation guard");
+assert.match(gate, /let nativeActionPending = false/,
+  "Native-tab requests share a page-wide single-flight lease");
 assert.match(gate, /async function runNative\(button\)/);
 assert.match(gate, /status\.setAttribute\("role", "alert"\)/,
   "Native-tab failures must be exposed as an accessible visible alert");
-assert.match(gate, /nativeActionGenerations\.get\(button\) !== generation\) return/,
-  "An older failure must not overwrite the visible result of a newer request");
+assert.match(gate, /if \(nativeActionPending \|\| !button\.isConnected\) return/,
+  "Rapid activation and replaced buttons cannot start a second request");
+assert.match(gate, /finally \{\s*nativeActionPending = false;\s*syncNativeButtons\(\)/);
+assert.match(gate, /native\.setAttribute\("data-native-new-tab", ""\);\s*syncNativeButton\(native\)/,
+  "Replacement overlay buttons must reflect an existing native request");
+assert.match(gate, /const target = replacement \|\| \(button\.isConnected \? button : document\.getElementById\("nativeNewTab"\)\)/,
+  "A failure must be visible on the live button after an overlay rebuild");
 assert.match(gate, /text\("nativeNewTabFailed", "Couldn't open the browser's native new tab\. Try again\."\)/);
 assert.ok((gate.match(/run\(\(\) => runNative\(/g) ?? []).length >= 2,
   "Both static and overlay native-new-tab buttons must use visible failure handling");
