@@ -21,13 +21,35 @@ export class TaskSubmissionGate {
   finish(): void { this.active = false; }
 }
 
-/** A task form's input and outstanding submission survive DOM replacement. */
+export interface TaskDraftSnapshot {
+  readonly value: string;
+  readonly generation: number;
+}
+
+/** A task form's input and outstanding submission survive DOM replacement.
+ * A value-only comparison cannot distinguish editing away from and back to
+ * the submitted text while a save is pending. */
 export class TaskFormSession extends TaskSubmissionGate {
   readonly committed = new VersionedWidgetValue<LocalTask[]>();
-  draft = "";
+  private draftValue = "";
+  private draftGeneration = 0;
   view: (() => void) | undefined;
-  acknowledge(submittedDraft: string): void {
-    this.draft = this.afterSuccess(this.draft, submittedDraft);
+
+  get draft(): string { return this.draftValue; }
+  set draft(value: string) {
+    if (value === this.draftValue) return;
+    this.draftValue = value;
+    this.draftGeneration++;
+  }
+
+  snapshotDraft(): TaskDraftSnapshot {
+    return { value: this.draftValue, generation: this.draftGeneration };
+  }
+
+  acknowledge(submittedDraft: TaskDraftSnapshot): void {
+    if (submittedDraft.generation !== this.draftGeneration) return;
+    if (submittedDraft.value !== this.draftValue) return;
+    this.draft = "";
   }
 }
 
