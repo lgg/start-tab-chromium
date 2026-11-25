@@ -192,8 +192,8 @@ export function renderLinkCollection(
     const nextPage = (page() + offset + totalPages) % totalPages;
     draw();
     try {
-      const revision = await context.setRuntime({ kind: "linkPage", instanceId: block.id, page: nextPage, expectedPage });
-      if (revision !== undefined) session.committed.observe(nextPage, revision);
+      const ack = await context.setRuntime({ kind: "linkPage", instanceId: block.id, page: nextPage, expectedPage });
+      if (ack.runtimeUpdatedAt !== undefined && ack.savedLinkPage !== undefined) session.committed.observe(ack.savedLinkPage, ack.runtimeUpdatedAt);
       else {
         await refreshAfterAcknowledgedRuntimeWrite(async () => {
           const { runtime } = await getStartPageViewSnapshot();

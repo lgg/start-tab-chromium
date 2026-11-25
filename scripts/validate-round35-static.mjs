@@ -111,7 +111,7 @@ assert.match(runtimeRenderer, /checkbox\.disabled = pending/);
 const links76 = read("src/newtab/block-renderers-static.ts");
 assert.doesNotMatch(links76, /context\.runtime\.linkPages\[block\.id\] = page/);
 assert.match(links76, /session\.view !== draw \|\| !session\.begin\(\)/);
-assert.match(links76, /session\.committed\.observe\(nextPage, revision\)/);
+assert.match(links76, /session\.committed\.observe\(ack\.savedLinkPage, ack\.runtimeUpdatedAt\)/);
 assert.match(runtimeRenderer, /Math\.ceil\(value \/ 1000\) \* 1000/);
 assert.match(runtimeRenderer, /const clockRequests = new ClockRequestGate\(\)/);
 assert.match(runtimeRenderer, /clockRequests\.begin\(block\.id, token\)[\s\S]*await refreshClock\(block, context\)[\s\S]*clockRequests\.finish\(lease\)/);
@@ -189,3 +189,13 @@ for (const renderer87 of [runtimeRenderer, links76]) {
   assert.match(renderer87, /await context\.setRuntime\([\s\S]*await refreshAfterAcknowledgedRuntimeWrite\(/);
   assert.match(renderer87, /runtimeSavedRefreshFailed/);
 }
+
+assert.match(runtimeRenderer, /submissions\.committed\.observe\(ack\.savedTasks, ack\.runtimeUpdatedAt\)/);
+assert.match(runtimeRenderer, /ack\.runtimeUpdatedAt !== undefined && Array\.isArray\(ack\.savedTasks\)/);
+assert.match(links76, /ack\.runtimeUpdatedAt !== undefined && ack\.savedLinkPage !== undefined/);
+
+assert.match(newtab, /async function reconcileCommittedLocale\(\): Promise<boolean>/);
+assert.match(newtab, /runUiTask\(reconcileCommittedLocale\)/);
+const init102 = newtab.slice(newtab.indexOf("async function init()"));
+assert.match(init102, /chrome\.storage\.onChanged\.addListener\(handleStorageChange\)[\s\S]*await refreshState\(\);[\s\S]*await reconcileCommittedLocale\(\)[\s\S]*render\(\);/,
+  "Subscribe before the startup state and locale catch-up so initialization cannot miss earlier committed changes");
