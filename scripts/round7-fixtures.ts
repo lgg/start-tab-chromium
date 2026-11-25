@@ -123,7 +123,7 @@ const chromeMock = {
     getManifest(): chrome.runtime.Manifest { return { manifest_version: 3, name: "fixture", version: "3.0.0", chrome_url_overrides: { newtab: "newtab.html" } }; },
   },
   tabs: {
-    onCreated: eventTarget(), onUpdated: eventTarget(),
+    onCreated: eventTarget(), onUpdated: eventTarget(), onRemoved: eventTarget(),
     async create(): Promise<chrome.tabs.Tab> { return { id: 99, index: 0, pinned: false, highlighted: false, active: true, incognito: false, selected: true, discarded: false, autoDiscardable: true, groupId: -1, windowId: 1 }; },
     async update(): Promise<chrome.tabs.Tab> { return { id: 99, index: 0, pinned: false, highlighted: false, active: true, incognito: false, selected: true, discarded: false, autoDiscardable: true, groupId: -1, windowId: 1 }; },
   },
