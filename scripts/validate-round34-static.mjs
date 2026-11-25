@@ -69,13 +69,13 @@ assert.match(editor,
   /const selectedId = provider\.value;[\s\S]*const selectedIndex = provider\.selectedIndex;[\s\S]*provider\.selectedIndex = providerSelectionIndexAfterEdit/,
   "Provider edits must preserve the selected row across ID changes and removals");
 
-assert.match(options, /const settingsChanged = !jsonContentEqual\(next, settings\)/,
+assert.match(options, /const settingsChanged = !jsonContentEqual\(next, baseSettings\)/,
   "Locale-only saves must not rewrite settings and runtime revisions");
 assert.match(options,
-  /if \(settingsChanged\) \{[\s\S]*await sendMessage\(\{[\s\S]*type: "replace-start-page-settings"[\s\S]*settingsPersisted = true;[\s\S]*if \(localeChanged\) \{[\s\S]*await setLocalePreference[\s\S]*location\.reload\(\)/,
+  /if \(settingsChanged\) \{[\s\S]*await sendMessage\(\{[\s\S]*type: "replace-start-page-settings"[\s\S]*if \(localeChanged\) \{[\s\S]*await setLocalePreference[\s\S]*location\.reload\(\)/,
   "Settings must commit before locale persistence so a settings failure cannot leave a stale applied language");
-assert.match(options, /catch \(error\) \{[\s\S]*if \(settingsPersisted\) \{[\s\S]*await reloadState\(\);[\s\S]*render\(\);/,
-  "A locale failure after a settings commit must refresh the in-memory settings revision");
+assert.match(options, /catch \(error\) \{[\s\S]*await reloadState\(\);[\s\S]*render\(savingGeneral\);/,
+  "A locale failure after a settings commit must refresh persisted state while retaining the failed general draft");
 
 for (const command of ["node scripts/run-round34-fixtures.mjs", "node scripts/validate-round34-static.mjs"]) {
   assert.ok(packageJson.scripts.test.includes(command), `npm test must include ${command}`);

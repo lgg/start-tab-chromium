@@ -35,7 +35,7 @@ assert.match(options, /if \(startTabPageAvailable\) \{[\s\S]*chrome\.runtime\.ge
   "The Open Start Tab action must not exist in blocker-only builds");
 assert.match(options, /startTabEnabled\.disabled = !startTabPageAvailable/,
   "Blocker-only Options must not expose an effective runtime Start Tab toggle");
-assert.match(options, /next\.startTab\.enabled = startTabPageAvailable \? startTabEnabled\.checked : settings\.startTab\.enabled/,
+assert.match(options, /next\.startTab\.enabled = startTabPageAvailable \? startTabEnabled\.checked : baseSettings\.startTab\.enabled/,
   "Saving other blocker-only settings must preserve latent full-build Start Tab state");
 
 assert.match(blocked, /blockedSiteForUrl/);

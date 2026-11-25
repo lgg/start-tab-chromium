@@ -33,7 +33,7 @@ assert.match(options, /preset\.addEventListener\("change"[\s\S]*mode\.value = "g
   "Preset selection must update the visible mode and column controls");
 assert.match(options, /activePreset[\s\S]*layoutMatchesPreset\(settings, candidate\.id\)/,
   "Options must not display stale preset metadata for geometry that no longer matches");
-assert.match(options, /preset\.value !== "custom" && !layoutMatchesPreset\(settings, preset\.value as LayoutPresetId\)/,
+assert.match(options, /preset\.value !== "custom" && !layoutMatchesPreset\(baseSettings, preset\.value as LayoutPresetId\)/,
   "Reapplying a stale preset ID must depend on actual geometry, not only the stored profile string");
 assert.match(options, /layoutMatchesPreset\(next, preset\.value as LayoutPresetId\)/,
   "Saved profile metadata must describe actual geometry rather than a stale selector");
