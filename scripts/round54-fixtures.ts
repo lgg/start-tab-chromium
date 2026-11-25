@@ -127,3 +127,43 @@ const explicitCollision = normalizeRuntimeState({ version: 2, tasks: { tasks: [{
 assert.notEqual(explicitCollision.tasks.tasks![0]!.id, generatedTaskId);
 assert.equal(explicitCollision.tasks.tasks![1]!.id, generatedTaskId);
 console.log("Round 64 task identity and migration revision regressions passed");
+
+const isolatedSettings = normalizeStartPageSettings({
+  schemaVersion: 4, layout: { mode: "free", blocks: [
+    { type: "note", id: "other-note" }, { type: "note", id: "note" },
+    { type: "timer", id: "other-timer" }, { type: "timer", id: "timer" },
+    { type: "links", id: "other-links" }, { type: "links", id: "links" },
+  ] },
+});
+const aliasRuntime = {
+  notes: { note: "Only the owning note" },
+  clocks: { timer: { type: "timer", running: false, elapsedMs: 12000, durationMs: 60000 } },
+  linkPages: { links: 2 },
+};
+for (const version of [1, 2]) {
+  const normalized = normalizeRuntimeState({ ...aliasRuntime, version }, isolatedSettings);
+  assert.equal(normalized.notes.note, "Only the owning note");
+  assert.equal(normalized.notes["other-note"], undefined, "Type-named note IDs must not populate unrelated notes");
+  assert.equal(normalized.clocks["other-timer"]!.accumulatedMs, 0, "Legacy clock data must not duplicate into another timer");
+  assert.equal(normalized.linkPages["other-links"], 0, "Link pagination must not leak into another widget");
+  assert.equal(normalized.linkPages.links, 2);
+  assert.deepEqual(normalizeRuntimeState(normalized, isolatedSettings), normalized);
+}
+const noLiteralId = normalizeStartPageSettings({
+  schemaVersion: 4, layout: { mode: "free", blocks: [
+    { type: "note", id: "note-a" }, { type: "note", id: "note-b" },
+    { type: "timer", id: "timer-a" }, { type: "timer", id: "timer-b" },
+    { type: "links", id: "links-a" }, { type: "links", id: "links-b" },
+  ] },
+});
+const legacyAliases = normalizeRuntimeState({ ...aliasRuntime, version: 1 }, noLiteralId);
+assert.equal(legacyAliases.notes["note-a"], "Only the owning note");
+assert.equal(legacyAliases.notes["note-b"], undefined);
+assert.equal(legacyAliases.clocks["timer-a"]!.accumulatedMs, 12000);
+assert.equal(legacyAliases.clocks["timer-b"]!.accumulatedMs, 0);
+assert.equal(legacyAliases.linkPages["links-a"], 2);
+assert.equal(legacyAliases.linkPages["links-b"], 0);
+const orphanedV2 = normalizeRuntimeState({ ...aliasRuntime, version: 2 }, noLiteralId);
+assert.equal(orphanedV2.notes["note-a"], undefined, "Current orphan IDs must not be mistaken for legacy aliases");
+assert.equal(orphanedV2.linkPages["links-a"], 0);
+console.log("Round 67 runtime instance isolation regressions passed");
