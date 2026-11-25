@@ -1,6 +1,7 @@
 import { blockedSiteForUrl, getLastBlockedUrl, hostFromUrl, normalizeHost } from "../lib/blocklist.js";
 import { loadI18n, type I18n } from "../lib/i18n.js";
 import { sendMessage } from "../lib/messages.js";
+import { remainingCountdownSeconds } from "./countdown.js";
 
 const WAIT_SECONDS = 10;
 const messageEl = document.getElementById("message") as HTMLHeadingElement;
@@ -10,6 +11,7 @@ const countdownEl = document.getElementById("countdown") as HTMLDivElement;
 const countdownTextEl = document.getElementById("countdownText") as HTMLParagraphElement;
 const unblockEl = document.getElementById("unblock") as HTMLButtonElement;
 const cancelEl = document.getElementById("cancel") as HTMLButtonElement;
+const errorEl = document.getElementById("unblockError") as HTMLParagraphElement;
 
 const host = readBlockedHost();
 let interval: number | undefined;
@@ -52,13 +54,17 @@ function clearCountdownTimer(): void {
 function startCountdown(): void {
   if (!host || countdownActive) return;
   countdownActive = true;
+  errorEl.hidden = true;
+  errorEl.textContent = "";
   unblockEl.disabled = true;
   cancelEl.disabled = false;
   actionsEl.hidden = true;
   countdownEl.hidden = false;
-  let remaining = WAIT_SECONDS;
+  const deadline = performance.now() + WAIT_SECONDS * 1000;
 
   const tick = (): void => {
+    if (!countdownActive) return;
+    const remaining = remainingCountdownSeconds(deadline, performance.now());
     countdownTextEl.textContent = i18n.t("unblockingCountdown", {
       host,
       remaining,
@@ -70,11 +76,10 @@ function startCountdown(): void {
       void finishUnblock().catch(showUnblockFailed);
       return;
     }
-    remaining -= 1;
   };
 
   tick();
-  interval = window.setInterval(tick, 1000);
+  interval = window.setInterval(tick, 250);
 }
 
 function cancelCountdown(): void {
@@ -87,7 +92,9 @@ function cancelCountdown(): void {
 }
 
 function showUnblockFailed(): void {
-  countdownTextEl.textContent = i18n.t("failedToUnblock");
+  clearCountdownTimer();
+  errorEl.textContent = i18n.t("failedToUnblock");
+  errorEl.hidden = false;
   countdownActive = false;
   unblockEl.disabled = false;
   cancelEl.disabled = false;
@@ -100,8 +107,9 @@ function showStartupFailed(error: unknown): void {
   countdownActive = false;
   unblockEl.disabled = true;
   actionsEl.hidden = true;
-  countdownEl.hidden = false;
-  countdownTextEl.textContent = error instanceof Error ? error.message : String(error);
+  countdownEl.hidden = true;
+  errorEl.textContent = error instanceof Error ? error.message : String(error);
+  errorEl.hidden = false;
 }
 
 type UnblockResult = "removed" | "unchanged" | "failed";
@@ -152,6 +160,10 @@ async function init(): Promise<void> {
   unblockEl.addEventListener("click", startCountdown);
   cancelEl.addEventListener("click", cancelCountdown);
   window.addEventListener("pagehide", clearCountdownTimer);
+  // A restored BFCache page must not retain a stopped, non-restartable countdown.
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted) location.reload();
+  });
   renderMessage();
 }
 

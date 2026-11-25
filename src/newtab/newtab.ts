@@ -510,6 +510,11 @@ async function init(): Promise<void> {
   window.addEventListener(DISMISS_ONBOARDING_EVENT, dismissOnboardingFromGate);
   window.addEventListener("resize", handleResize);
   window.addEventListener("beforeunload", handleBeforeUnload);
+  // BFCache restores the existing DOM after pagehide disposed all listeners
+  // and widget timers. Reinitialize via reload rather than a half-live page.
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted && disposed) location.reload();
+  });
   window.addEventListener("pagehide", dispose, { once: true });
   render();
   await showOnboarding();

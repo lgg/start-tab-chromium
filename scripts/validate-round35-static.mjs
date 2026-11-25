@@ -23,6 +23,8 @@ const runtimeRenderer = read("src/newtab/block-renderers-runtime.ts");
 const gate = read("src/newtab/newtab-gate.js");
 const popup = read("src/popup/popup.ts");
 const blocked = read("src/blocked/blocked.ts");
+const blockedHtml = read("src/blocked/blocked.html");
+const clockGate = read("src/newtab/clock-request-gate.ts");
 const worker = read("src/service-worker.ts");
 const localeReport = read("scripts/report-locale-parity.mjs");
 const localeValidation = read("scripts/locale-catalog-validation.mjs");
@@ -93,6 +95,22 @@ assert.match(popup, /languageEl\.value = localePreference/,
   "Popup language selection must roll back visually after persistence failure");
 assert.match(blocked, /remaining <= 0[\s\S]*cancelEl\.disabled = true[\s\S]*finishUnblock/,
   "The countdown cancel action must not race an unblock already being committed");
+
+assert.match(runtimeRenderer, /const submissions = new TaskSubmissionGate\(\)/);
+assert.match(runtimeRenderer, /!title \|\| !submissions\.begin\(\)/);
+assert.match(runtimeRenderer, /submissions\.afterSuccess\(input\.value, submittedDraft\)/);
+assert.match(runtimeRenderer, /finally\(\(\) => \{[\s\S]*submissions\.finish\(\)/);
+assert.match(runtimeRenderer, /Math\.ceil\(value \/ 1000\) \* 1000/);
+assert.match(runtimeRenderer, /const clockRequests = new ClockRequestGate\(\)/);
+assert.match(runtimeRenderer, /clockRequests\.begin\(block\.id, token\)[\s\S]*await refreshClock\(block, context\)[\s\S]*clockRequests\.finish\(lease\)/);
+assert.match(runtimeRenderer, /clockRequests\.canComplete\(block\.id, clock\.completionToken\)/);
+assert.match(clockGate, /retryAt: this\.now\(\) \+ this\.retryDelayMs/);
+assert.match(newtab, /pageshow[\s\S]*event\.persisted && disposed[\s\S]*location\.reload\(\)/);
+assert.match(blocked, /deadline = performance\.now\(\) \+ WAIT_SECONDS \* 1000/);
+assert.match(blocked, /remainingCountdownSeconds\(deadline, performance\.now\(\)\)/);
+assert.match(blocked, /function showUnblockFailed[\s\S]*errorEl\.hidden = false[\s\S]*countdownEl\.hidden = true/);
+assert.match(blockedHtml, /id="unblockError" role="alert"/);
+assert.match(blocked, /pageshow[\s\S]*event\.persisted[\s\S]*location\.reload\(\)/);
 
 assert.match(localeReport, /buildLocaleParityReport/,
   "The locale report must delegate catalog enumeration to the shared validator");
