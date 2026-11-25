@@ -461,16 +461,23 @@ async function finishOnboarding(presetId: LayoutPresetId | null): Promise<void> 
   }
 }
 
+function onboardingBlocked(): boolean {
+  return disposed || editor.isActive || hasUnsavedNoteDrafts() || hasPendingTaskDrafts()
+    || hasSearchDrafts() || !savedSettings.startTab.enabled
+    || Boolean(document.getElementById("startTabGateOverlay")
+      || document.getElementById("onboarding")
+      || document.querySelector("dialog[open]"));
+}
+
 async function showOnboarding(): Promise<void> {
   if (onboardingOpening) return;
   onboardingOpening = true;
   try {
     await window.startTabGateReady;
-    if (disposed || editor.isActive || hasUnsavedNoteDrafts() || hasPendingTaskDrafts()
-      || !savedSettings.startTab.enabled
-      || document.getElementById("startTabGateOverlay")
-      || document.getElementById("onboarding")
-      || await onboardingState()) return;
+    if (onboardingBlocked()) return;
+    // The committed-state read can wait for another context's transaction.
+    // Recheck every page-local guard synchronously before mounting the modal.
+    if (await onboardingState() || onboardingBlocked()) return;
     onboardingPreviousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const overlay = element("div", "onboarding");
     overlay.id = "onboarding";
@@ -564,7 +571,7 @@ function handleResize(): void {
 }
 
 function handleBeforeUnload(event: BeforeUnloadEvent): void {
-  if (!editor.hasUnsavedChanges && !hasUnsavedNoteDrafts()) return;
+  if (!editor.hasUnsavedChanges && !hasUnsavedNoteDrafts() && !hasPendingTaskDrafts()) return;
   event.preventDefault();
   event.returnValue = "";
 }

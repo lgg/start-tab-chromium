@@ -99,3 +99,10 @@ for (const phrase of ["Split View marker", "onboarding", "confirmDeleteWithConte
 }
 
 console.log("Round 37 static validation passed");
+
+assert.match(newtab, /function onboardingBlocked\(\)[\s\S]*hasSearchDrafts\(\)[\s\S]*document\.querySelector\("dialog\[open\]"\)/,
+  "Onboarding must not cover a live search draft or another open dialog");
+assert.match(newtab, /if \(onboardingBlocked\(\)\) return;[\s\S]*if \(await onboardingState\(\) \|\| onboardingBlocked\(\)\) return;/,
+  "Recheck page-local guards after waiting for committed onboarding state");
+assert.match(newtab, /function handleBeforeUnload[\s\S]*!hasPendingTaskDrafts\(\)\) return;/,
+  "Closing or navigating away must warn about pending task work as well as notes and layout edits");
