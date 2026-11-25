@@ -83,10 +83,10 @@ try {
   const block = initial.layout.blocks[0]!;
   const firstBlock = await updateBlockInstance(block.id, (current) => ({ ...current, title: "New note" }), block.updatedAt);
   assert.ok(firstBlock.updatedAt > block.updatedAt, "A block edit must advance an imported entity revision even when root time equals it");
-  await assert.rejects(() => updateBlockInstance(block.id, (current) => ({ ...current, title: "Stale note" }), block.updatedAt), /changed or was removed/);
+  await assert.rejects(() => updateBlockInstance(block.id, (current) => ({ ...current, title: "Stale note" }), block.updatedAt), /changed in another extension context/);
   const firstTheme = await updateCustomTheme({ ...theme, name: "New theme" }, theme.updatedAt);
   assert.ok(firstTheme.updatedAt > theme.updatedAt, "A same-millisecond theme edit must advance the revision");
-  await assert.rejects(() => updateCustomTheme({ ...theme, name: "Stale theme" }, theme.updatedAt), /changed or was removed/);
+  await assert.rejects(() => updateCustomTheme({ ...theme, name: "Stale theme" }, theme.updatedAt), /changed in another extension context/);
   const saved = normalizeStartPageSettings(stored.startPageSettings);
   assert.equal(saved.layout.blocks[0]!.title, "New note");
   assert.equal(saved.themes.customThemes[0]!.name, "New theme");
