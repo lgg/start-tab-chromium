@@ -331,6 +331,22 @@ try {
   globalThis.fetch = originalFetch;
 }
 
+// A repeated pagination token is not proof of absence. Fail without POST.
+resetState();
+localStorage = localData("drive-loop.example", REVISION_BASE + 1250);
+let loopReads = 0;
+globalThis.fetch = async (_input, init) => {
+  assert.equal(init?.method, undefined);
+  loopReads++;
+  return Response.json({ files: [], nextPageToken: "repeated" });
+};
+try {
+  await assert.rejects(() => google.uploadDriveBackup(), /did not advance/);
+  assert.equal(loopReads, 2);
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
 // Two concurrent local uploads must share the same list/write lock.
 // The second lookup must observe the first create and PATCH instead of POST.
 resetState();
@@ -407,6 +423,10 @@ localStorage = localData("safe.example", REVISION_BASE + 1700);
 const safeBefore = clone(localStorage);
 await assert.rejects(() => revision.markStartTabDataChanged(1e30), /safe integer range/);
 assert.deepEqual(localStorage, safeBefore);
+localStorage = localData("corrupted-revision.example", 1e30);
+await assert.rejects(() => chromeSync.uploadChromeSyncBackup(), /safe integer range/);
+assert.equal(syncSetCount, 0);
+localStorage = clone(safeBefore);
 const unsafeFrame = await buildRemoteFrame("unsafe-remote.example", REVISION_BASE + 1800);
 (unsafeFrame.startTabSyncMeta as { contentUpdatedAt: number }).contentUpdatedAt = 1e30;
 syncStorage = unsafeFrame;
