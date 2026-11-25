@@ -750,3 +750,20 @@ body {
     animation: none !important;
   }
 }
+
+/* Only visible when user work requires recovery or a deferred reload. */
+.draft-recovery:not([hidden]) {
+  display: grid;
+  gap: 10px;
+  width: min(720px, 100%);
+  margin: 0 auto 16px;
+  padding: 14px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  background: var(--card-surface);
+  color: var(--text-primary);
+}
+.draft-recovery h2, .draft-recovery p { margin: 0; }
+.draft-recovery > button { justify-self: start; }
+.hidden-note-draft { display: grid; gap: 8px; }
+.hidden-note-draft textarea { min-height: 100px; resize: vertical; }

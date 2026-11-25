@@ -41,6 +41,9 @@ export class TaskFormSessions {
     }
     return session;
   }
+  hasPendingDrafts(): boolean {
+    return [...this.sessions.values()].some((session) => session.pending || session.draft.length > 0);
+  }
   prune(retained: ReadonlySet<string>): void {
     for (const [id, session] of this.sessions) {
       if (!retained.has(id) && !session.pending) this.sessions.delete(id);

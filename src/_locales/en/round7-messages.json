@@ -61,5 +61,26 @@
   },
   "optionsSavedRefreshFailed": {
     "message": "Action completed, but the settings view could not be refreshed. Refresh before another action."
+  },
+  "localeReloadDeferred": {
+    "message": "The language changed elsewhere. Reload when you are ready; your current drafts have been kept."
+  },
+  "localeReloadAction": {
+    "message": "Reload page"
+  },
+  "localeReloadDiscardConfirm": {
+    "message": "Reload now? Unsaved drafts and open edits may be lost."
+  },
+  "hiddenNoteDrafts": {
+    "message": "Unsaved notes from hidden widgets"
+  },
+  "hiddenNoteDraftsDescription": {
+    "message": "These drafts are still available in this tab. Select and copy their text, restore the widget if possible, or discard them explicitly."
+  },
+  "hiddenNoteSelect": {
+    "message": "Select text"
+  },
+  "hiddenNoteDiscard": {
+    "message": "Discard draft"
   }
 }
