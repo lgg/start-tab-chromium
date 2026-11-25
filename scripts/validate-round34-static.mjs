@@ -25,15 +25,15 @@ assert.match(storagePlan, /jsonContentEqual/,
 assert.match(storagePlan, /export function sameRuntimeContent/,
   "Runtime storage echoes need a semantic content comparator");
 assert.match(newtab,
-  /normalizeRuntimeState\(runtimeChange\.newValue, editor\.settings\)[\s\S]*sameRuntimeContent\(runtime, incomingRuntime\)[\s\S]*runtime = incomingRuntime;[\s\S]*runtimeNeedsRefresh = false/,
-  "Equal runtime storage echoes must update the revision without rebuilding the page");
-assert.match(newtab, /!isFutureRuntimeSchema\(runtimeChange\.newValue\)/,
-  "Future runtime schemas must never be silently normalized while suppressing refresh");
+  /const snapshot = await getStartPageViewSnapshot\(\)[\s\S]*sameRuntimeContent\(runtime, projected\)[\s\S]*runtime = projected/,
+  "Canonical snapshots must update revisions after locked reads and compare semantic content");
+assert.doesNotMatch(newtab, /normalizeRuntimeState\(runtimeChange\.newValue/ ,
+  "Storage events must not publish provisional runtime directly");
 
 assert.match(notes, /const noteSessions = new Map<string, NoteSession>\(\)/);
-assert.match(notes, /session\.draft\.observeCanonical\(canonicalValue\)/);
-assert.match(notes, /await session\.save\(attempt\.value, attempt\.expectedValue\)[\s\S]*session\.draft\.succeed\(attempt\)[\s\S]*session\.draft\.fail\(attempt\)/);
-assert.match(notes, /current !== session\.draft\.expectedValue[\s\S]*noteDraftOverwriteConfirm[\s\S]*rebaseForRetry\(current\)/);
+assert.match(notes, /session\.draft\.observeCanonical\(canonicalValue, context\.runtime\.updatedAt\)/);
+assert.match(notes, /await session\.save\(attempt\.value, attempt\.expectedValue\)[\s\S]*session\.draft\.succeed\(attempt, revision\)[\s\S]*session\.draft\.fail\(attempt\)/);
+assert.match(notes, /current !== session\.draft\.expectedValue[\s\S]*noteDraftOverwriteConfirm[\s\S]*rebaseForRetry\(current, currentRuntime\.updatedAt\)/);
 assert.match(noteDraft, /if \(!this\.hasUnsaved\)/);
 assert.match(noteDraft, /this\.baseline = attempt\.value/);
 assert.match(newtab, /!editor\.hasUnsavedChanges && !hasUnsavedNoteDrafts\(\)/);
@@ -84,3 +84,14 @@ for (const command of ["node scripts/run-round34-fixtures.mjs", "node scripts/va
 }
 
 console.log("Round 34 static validation passed");
+
+assert.doesNotMatch(notes, /context\.runtime\.notes\[block\.id\] = session\.draft\.value/);
+assert.match(notes, /textarea\.readOnly = session\.resolving/);
+assert.match(noteDraft, /revision < this\.canonical\.revision/);
+assert.match(newtab, /const next = refreshJob\.catch\(\(\) => undefined\)\.then/);
+assert.match(newtab, /const snapshot = await getStartPageViewSnapshot\(\);[\s\S]*editor\.replaceSavedSettings\(savedSettings\)/);
+
+const snapshotSource74 = read("src/lib/start-page-runtime.ts");
+const scheduler74 = read("src/newtab/render-scheduler.ts");
+assert.match(snapshotSource74, /export async function getStartPageViewSnapshot[\s\S]*withStorageLock\("data-write",[\s\S]*chrome\.storage\.local\.get\(\[START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY\]\)/);
+assert.match(scheduler74, /forceRender \|\| changed !== false/);

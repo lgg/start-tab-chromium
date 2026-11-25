@@ -75,11 +75,12 @@ interface LocaleCatalog {
 
 interface HandlerResult {
   changed?: boolean;
+  runtimeUpdatedAt?: number;
 }
 
 type ClockBlock = Extract<BlockInstance, { type: "timer" | "stopwatch" | "pomodoro" }>;
 
-let runtimeJob: Promise<void> = Promise.resolve();
+let runtimeJob: Promise<unknown> = Promise.resolve();
 let statsJob: Promise<void> = Promise.resolve();
 let nativeTabJob: Promise<void> = Promise.resolve();
 
@@ -111,7 +112,7 @@ function runStatsJob(operation: () => Promise<void>): Promise<void> {
   return next;
 }
 
-function runRuntimeJob(operation: () => Promise<void>): Promise<void> {
+function runRuntimeJob<T>(operation: () => Promise<T>): Promise<T> {
   const next = runtimeJob.catch(ignoreBackgroundError).then(operation);
   runtimeJob = next;
   return next;
@@ -185,7 +186,7 @@ async function handle(message: Message): Promise<HandlerResult | void> {
     case "clock-action": await runRuntimeJob(() => performClockAction(message.instanceId, message.action)); break;
     case "complete-clock": await runRuntimeJob(() => finishClockCompletion(message.instanceId, message.token)); break;
     case "reset-clocks": await runRuntimeJob(resetAllClocks); break;
-    case "runtime-note": await runRuntimeJob(() => updateRuntimeNote(message.instanceId, message.value, message.expectedValue)); break;
+    case "runtime-note": return { runtimeUpdatedAt: await runRuntimeJob(() => updateRuntimeNote(message.instanceId, message.value, message.expectedValue)) };
     case "runtime-tasks": await runRuntimeJob(() => updateRuntimeTasks(message.instanceId, message.tasks, message.expectedTasks)); break;
     case "runtime-link-page": await runRuntimeJob(() => updateRuntimeLinkPage(message.instanceId, message.page, message.expectedPage)); break;
     case "delete-instance-runtime": await runRuntimeJob(() => deleteInstanceRuntime(
@@ -202,8 +203,8 @@ export function sameTasks(left: readonly LocalTask[], right: readonly LocalTask[
   return jsonContentEqual(left, right);
 }
 
-async function updateRuntimeNote(instanceId: string, value: string, expectedValue: string): Promise<void> {
-  await updateStartPageRuntimeState((runtime, settings) => {
+async function updateRuntimeNote(instanceId: string, value: string, expectedValue: string): Promise<number> {
+  const saved = await updateStartPageRuntimeState((runtime, settings) => {
     assertRuntimeMutationTarget(settings, instanceId, "note");
     const current = ownValue(runtime.notes, instanceId) ?? "";
     if (current !== expectedValue) {
@@ -212,6 +213,7 @@ async function updateRuntimeNote(instanceId: string, value: string, expectedValu
     runtime.notes[instanceId] = value.slice(0, MAX_NOTE_LENGTH);
     return runtime;
   });
+  return saved.updatedAt;
 }
 
 async function updateRuntimeTasks(instanceId: string, tasks: LocalTask[], expectedTasks: LocalTask[]): Promise<void> {

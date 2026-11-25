@@ -1,5 +1,6 @@
 import { commitStorageMutationWithRevision } from "../lib/data-revision.js";
 import { loadI18n, type I18n } from "../lib/i18n.js";
+import { jsonContentEqual } from "../lib/json-content.js";
 import { sendMessage } from "../lib/messages.js";
 import { withStorageLock } from "../lib/storage-lock.js";
 import {
@@ -8,8 +9,7 @@ import {
   onboardingStorageAction,
 } from "./onboarding-state.js";
 import {
-  getStartPageRuntimeState,
-  isFutureRuntimeSchema,
+  getStartPageViewSnapshot,
   normalizeRuntimeState,
   type StartPageRuntimeState,
 } from "../lib/start-page-runtime.js";
@@ -17,7 +17,6 @@ import {
   LAYOUT_PRESETS,
   blockTitleKey,
   blockUsesDefaultTitle,
-  getStartPageSettings,
   getTheme,
   layoutReplacementRemovesUserData,
   settingsWithLayoutPreset,
@@ -81,7 +80,9 @@ let runtime: StartPageRuntimeState;
 let editor: LayoutEditor;
 let renderCleanups: Array<() => void> = [];
 let disposed = false;
-let runtimeMutationJob: Promise<void> = Promise.resolve();
+let runtimeMutationJob: Promise<unknown> = Promise.resolve();
+let refreshJob: Promise<unknown> = Promise.resolve();
+let savedGeneration = 0;
 let onboardingOpening = false;
 let onboardingFinishing = false;
 let onboardingPreviousFocus: HTMLElement | null = null;
@@ -257,16 +258,15 @@ function render(): void {
     settings,
     runtime,
     setRuntime: async (mutation) => {
-      const operation = async (): Promise<void> => {
+      const operation = async (): Promise<number | undefined> => {
         switch (mutation.kind) {
           case "note":
-            await sendMessage({
+            return (await sendMessage({
               type: "runtime-note",
               instanceId: mutation.instanceId,
               value: mutation.value,
               expectedValue: mutation.expectedValue,
-            });
-            break;
+            })).runtimeUpdatedAt;
           case "tasks":
             await sendMessage({
               type: "runtime-tasks",
@@ -288,10 +288,10 @@ function render(): void {
       const next = runtimeMutationJob.catch(() => undefined).then(operation);
       runtimeMutationJob = next;
       try {
-        await next;
+        return await next;
       } catch (error) {
-        await recoverRuntimeMutation(error, {
-          refresh: refreshState,
+        return await recoverRuntimeMutation(error, {
+          refresh: async () => { await refreshState(); },
           announceConflict: () => announce(i18n.t("runtimeMutationConflict")),
           queueRender,
           queueRefresh: queueStateRefresh,
@@ -344,12 +344,24 @@ function queueStateRefresh(): void {
   renderScheduler.queueRefresh();
 }
 
-async function refreshState(): Promise<void> {
-  if (!editor.hasUnsavedChanges) {
-    savedSettings = await getStartPageSettings();
+function refreshState(): Promise<boolean> {
+  const next = refreshJob.catch(() => undefined).then(async () => {
+    if (disposed) return false;
+    const generation = savedGeneration;
+    const snapshot = await getStartPageViewSnapshot();
+    if (disposed || generation !== savedGeneration) return false;
+    const settingsChanged = !jsonContentEqual(savedSettings, snapshot.settings);
+    // Even a dirty editor needs the latest saved baseline for Cancel.
+    // LayoutEditor preserves its draft and original CAS token independently.
+    savedSettings = snapshot.settings;
     editor.replaceSavedSettings(savedSettings);
-  }
-  runtime = await getStartPageRuntimeState(editor.settings);
+    const projected = normalizeRuntimeState(snapshot.runtime, editor.settings);
+    const runtimeChanged = !sameRuntimeContent(runtime, projected);
+    runtime = projected;
+    return settingsChanged || runtimeChanged;
+  });
+  refreshJob = next;
+  return next;
 }
 
 async function onboardingState(): Promise<boolean> {
@@ -391,9 +403,7 @@ async function finishOnboarding(presetId: LayoutPresetId | null): Promise<void> 
           expectedSettingsUpdatedAt: savedSettings.updatedAt,
           expectedRuntimeUpdatedAt: runtime.updatedAt,
         });
-        savedSettings = await getStartPageSettings();
-        editor.replaceSavedSettings(savedSettings);
-        runtime = await getStartPageRuntimeState(savedSettings);
+        await refreshState();
       }
       await withStorageLock("data-write", async () => {
         await commitStorageMutationWithRevision(
@@ -467,22 +477,15 @@ function handleStorageChange(changes: Record<string, chrome.storage.StorageChang
     });
   }
   if (changes.startPageSettings || changes.startPageRuntimeState || changes.focusStats) {
-    let runtimeNeedsRefresh = Boolean(changes.startPageRuntimeState);
-    const runtimeChange = changes.startPageRuntimeState;
-    if (runtimeChange && !isFutureRuntimeSchema(runtimeChange.newValue)) {
-      const incomingRuntime = normalizeRuntimeState(runtimeChange.newValue, editor.settings);
-      if (sameRuntimeContent(runtime, incomingRuntime)) {
-        runtime = incomingRuntime;
-        runtimeNeedsRefresh = false;
-      }
-    }
     const plan = planStartPageStorageChange(editor.hasUnsavedChanges, {
       settings: Boolean(changes.startPageSettings),
-      runtime: runtimeNeedsRefresh,
+      runtime: Boolean(changes.startPageRuntimeState),
       focusStats: Boolean(changes.focusStats),
     });
     if (plan.announceIgnoredSettings) announce(i18n.t("externalSettingsChangeIgnored"));
-    if (plan.refreshState) queueStateRefresh();
+    // Do not publish uncommitted values from the storage event. A locked
+    // refresh updates the revision even when visible content is unchanged.
+    if (plan.refreshState) renderScheduler.queueRefresh(Boolean(changes.focusStats));
   }
 }
 
@@ -523,8 +526,9 @@ function dispose(): void {
 async function init(): Promise<void> {
   i18n = await loadI18n();
   document.title = i18n.t("appName");
-  savedSettings = await getStartPageSettings();
-  runtime = await getStartPageRuntimeState(savedSettings);
+  const initialSnapshot = await getStartPageViewSnapshot();
+  savedSettings = initialSnapshot.settings;
+  runtime = initialSnapshot.runtime;
   editor = new LayoutEditor(savedSettings, {
     i18n,
     toolbarHost,
@@ -536,12 +540,10 @@ async function init(): Promise<void> {
       updateLayoutMetrics(settings, visibleBlocks(settings));
     },
     onSaved: (settings) => {
+      savedGeneration += 1;
       savedSettings = settings;
       announce(i18n.t("layoutSaved"));
-      runUiTask(async () => {
-        runtime = await getStartPageRuntimeState(settings);
-        queueRender();
-      });
+      queueStateRefresh();
     },
     onError: reportUiError,
   });

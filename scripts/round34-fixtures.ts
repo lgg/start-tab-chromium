@@ -209,3 +209,33 @@ try {
   finally { clearTimeout(keepAlive); }
 } finally { globalThis.fetch = realFetch; }
 console.log("Round 60 provider payload, deadline and cache regressions passed");
+
+const versioned = new NoteDraft("old", 10);
+versioned.edit("mine");
+const saving73 = versioned.beginSave()!;
+versioned.observeCanonical("external", 12);
+versioned.succeed(saving73, 11);
+assert.equal(versioned.value, "external", "A newer canonical edit arriving before acknowledgement wins over clean acknowledged text");
+versioned.observeCanonical("mine", 11);
+assert.equal(versioned.value, "external", "A stale renderer snapshot cannot revert a newer canonical revision");
+const concurrent73 = new NoteDraft("old", 10);
+concurrent73.edit("first");
+const pending73 = concurrent73.beginSave()!;
+concurrent73.edit("second");
+concurrent73.observeCanonical("external", 12);
+concurrent73.succeed(pending73, 11);
+assert.equal(concurrent73.value, "second");
+assert.equal(concurrent73.failed, true, "A later local draft must not silently rebase over a newer canonical edit");
+assert.equal(concurrent73.beginSave(), null);
+assert.throws(() => concurrent73.discard("first", 11), /changed during conflict resolution/);
+concurrent73.discard("external", 12);
+assert.equal(concurrent73.hasUnsaved, false);
+const ack73 = new NoteDraft("old", 10);
+ack73.edit("new");
+const ackAttempt73 = ack73.beginSave()!;
+ack73.succeed(ackAttempt73, 11);
+ack73.observeCanonical("old", 10);
+assert.equal(ack73.value, "new", "A successful save must survive an old render before storage refresh");
+ack73.observeCanonical("fresh", 12);
+assert.equal(ack73.value, "fresh");
+console.log("Round 73 note revision regressions passed");

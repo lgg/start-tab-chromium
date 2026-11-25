@@ -24,6 +24,7 @@ import {
   START_PAGE_MIGRATION_REPORT_KEY,
   START_PAGE_SETTINGS_KEY,
   createDefaultStartPageSettings,
+  getStartPageSettings,
   isFutureStartPageSchema,
   isRecord,
   normalizeStartPageSettings,
@@ -299,6 +300,25 @@ async function persistRuntimeInTransaction(
     stamped.updatedAt,
   );
   return stamped;
+}
+
+/** Read a coherent committed page snapshot. Storage change events are only
+ * hints: a multi-step mutation can publish intermediate values and roll back. */
+export async function getStartPageViewSnapshot(): Promise<{ settings: StartPageSettings; runtime: StartPageRuntimeState }> {
+  // Perform any settings migration before taking the non-reentrant lock.
+  await getStartPageSettings();
+  return withStorageLock("data-write", async () => {
+    const stored = await chrome.storage.local.get([START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
+    const rawSettings = stored[START_PAGE_SETTINGS_KEY];
+    const rawRuntime = stored[START_PAGE_RUNTIME_KEY];
+    const settings = normalizeStartPageSettings(rawSettings);
+    const normalized = normalizeRuntimeState(rawRuntime, settings, stored[LEGACY_INSTANCE_RUNTIME_KEY]);
+    const runtime = isFutureStartPageSchema(rawSettings) || isFutureRuntimeSchema(rawRuntime)
+      || jsonContentEqual(rawRuntime, normalized)
+      ? normalized
+      : await persistRuntimeInTransaction(normalized, settings, true, null, stored[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined);
+    return { settings, runtime };
+  });
 }
 
 export async function getStartPageRuntimeState(inputSettings?: StartPageSettings): Promise<StartPageRuntimeState> {
