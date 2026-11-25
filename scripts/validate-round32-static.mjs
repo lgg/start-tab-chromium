@@ -12,7 +12,7 @@ const workflow = read(".github/workflows/ci.yml");
 const selfHostedValidation = read("scripts/validate-self-hosted-ci.mjs");
 
 assert.ok(
-  chromeSync.includes("function parsedMetaEqual(left: ParsedMeta | null, right: ParsedMeta)"),
+  chromeSync.includes("function parsedMetaEqual(left: ParsedMeta | null, right: ParsedMeta | null)"),
   "Browser Sync must compare complete parsed metadata including legacy framing",
 );
 assert.ok(
@@ -25,7 +25,7 @@ assert.ok(
   "Browser Sync content verification must accept validated raw and migrated checksum forms",
 );
 const verificationIndex = chromeSync.indexOf("await readVerifiedRemoteBundle(remote);");
-const repairIndex = chromeSync.indexOf("await writeRemoteSnapshot(localSnapshot);", verificationIndex);
+const repairIndex = chromeSync.indexOf("await writeRemoteSnapshot(localSnapshot, remote);", verificationIndex);
 assert.ok(
   verificationIndex >= 0 && repairIndex > verificationIndex,
   "Matching local content must verify and then repair a corrupt stable remote frame",
