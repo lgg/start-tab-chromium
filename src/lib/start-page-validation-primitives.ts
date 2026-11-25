@@ -81,6 +81,22 @@ export function safeWebUrlTemplate(value: string): string | null {
   return safeWebUrl(trimmed.split("{query}").join("start-tab-query")) ? trimmed : null;
 }
 
+/** The actual substituted URL can be invalid even when the template's
+ * sentinel URL was valid (e.g. a search term used in a hostname). */
+export function buildSearchUrl(template: string, query: string): string | null {
+  if (!safeWebUrlTemplate(template)) return null;
+  try {
+    // TextEncoder replaces lone UTF-16 surrogates, matching the browser's
+    // URL string conversion instead of throwing on malformed pasted text.
+    const wellFormed = new TextDecoder().decode(new TextEncoder().encode(query));
+    const substituted = template.trim().split("{query}").join(encodeURIComponent(wellFormed));
+    const safe = safeWebUrl(substituted);
+    return safe ? new URL(safe).href : null;
+  } catch {
+    return null;
+  }
+}
+
 export function safeGradient(value: unknown, fallback: string): string {
   const candidate = trimmedString(value, fallback, 1000);
   return /^(linear-gradient|radial-gradient|conic-gradient)\(/i.test(candidate) ? candidate : fallback;
