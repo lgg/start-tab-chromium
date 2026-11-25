@@ -680,3 +680,34 @@ try {
   assert.equal(requests100, 2, "A complete listing must still permit a normal backup upload");
 } finally { globalThis.fetch = originalFetch; }
 console.log("Round 100 Google Drive incomplete search regressions passed");
+
+resetState();
+localStorage = localData("keep-local-104.example", REVISION_BASE + 12_000);
+const before104 = clone(localStorage);
+const header104 = { app: "Start Tab", version: 4, exportedAt: new Date().toISOString() };
+for (const storage104 of [
+  {},
+  { unrelated: true },
+  { localeOverride: "ru" },
+  { blockedSites: null },
+  { blockedSites: ["valid.example", 1] },
+  { blocked: "legacy.example" },
+  { blockedSites: [], startPageSettings: [] },
+  { startPageRuntimeState: "truncated" },
+  { startTabInstanceState: false },
+  { focusStats: null },
+]) {
+  const candidate104 = { ...header104, storage: storage104 };
+  assert.throws(() => backup.migrateBackup(candidate104), /no recognized data sections|Invalid Start Tab backup section/);
+  await assert.rejects(() => backup.importBackup(candidate104), /no recognized data sections|Invalid Start Tab backup section/);
+  assert.deepEqual(localStorage, before104, "Malformed backup must not alter local data or recovery state");
+  assert.equal(alarms.size, 0);
+  assert.deepEqual(dynamicRules, []);
+}
+const empty104 = backup.migrateBackup({ ...header104, storage: { blockedSites: [] } });
+assert.deepEqual(empty104.storage.blockedSites, [], "Explicit empty blocklists remain valid");
+const old104 = backup.migrateBackup({ ...header104, version: 1, storage: { blocked: ["legacy.example"] } });
+assert.deepEqual(old104.storage.blockedSites, ["legacy.example"], "Legacy partial blocklist backups remain valid");
+const actual104 = await backup.exportBackup();
+assert.doesNotThrow(() => backup.migrateBackup(actual104));
+console.log("Round 104 malformed backup section regressions passed");
