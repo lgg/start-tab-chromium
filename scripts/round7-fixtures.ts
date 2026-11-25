@@ -510,7 +510,9 @@ assert.ok((localState[revisionApi.DATA_REVISION_KEY] as { updatedAt: number }).u
 const committedReset115 = structuredClone(localState);
 const canonicalReset115 = await settingsApi.getStartPageSettings();
 assert.equal(canonicalReset115.schemaVersion, settingsApi.START_PAGE_SCHEMA_VERSION);
-assert.deepEqual(canonicalReset115, committedReset115.startPageSettings, "Reset must commit an already normalized layout");
+// Chrome storage serializes dictionaries as plain objects; compare the
+// serialized content without treating null-prototype dictionaries as edits.
+assert.deepEqual(structuredClone(canonicalReset115), committedReset115.startPageSettings, "Reset must commit an already normalized layout");
 assert.deepEqual(localState, committedReset115, "The first settings read after reset must not create an extra migration or revision");
 const directDefault115 = settingsApi.createDefaultStartPageSettings(12345);
 assert.deepEqual(settingsApi.normalizeStartPageSettings(directDefault115), directDefault115, "Explicit default settings must be idempotent under normalization");
