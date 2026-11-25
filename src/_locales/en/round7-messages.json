@@ -52,5 +52,14 @@
   },
   "noteDraftOverwriteConfirm": {
     "message": "The saved note changed elsewhere. Overwrite that saved text with this draft?"
+  },
+  "optionsRefreshedRetry": {
+    "message": "Settings refreshed. Review the current values and repeat the action."
+  },
+  "optionsRefreshRequired": {
+    "message": "Settings could not be refreshed. No new action was performed."
+  },
+  "optionsSavedRefreshFailed": {
+    "message": "Action completed, but the settings view could not be refreshed. Refresh before another action."
   }
 }

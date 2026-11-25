@@ -181,6 +181,7 @@ async function handle(message: Message): Promise<HandlerResult | void> {
         message.settings,
         message.expectedSettingsUpdatedAt,
         message.expectedRuntimeUpdatedAt,
+        message.localeChange,
       );
     }); break;
     case "clock-action": await runRuntimeJob(() => performClockAction(message.instanceId, message.action)); break;

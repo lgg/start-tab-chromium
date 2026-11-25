@@ -1,5 +1,5 @@
 import { commitStorageMutationWithRevision } from "../lib/data-revision.js";
-import { loadI18n, type I18n } from "../lib/i18n.js";
+import { getLocalePreference, loadI18n, type I18n, type LocalePreference } from "../lib/i18n.js";
 import { jsonContentEqual } from "../lib/json-content.js";
 import { sendMessage } from "../lib/messages.js";
 import { withStorageLock } from "../lib/storage-lock.js";
@@ -75,6 +75,7 @@ const nativeNewTabButton = requireElement<HTMLButtonElement>("nativeNewTab");
 const statusRegion = requireElement<HTMLElement>("statusRegion");
 
 let i18n: I18n;
+let loadedLocalePreference: LocalePreference;
 let savedSettings: StartPageSettings;
 let runtime: StartPageRuntimeState;
 let editor: LayoutEditor;
@@ -463,8 +464,12 @@ async function showOnboarding(): Promise<void> {
 function handleStorageChange(changes: Record<string, chrome.storage.StorageChange>, areaName: string): void {
   if (areaName !== "local" || disposed) return;
   if (changes.localeOverride) {
-    location.reload();
-    return;
+    // Ignore provisional writes/rollbacks; reload only for the committed
+    // preference that differs from the catalog loaded by this page.
+    runUiTask(async () => {
+      const committed = await withStorageLock("data-write", getLocalePreference);
+      if (!disposed && committed !== loadedLocalePreference) location.reload();
+    });
   }
   const onboardingAction = onboardingStorageAction(changes[START_PAGE_ONBOARDING_KEY]);
   if (onboardingAction === "dismiss") {
@@ -523,7 +528,9 @@ function dispose(): void {
 }
 
 async function init(): Promise<void> {
-  i18n = await loadI18n();
+  const loaded = await loadI18n();
+  i18n = loaded;
+  loadedLocalePreference = loaded.preference;
   document.title = i18n.t("appName");
   const initialSnapshot = await getStartPageViewSnapshot();
   savedSettings = initialSnapshot.settings;

@@ -72,10 +72,10 @@ assert.match(editor,
 assert.match(options, /const settingsChanged = !jsonContentEqual\(next, baseSettings\)/,
   "Locale-only saves must not rewrite settings and runtime revisions");
 assert.match(options,
-  /if \(settingsChanged\) \{[\s\S]*await sendMessage\(\{[\s\S]*type: "replace-start-page-settings"[\s\S]*if \(localeChanged\) \{[\s\S]*await setLocalePreference[\s\S]*location\.reload\(\)/,
-  "Settings must commit before locale persistence so a settings failure cannot leave a stale applied language");
+  /if \(settingsChanged\) \{[\s\S]*await sendMessage\(\{[\s\S]*type: "replace-start-page-settings"[\s\S]*localeChange: \{ expected: baseLocale, preference \}[\s\S]*if \(localeChanged\) \{[\s\S]*if \(!settingsChanged\) await setLocalePreference\(preference, baseLocale\)/,
+  "Combined language and settings changes must share one worker transaction; locale-only changes retain independent CAS");
 assert.match(options, /catch \(error\) \{[\s\S]*await reloadState\(\);[\s\S]*render\(savingGeneral\);/,
-  "A locale failure after a settings commit must refresh persisted state while retaining the failed general draft");
+  "A failed General action must refresh canonical state while retaining the form draft");
 
 for (const command of ["node scripts/run-round34-fixtures.mjs", "node scripts/validate-round34-static.mjs"]) {
   assert.ok(packageJson.scripts.test.includes(command), `npm test must include ${command}`);
@@ -101,3 +101,8 @@ assert.match(datePattern77, /hourCycle: "h23"/);
 assert.match(datePattern77, /return pattern\.replace\(/);
 assert.match(staticWidgets, /const formatParts = createDatePartsFormatter[\s\S]*const parts = formatParts\(new Date\(\)\)/);
 assert.match(staticWidgets, /const url = buildSearchUrl\(provider\.urlTemplate, query\)/);
+
+assert.match(options, /if \(next\.layout\.zone !== baseSettings\.layout\.zone\)/);
+assert.match(options, /if \(actionGuard\.needsRefresh\)[\s\S]*optionsRefreshedRetry/);
+assert.match(options, /optionsSavedRefreshFailed/);
+assert.match(newtab, /withStorageLock\("data-write", getLocalePreference\)[\s\S]*committed !== loadedLocalePreference/);

@@ -37,7 +37,7 @@ import { sendMessage } from "../lib/messages.js";
 import { MAX_CUSTOM_THEMES, MAX_START_PAGE_BLOCKS } from "../lib/platform-limits.js";
 import {
   deleteInstanceRuntime,
-  getStartPageRuntimeState,
+  getStartPageViewSnapshot,
   type StartPageRuntimeState,
 } from "../lib/start-page-runtime.js";
 import {
@@ -56,7 +56,6 @@ import {
   duplicateTheme,
   exportCustomTheme,
   getStartPageMigrationReport,
-  getStartPageSettings,
   blockDeletionRequiresDataConfirmation,
   importCustomTheme,
   isSingletonBlockType,
@@ -232,28 +231,52 @@ async function runAction<T>(
   savingGeneral = false,
 ): Promise<void> {
   if (actionGuard.pending) return;
-  if (!savingGeneral && generalDraft && !generalDraft.state.mayReplace(
+  if (!actionGuard.needsRefresh && !savingGeneral && generalDraft && !generalDraft.state.mayReplace(
     generalDraft.signature(), () => window.confirm(i18n.t("discardChangesConfirm")),
   )) return;
   if (!actionGuard.tryStart()) return;
   setActionBusy(true);
   setStatus(i18n.t("working"));
   try {
-    const result = await action();
-    await reloadState();
-    render();
-    setStatus(typeof successMessage === "function" ? successMessage(result) : successMessage);
-  } catch (error) {
-    let failure: unknown = error;
+    if (actionGuard.needsRefresh) {
+      try {
+        await reloadState();
+        render(Boolean(generalDraft?.state.isDirty(generalDraft.signature())));
+        actionGuard.markRefreshed();
+        setStatus(i18n.t("optionsRefreshedRetry"));
+      } catch (error) {
+        setStatus(i18n.t("optionsRefreshRequired") + " · " + actionFailureText(error), true);
+      }
+      return;
+    }
+    let result: T;
+    try {
+      result = await action();
+    } catch (error) {
+      let failure: unknown = error;
+      actionGuard.invalidate();
+      try {
+        await reloadState();
+        render(savingGeneral);
+        actionGuard.markRefreshed();
+      } catch (refreshError) {
+        failure = new AggregateError([error, refreshError], "The action failed and Options could not reload the latest state");
+      }
+      setStatus(actionFailureText(failure), true);
+      return;
+    }
+    // A successful mutation must not be reported as failed or replayed
+    // merely because the subsequent read/render did not succeed.
+    const success = typeof successMessage === "function" ? successMessage(result) : successMessage;
+    actionGuard.invalidate();
     try {
       await reloadState();
-      // Preserve the failed general form and its original CAS baseline.
-      // A user can explicitly discard it to load the refreshed state.
-      render(savingGeneral);
-    } catch (refreshError) {
-      failure = new AggregateError([error, refreshError], "The action failed and Options could not reload the latest state");
+      render();
+      actionGuard.markRefreshed();
+      setStatus(success);
+    } catch (error) {
+      setStatus([success, i18n.t("optionsSavedRefreshFailed"), actionFailureText(error)].filter(Boolean).join(" · "), true);
     }
-    setStatus(actionFailureText(failure), true);
   } finally {
     actionGuard.finish();
     setActionBusy(false);
@@ -291,7 +314,6 @@ function renderHeader(): void {
     if (!window.confirm(i18n.t("resetStartPageConfirm"))) return;
     void runAction(async () => {
       await sendMessage({ type: "reset-start-page" });
-      runtime = await getStartPageRuntimeState(await getStartPageSettings());
     }, i18n.t("resetComplete"));
   });
   headerActions.append(reset);
@@ -409,16 +431,22 @@ function renderGeneral(): HTMLElement {
     next.settingsButton.hoverArea = hoverArea.value as typeof next.settingsButton.hoverArea;
     next.layout.mode = mode.value as LayoutMode;
     next.layout.zone = zone.value as LayoutZone;
-    next.layout.blocks = next.layout.blocks.map((block) => ({ ...block, zone: next.layout.zone }));
+    if (next.layout.zone !== baseSettings.layout.zone) {
+      next.layout.blocks = next.layout.blocks.map((block) => ({ ...block, zone: next.layout.zone }));
+    }
     next.layout.columns = readNumber(columns, next.layout.columns);
     next.layout.rowHeight = readNumber(rowHeight, next.layout.rowHeight);
     next.layout.gap = readNumber(gap, next.layout.gap);
     next.layout.containedMaxWidth = readNumber(containedMaxWidth, next.layout.containedMaxWidth);
     next.layout.showBlockTitles = showTitles.checked;
-    next.layout.profile = preset.value !== "custom"
-      && layoutMatchesPreset(next, preset.value as LayoutPresetId)
-      ? preset.value
-      : "custom";
+    if (preset.value !== (activePreset?.id ?? "custom")
+      || next.layout.mode !== baseSettings.layout.mode
+      || next.layout.columns !== baseSettings.layout.columns) {
+      next.layout.profile = preset.value !== "custom"
+        && layoutMatchesPreset(next, preset.value as LayoutPresetId)
+        ? preset.value
+        : "custom";
+    }
     next.focusStats.defaultMinutesPerAvoidedVisit = readNumber(defaultMinutes, next.focusStats.defaultMinutesPerAvoidedVisit);
     next.focusStats.avoidedVisitDedupeSeconds = readNumber(dedupeSeconds, next.focusStats.avoidedVisitDedupeSeconds);
 
@@ -427,6 +455,7 @@ function renderGeneral(): HTMLElement {
 
     void runAction(async () => {
       const localeChanged = locale.value !== baseLocale;
+      const preference = locale.value as LocalePreference;
       const settingsChanged = !jsonContentEqual(next, baseSettings);
       if (settingsChanged) {
         await sendMessage({
@@ -434,11 +463,12 @@ function renderGeneral(): HTMLElement {
           settings: next,
           expectedSettingsUpdatedAt: baseSettings.updatedAt,
           expectedRuntimeUpdatedAt: baseRuntimeUpdatedAt,
+          ...(localeChanged ? { localeChange: { expected: baseLocale, preference } } : {}),
         });
       }
       if (localeChanged) {
-        await setLocalePreference(locale.value as LocalePreference);
-        localePreference = locale.value as LocalePreference;
+        if (!settingsChanged) await setLocalePreference(preference, baseLocale);
+        localePreference = preference;
         draftState.acknowledge(signature());
         location.reload();
       }
@@ -718,8 +748,7 @@ async function renderStatistics(): Promise<HTMLElement> {
 }
 
 async function reloadState(): Promise<void> {
-  const nextSettings = await getStartPageSettings();
-  const nextRuntime = await getStartPageRuntimeState(nextSettings);
+  const { settings: nextSettings, runtime: nextRuntime } = await getStartPageViewSnapshot();
   const nextLocale = await getLocalePreference();
   const nextSites = await getBlockedSites();
   // A failed read must not leave half the UI using a new baseline while

@@ -155,3 +155,12 @@ assert.equal(messages.isMessage({
 }), true);
 
 console.log("Round 40 fixtures passed");
+
+guard.invalidate();
+assert.equal(guard.needsRefresh, true, "A committed action with failed refresh blocks another mutation until the view is refreshed");
+guard.tryStart();
+guard.finish();
+assert.equal(guard.needsRefresh, true, "Releasing the busy lease must not clear the stale-view flag");
+guard.markRefreshed();
+assert.equal(guard.needsRefresh, false);
+console.log("Round 78 Options stale-view guard regressions passed");

@@ -2,6 +2,7 @@ import { commitStorageMutationWithRevision, DATA_REVISION_KEY, markStartTabDataC
 import { cloneDictionary, createDictionary, ownValue } from "./dictionary.js";
 import { runIndependentEffects } from "./independent-effects.js";
 import { jsonContentEqual } from "./json-content.js";
+import { assertLocalePreference, LOCALE_OVERRIDE_KEY, writeLocalePreferenceInExistingTransaction, type LocaleChange } from "./i18n.js";
 import { withStorageLock } from "./storage-lock.js";
 import { uniqueEntityId } from "./start-page-validation-primitives.js";
 import { MAX_LOCAL_TASKS_PER_INSTANCE, MAX_NOTE_LENGTH } from "./platform-limits.js";
@@ -587,13 +588,16 @@ export async function replaceStartPageSettingsWithRuntime(
   value: unknown,
   expectedSettingsUpdatedAt: number,
   expectedRuntimeUpdatedAt: number,
+  localeChange?: LocaleChange,
 ): Promise<StartPageSettings> {
   return withStorageLock("data-write", async () => {
     const items = await chrome.storage.local.get([
       START_PAGE_SETTINGS_KEY,
       START_PAGE_RUNTIME_KEY,
       LEGACY_INSTANCE_RUNTIME_KEY,
+      ...(localeChange ? [LOCALE_OVERRIDE_KEY] : []),
     ]);
+    if (localeChange) assertLocalePreference(items[LOCALE_OVERRIDE_KEY], localeChange.expected);
     const prepared = prepareStartPageSettingsWrite(
       value,
       items[START_PAGE_SETTINGS_KEY],
@@ -622,7 +626,7 @@ export async function replaceStartPageSettingsWithRuntime(
     const previousAlarms = await readClockAlarmSnapshot();
     try {
       await commitStorageMutationWithRevision(
-        [START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY],
+        [START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY, ...(localeChange ? [LOCALE_OVERRIDE_KEY] : [])],
         async () => {
           await chrome.storage.local.set({
             [START_PAGE_SETTINGS_KEY]: prepared.settings,
@@ -630,6 +634,7 @@ export async function replaceStartPageSettingsWithRuntime(
           });
           await chrome.storage.local.remove(LEGACY_INSTANCE_RUNTIME_KEY);
           await reconcileClockAlarmsForRuntime(runtime);
+          if (localeChange) await writeLocalePreferenceInExistingTransaction(localeChange.preference);
         },
         Math.max(prepared.settings.updatedAt, runtime.updatedAt),
       );
