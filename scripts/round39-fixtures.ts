@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { LayoutDraftVersion, clampFreeGeometry } from "../src/newtab/layout-draft-version.js";
+import { MAX_FREE_GEOMETRY } from "../src/lib/platform-limits.js";
+import { normalizeStartPageSettings } from "../src/lib/start-page-settings.js";
 import { shouldRefreshLayoutDraft } from "../src/newtab/layout-editor.js";
 import {
   assertRuntimeMutationTarget,
@@ -38,3 +41,21 @@ assert.equal(shouldRefreshLayoutDraft(true, false, true), false,
   "An in-flight save must keep its exact submitted draft stable");
 
 console.log("Round 39 fixtures passed");
+
+const baseline = new LayoutDraftVersion(100);
+const dialogEpoch = baseline.epoch;
+baseline.change();
+assert.equal(baseline.updatedAt, 100, "Local draft edits must not advance the persisted CAS baseline");
+assert.equal(baseline.isCurrent(dialogEpoch), false, "A local mutation invalidates a stale dialog result");
+const epochBeforeReset = baseline.epoch;
+baseline.reset(200);
+assert.equal(baseline.updatedAt, 200);
+assert.equal(baseline.isCurrent(epochBeforeReset), false, "A new edit session invalidates old dialogs even if a block still exists");
+const oversized = createBlockInstance("note", { free: { x: MAX_FREE_GEOMETRY + 1, y: -4, width: Number.POSITIVE_INFINITY, height: MAX_FREE_GEOMETRY + 99 } });
+const bounded = clampFreeGeometry(oversized);
+assert.deepEqual(bounded.free, { x: MAX_FREE_GEOMETRY, y: 0, width: 250, height: MAX_FREE_GEOMETRY });
+const freeSettings = createDefaultStartPageSettings(1);
+freeSettings.layout.mode = "free";
+freeSettings.layout.blocks = [bounded];
+assert.deepEqual(normalizeStartPageSettings(freeSettings).layout.blocks[0]?.free, bounded.free, "Editor preview and persistence must use identical geometry bounds");
+console.log("Round 59 layout version and geometry regressions passed");

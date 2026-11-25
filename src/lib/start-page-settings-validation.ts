@@ -24,7 +24,7 @@ import {
 import { normalizeBlockConfig } from "./start-page-block-validation.js";
 import { ownValue } from "./dictionary.js";
 import { placeGridBlocks } from "./grid-layout.js";
-import { MAX_GRID_BLOCK_HEIGHT, MAX_GRID_ROW, MAX_START_PAGE_BLOCKS } from "./platform-limits.js";
+import { MAX_FREE_GEOMETRY, MAX_GRID_BLOCK_HEIGHT, MAX_GRID_ROW, MAX_START_PAGE_BLOCKS } from "./platform-limits.js";
 import { migrateLegacyTheme, normalizeCustomThemes } from "./start-page-theme-validation.js";
 import {
   booleanValue,
@@ -84,10 +84,10 @@ function normalizeBlock(value: unknown, index: number, root: Record<string, unkn
     height,
     order: finiteInteger(value.order, index, 0, 10000),
     free: {
-      x: finiteNumber(free.x, Math.max(0, (finiteInteger(value.column, 1, 1, columns) - 1) * 92), 0, 100000),
-      y: finiteNumber(free.y, Math.max(0, (finiteInteger(value.row, index + 1, 1, MAX_GRID_ROW) - 1) * 76), 0, 100000),
-      width: finiteNumber(free.width, Math.max(descriptor.minFreeWidth, width * 90), descriptor.minFreeWidth, 100000),
-      height: finiteNumber(free.height, Math.max(descriptor.minFreeHeight, height * 72), descriptor.minFreeHeight, 100000),
+      x: finiteNumber(free.x, Math.max(0, (finiteInteger(value.column, 1, 1, columns) - 1) * 92), 0, MAX_FREE_GEOMETRY),
+      y: finiteNumber(free.y, Math.max(0, (finiteInteger(value.row, index + 1, 1, MAX_GRID_ROW) - 1) * 76), 0, MAX_FREE_GEOMETRY),
+      width: finiteNumber(free.width, Math.max(descriptor.minFreeWidth, width * 90), descriptor.minFreeWidth, MAX_FREE_GEOMETRY),
+      height: finiteNumber(free.height, Math.max(descriptor.minFreeHeight, height * 72), descriptor.minFreeHeight, MAX_FREE_GEOMETRY),
     },
     config: normalizeBlockConfig(type, configValue, root, `layout.blocks[${index}].config`, issues),
     createdAt,
