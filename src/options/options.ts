@@ -25,7 +25,7 @@ import {
   uploadDriveBackup,
 } from "../lib/google-integration.js";
 import {
-  loadI18n,
+  loadI18nForPreference,
   setLocalePreference,
   type I18n,
   type LocalePreference,
@@ -181,7 +181,7 @@ const backupImportInput = requireElement<HTMLInputElement>("backupImportInput");
 const themeImportInput = requireElement<HTMLInputElement>("themeImportInput");
 const startTabPageAvailable = chrome.runtime.getManifest().chrome_url_overrides?.newtab === "newtab.html";
 
-let i18n: I18n;
+let i18n: I18n & { preference: LocalePreference };
 let settings: StartPageSettings;
 let runtime: StartPageRuntimeState;
 let localePreference: LocalePreference;
@@ -239,7 +239,7 @@ async function runAction<T>(
   try {
     if (actionGuard.needsRefresh) {
       try {
-        await reloadState();
+        await reloadState(Boolean(generalDraft?.state.isDirty(generalDraft.signature())));
         render(Boolean(generalDraft?.state.isDirty(generalDraft.signature())));
         actionGuard.markRefreshed();
         setStatus(i18n.t("optionsRefreshedRetry"));
@@ -255,7 +255,7 @@ async function runAction<T>(
       let failure: unknown = error;
       actionGuard.invalidate();
       try {
-        await reloadState();
+        await reloadState(savingGeneral || Boolean(generalDraft?.state.isDirty(generalDraft.signature())));
         // Confirming replacement allowed a successful action to replace the
         // draft; a failed action does not justify losing the user's edits.
         render(savingGeneral || Boolean(generalDraft?.state.isDirty(generalDraft.signature())));
@@ -471,7 +471,8 @@ function renderGeneral(): HTMLElement {
         if (!settingsChanged) await setLocalePreference(preference, baseLocale);
         localePreference = preference;
         draftState.acknowledge(signature());
-        location.reload();
+        // runAction reloads the committed state and matching locale catalog
+        // before rebuilding the view. No full-page reload is needed.
       }
       draftState.acknowledge(signature());
     }, i18n.t("settingsSaved"), true);
@@ -748,15 +749,20 @@ async function renderStatistics(): Promise<HTMLElement> {
   return item.root;
 }
 
-async function reloadState(): Promise<void> {
+async function reloadState(preserveGeneral = false): Promise<void> {
   const { settings: nextSettings, runtime: nextRuntime, localePreference: nextLocale } = await getStartPageViewSnapshot();
   const nextSites = await getBlockedSites();
+  // Preserve the language of a retained dirty form until it is saved or
+  // discarded. The stored preference is still updated for subsequent CAS.
+  const nextI18n = !i18n || (!preserveGeneral && i18n.preference !== nextLocale)
+    ? await loadI18nForPreference(nextLocale) : i18n;
   // A failed read must not leave half the UI using a new baseline while
   // the remaining controls still belong to the previous snapshot.
   settings = nextSettings;
   runtime = nextRuntime;
   localePreference = nextLocale;
   blockedSites = nextSites;
+  i18n = nextI18n;
 }
 
 function render(preserveGeneral = false): void {
@@ -814,7 +820,6 @@ themeImportInput.addEventListener("change", () => {
 });
 
 async function init(): Promise<void> {
-  i18n = await loadI18n();
   await reloadState();
   render();
 }

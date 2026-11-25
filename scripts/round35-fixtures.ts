@@ -377,3 +377,44 @@ await commands105.run(() => true, async () => { writes105++; }, () => { refreshe
 assert.equal(writes105, 2);
 assert.equal(refreshes105, 3);
 console.log("Round 105 destructive command lease regressions passed");
+
+const { loadI18nForPreference } = await import("../src/lib/i18n.js");
+const originalFetch110 = globalThis.fetch;
+const originalChrome110 = Object.getOwnPropertyDescriptor(globalThis, "chrome");
+const originalDocument110 = Object.getOwnPropertyDescriptor(globalThis, "document");
+const document110 = { documentElement: { lang: "" } };
+const requested110: string[] = [];
+let storageReads110 = 0;
+try {
+  Object.defineProperty(globalThis, "chrome", { configurable: true, value: {
+    runtime: { getURL: (path: string) => "https://example.invalid/" + path },
+    storage: { local: { get: async () => { storageReads110++; return { localeOverride: "en" }; } } },
+  } });
+  Object.defineProperty(globalThis, "document", { configurable: true, value: document110 });
+  globalThis.fetch = async (input) => {
+    const path = new URL(String(input)).pathname;
+    requested110.push(path);
+    const language = path.includes("/ru/") ? "ru" : "en";
+    return Response.json(path.endsWith("/messages.json") ? { sample: { message: language } }
+      : path.endsWith("/round7-messages.json") ? { fragment: { message: language + "-fragment" } } : {});
+  };
+  const russian110 = await loadI18nForPreference("ru");
+  assert.equal(russian110.preference, "ru");
+  assert.equal(russian110.locale, "ru");
+  assert.equal(russian110.t("sample"), "ru");
+  assert.equal(russian110.t("fragment"), "ru-fragment");
+  assert.equal(document110.documentElement.lang, "ru");
+  assert.equal(storageReads110, 0, "The supplied committed preference must not be replaced by a second storage read");
+  assert.equal(requested110.length, 6);
+  const english110 = await loadI18nForPreference("en");
+  assert.equal(english110.t("sample"), "en");
+  assert.equal(document110.documentElement.lang, "en");
+  assert.equal(storageReads110, 0);
+} finally {
+  globalThis.fetch = originalFetch110;
+  if (originalChrome110) Object.defineProperty(globalThis, "chrome", originalChrome110);
+  else Reflect.deleteProperty(globalThis, "chrome");
+  if (originalDocument110) Object.defineProperty(globalThis, "document", originalDocument110);
+  else Reflect.deleteProperty(globalThis, "document");
+}
+console.log("Round 110 coherent snapshot locale catalog regressions passed");
