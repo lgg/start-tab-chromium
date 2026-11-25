@@ -3,29 +3,11 @@ import type { I18n } from "../lib/i18n.js";
 import type { BlockInstance, StartLink } from "../lib/start-page-settings.js";
 import { actionButton, element } from "./block-renderer-common.js";
 import type { BlockRenderContext } from "./block-renderer-types.js";
+import { WidgetRequestCache } from "./widget-request-cache.js";
+import { parseIpPayload, type IpResult } from "./provider-payloads.js";
+import { fetchWidgetJson } from "./widget-network.js";
 
-interface IpResult {
-  ip: string;
-  country: string;
-}
-
-interface CacheEntry {
-  expiresAt: number;
-  promise: Promise<unknown>;
-}
-
-const requestCache = new Map<string, CacheEntry>();
-
-function cachedRequest<T>(key: string, ttlMs: number, loader: () => Promise<T>): Promise<T> {
-  const existing = requestCache.get(key);
-  if (existing && existing.expiresAt > Date.now()) return existing.promise as Promise<T>;
-  const promise = loader();
-  requestCache.set(key, { expiresAt: Date.now() + ttlMs, promise });
-  void promise.catch(() => {
-    if (requestCache.get(key)?.promise === promise) requestCache.delete(key);
-  });
-  return promise;
-}
+const requestCache = new WidgetRequestCache();
 
 function safeLocale(requested: string, fallback: string): string {
   for (const candidate of [requested.trim(), fallback, "en"]) {
@@ -122,15 +104,6 @@ export function renderSearch(
   container.append(form);
 }
 
-function parseIpPayload(payload: unknown): IpResult | null {
-  if (typeof payload !== "object" || payload === null) return null;
-  const source = payload as Record<string, unknown>;
-  const ip = [source.ip, source.query, source.address].find((value): value is string => typeof value === "string" && value.length > 0);
-  const country = [source.country_name, source.country, source.countryCode, source.country_code]
-    .find((value): value is string => typeof value === "string" && value.length > 0) ?? "";
-  return ip ? { ip, country } : null;
-}
-
 async function fetchIp(endpoint: string): Promise<IpResult> {
   const endpoints = [...new Set([
     endpoint,
@@ -141,9 +114,7 @@ async function fetchIp(endpoint: string): Promise<IpResult> {
   let lastError: unknown = null;
   for (const candidate of endpoints) {
     try {
-      const response = await fetch(candidate, { cache: "no-store" });
-      if (!response.ok) throw new Error(`IP provider returned ${response.status}`);
-      const parsed = parseIpPayload(await response.json());
+      const parsed = parseIpPayload(await fetchWidgetJson(candidate));
       if (parsed) return parsed;
     } catch (error) {
       lastError = error;
@@ -159,7 +130,7 @@ export function renderIp(
 ): void {
   const detail = element("div", "ip__detail", context.i18n.t("ipLoading"));
   container.append(detail);
-  void cachedRequest(`ip:${block.config.endpoint}`, 5 * 60_000, () => fetchIp(block.config.endpoint)).then((result) => {
+  void requestCache.get(`ip:${block.config.endpoint}`, 5 * 60_000, () => fetchIp(block.config.endpoint)).then((result) => {
     if (!detail.isConnected) return;
     detail.textContent = context.i18n.t("ipResult", {
       ip: result.ip || context.i18n.t("ipUnknown"),

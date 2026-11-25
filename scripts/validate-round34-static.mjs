@@ -11,6 +11,9 @@ const notes = read("src/newtab/block-renderers-runtime.ts");
 const noteDraft = read("src/newtab/note-draft.ts");
 const storagePlan = read("src/newtab/storage-change-plan.ts");
 const integrations = read("src/newtab/block-renderers-integrations.ts");
+const staticWidgets = read("src/newtab/block-renderers-static.ts");
+const network = read("src/newtab/widget-network.ts");
+const google = read("src/lib/google-integration.ts");
 const editor = read("src/lib/block-settings-editor.ts");
 const options = read("src/options/options.ts");
 const packageJson = JSON.parse(read("package.json"));
@@ -51,6 +54,14 @@ assert.match(integrations, /latitude >= -90[\s\S]*latitude <= 90[\s\S]*longitude
   "Geocoded latitude and longitude must be range checked");
 assert.match(integrations, /const city = block\.config\.city\.trim\(\)/,
   "Weather labels must use the same normalized city value as geocoding mode detection");
+
+assert.match(integrations, /parseWeatherPayload\(await fetchWidgetJson\(url\.toString\(\)\)\)/);
+assert.match(staticWidgets, /parseIpPayload\(await fetchWidgetJson\(candidate\)\)/);
+assert.match(network, /signal: AbortSignal\.timeout\(timeoutMs\)/);
+assert.match(google, /signal: AbortSignal\.timeout\(30_000\)/);
+for (const renderer of [integrations, staticWidgets]) {
+  assert.match(renderer, /const requestCache = new WidgetRequestCache\(\)/);
+}
 
 assert.match(editor, /export function providerSelectionIndexAfterEdit/,
   "Search provider selection preservation must be independently testable");

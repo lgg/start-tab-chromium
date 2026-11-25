@@ -8,48 +8,21 @@ import { getStartPageRuntimeState } from "../lib/start-page-runtime.js";
 import type { BlockInstance } from "../lib/start-page-settings.js";
 import { actionButton, downloadJson, element, formatDuration } from "./block-renderer-common.js";
 import type { BlockRenderContext, UrlItem } from "./block-renderer-types.js";
+import { WidgetRequestCache } from "./widget-request-cache.js";
+import { parseWeatherPayload, validDateOnly, type WeatherDay, type WeatherResult } from "./provider-payloads.js";
+import { fetchWidgetJson } from "./widget-network.js";
 
-interface WeatherDay {
-  date: string;
-  min: number;
-  max: number;
-  code: number;
-}
-
-interface CacheEntry {
-  expiresAt: number;
-  promise: Promise<unknown>;
-}
-
-const requestCache = new Map<string, CacheEntry>();
-
-function cachedRequest<T>(key: string, ttlMs: number, loader: () => Promise<T>): Promise<T> {
-  const existing = requestCache.get(key);
-  if (existing && existing.expiresAt > Date.now()) return existing.promise as Promise<T>;
-  const promise = loader();
-  requestCache.set(key, { expiresAt: Date.now() + ttlMs, promise });
-  void promise.catch(() => {
-    if (requestCache.get(key)?.promise === promise) requestCache.delete(key);
-  });
-  return promise;
-}
+const requestCache = new WidgetRequestCache();
 
 function attached(node: Node): boolean {
   return node.isConnected;
 }
 
-interface WeatherResult {
-  currentTemperature: number | null;
-  currentCode: number | null;
-  unit: string;
-  days: WeatherDay[];
-}
-
 function calendarDate(value: string): Date | null {
-  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  const date = dateOnly
-    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]), 12)
-    : new Date(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return validDateOnly(value) ? new Date(value + "T12:00:00") : null;
+  }
+  const date = new Date(value);
   return Number.isFinite(date.getTime()) ? date : null;
 }
 
@@ -79,7 +52,7 @@ export function renderGoogleCalendar(
   }
   const query = block.config.query.trim();
   const cacheKey = `calendar:${JSON.stringify([block.config.calendarId, block.config.maxResults, query])}`;
-  void cachedRequest(cacheKey, 60_000, () => listCalendarEvents(block.config.calendarId, block.config.maxResults, query)).then((events) => {
+  void requestCache.get(cacheKey, 60_000, () => listCalendarEvents(block.config.calendarId, block.config.maxResults, query)).then((events) => {
     if (!attached(status)) return;
     const list = element("div", "calendar-list");
     if (block.config.accountLabel) list.append(element("p", "block-meta", block.config.accountLabel));
@@ -114,10 +87,8 @@ async function geocodeCity(endpoint: string, city: string): Promise<{ latitude: 
   url.searchParams.set("count", "1");
   url.searchParams.set("language", "en");
   url.searchParams.set("format", "json");
-  const response = await fetch(url.toString(), { cache: "no-store" });
-  if (!response.ok) throw new Error(`Geocoding returned ${response.status}`);
-  const payload = await response.json() as { results?: Array<{ latitude?: number; longitude?: number }> };
-  const first = payload.results?.[0];
+  const payload = await fetchWidgetJson(url.toString()) as { results?: Array<{ latitude?: number; longitude?: number }> } | null;
+  const first = Array.isArray(payload?.results) ? payload.results[0] : undefined;
   return validatedWeatherCoordinates(first?.latitude, first?.longitude);
 }
 
@@ -136,27 +107,7 @@ async function fetchWeather(block: Extract<BlockInstance, { type: "weather" }>):
   url.searchParams.set("current", "temperature_2m,weather_code");
   url.searchParams.set("daily", "weather_code,temperature_2m_max,temperature_2m_min");
   url.searchParams.set("timezone", "auto");
-  const response = await fetch(url.toString(), { cache: "no-store" });
-  if (!response.ok) throw new Error(`Weather provider returned ${response.status}`);
-  const payload = await response.json() as {
-    current?: { temperature_2m?: number; weather_code?: number };
-    current_units?: { temperature_2m?: string };
-    daily?: { time?: string[]; weather_code?: number[]; temperature_2m_max?: number[]; temperature_2m_min?: number[] };
-  };
-  const dates = payload.daily?.time ?? [];
-  return {
-    currentTemperature: typeof payload.current?.temperature_2m === "number" ? payload.current.temperature_2m : null,
-    currentCode: typeof payload.current?.weather_code === "number" ? payload.current.weather_code : null,
-    unit: payload.current_units?.temperature_2m ?? "°C",
-    days: dates.flatMap((date, index) => {
-      const min = payload.daily?.temperature_2m_min?.[index];
-      const max = payload.daily?.temperature_2m_max?.[index];
-      const code = payload.daily?.weather_code?.[index];
-      return typeof min === "number" && typeof max === "number" && typeof code === "number"
-        ? [{ date, min, max, code }]
-        : [];
-    }),
-  };
+  return parseWeatherPayload(await fetchWidgetJson(url.toString()));
 }
 
 export function weatherDaysForDisplay(weather: Pick<WeatherResult, "days">, displayMode: "day" | "week"): WeatherDay[] {
@@ -184,7 +135,7 @@ export function renderWeather(
   const status = element("p", "empty-state", context.i18n.t("weatherLoading"));
   container.append(status);
   const cacheKey = `weather:${JSON.stringify(block.config)}`;
-  void cachedRequest(cacheKey, 10 * 60_000, () => fetchWeather(block)).then((weather) => {
+  void requestCache.get(cacheKey, 10 * 60_000, () => fetchWeather(block)).then((weather) => {
     if (!attached(status)) return;
     const content = element("div", "weather");
     const city = block.config.city.trim();
@@ -266,7 +217,7 @@ export function renderRecent(
 ): void {
   const status = element("p", "empty-state", context.i18n.t("recentLoading"));
   container.append(status);
-  void cachedRequest(`recent:${block.config.maxResults}`, 30_000, () => recentHistory(block.config.maxResults)).then((items) => {
+  void requestCache.get(`recent:${block.config.maxResults}`, 30_000, () => recentHistory(block.config.maxResults)).then((items) => {
     if (attached(status)) status.replaceWith(urlList(items, context.i18n));
   }).catch(() => {
     if (attached(status)) status.textContent = context.i18n.t("recentUnavailable");
@@ -276,7 +227,7 @@ export function renderRecent(
 export function renderBrowserPinned(container: HTMLElement, context: BlockRenderContext): void {
   const status = element("p", "empty-state", context.i18n.t("browserPinnedLoading"));
   container.append(status);
-  void cachedRequest("browser-pinned", 15_000, browserPinnedTabs).then((items) => {
+  void requestCache.get("browser-pinned", 15_000, browserPinnedTabs).then((items) => {
     if (attached(status)) status.replaceWith(urlList(items, context.i18n));
   }).catch(() => {
     if (attached(status)) status.textContent = context.i18n.t("browserPinnedUnavailable");

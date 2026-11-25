@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { WidgetRequestCache } from "../src/newtab/widget-request-cache.js";
+import { parseIpPayload, parseWeatherPayload, validDateOnly } from "../src/newtab/provider-payloads.js";
+import { fetchWidgetJson } from "../src/newtab/widget-network.js";
 import { NoteDraft } from "../src/newtab/note-draft.js";
 import { providerSelectionIndexAfterEdit } from "../src/lib/block-settings-editor.js";
 import type { StartPageRuntimeState } from "../src/lib/start-page-runtime.js";
@@ -148,3 +151,61 @@ assert.equal(reverting.hasUnsaved, true, "Reverting while a save is pending stil
 reverting.succeed(intermediate);
 assert.deepEqual(reverting.beginSave(), { expectedValue: "intermediate", value: "original" });
 console.log("Round 58 page-lifetime note draft regressions passed");
+
+assert.deepEqual(parseIpPayload({ ip: " 203.0.113.10 ", country: " NL " }), { ip: "203.0.113.10", country: "NL" });
+assert.deepEqual(parseIpPayload({ query: "2001:db8::1" }), { ip: "2001:db8::1", country: "" });
+for (const ip of ["", "999.0.0.1", "example.com", "127.1", "abc:def", "2001:db8:::1", "1.2.3.4/path"]) {
+  assert.equal(parseIpPayload({ ip }), null, "Malformed provider IP must not suppress the fallback: " + ip);
+}
+assert.equal(parseIpPayload({ success: false, ip: "203.0.113.1" }), null);
+assert.equal(validDateOnly("2024-02-29"), true);
+assert.equal(validDateOnly("2025-02-29"), false);
+assert.equal(validDateOnly("2026-02-31"), false);
+assert.equal(validDateOnly("2026-11-25"), true);
+assert.equal(validDateOnly("not a date"), false);
+assert.throws(() => parseWeatherPayload({ current: { temperature_2m: Infinity } }), /no usable data/);
+assert.throws(() => parseWeatherPayload({ error: true }), /Invalid weather/);
+assert.deepEqual(parseWeatherPayload({
+  current: { temperature_2m: 7, weather_code: NaN },
+  current_units: { temperature_2m: 123 },
+  daily: { time: ["2026-11-25", "2026-02-31", "2026-11-26", "2026-11-27", "2026-11-25"],
+    temperature_2m_min: [1, 0, 10, 1, 0], temperature_2m_max: [8, 9, 5, 3, 5], weather_code: [3, 0, 0, 999, 1] },
+}), { currentTemperature: 7, currentCode: null, unit: "°C", days: [{ date: "2026-11-25", min: 1, max: 8, code: 3 }] });
+let clock = 0;
+const cache = new WidgetRequestCache(2, () => clock);
+let finish!: (value: number) => void;
+let loads = 0;
+const firstRequest = cache.get("first", 10, () => { loads++; return new Promise<number>((resolve) => { finish = resolve; }); });
+await Promise.resolve();
+clock = 100;
+assert.equal(cache.get("first", 10, async () => 99), firstRequest, "Pending loads must be shared even after the ordinary TTL");
+finish(1);
+assert.equal(await firstRequest, 1);
+clock = 109;
+assert.equal(await cache.get("first", 10, async () => 99), 1, "TTL begins when the response succeeds");
+clock = 110;
+assert.equal(await cache.get("first", 10, async () => 2), 2);
+assert.equal(loads, 1);
+await cache.get("second", 100, async () => 3);
+await cache.get("third", 100, async () => 4);
+assert.equal(await cache.get("first", 100, async () => 5), 5, "Old cache keys must be evicted at capacity");
+await assert.rejects(() => cache.get("bad", 100, async () => { throw new Error("offline"); }), /offline/);
+assert.equal(await cache.get("bad", 100, async () => 6), 6, "Rejected requests must be retryable");
+const realFetch = globalThis.fetch;
+try {
+  globalThis.fetch = async (_url, init) => {
+    assert.ok(init?.signal);
+    return Response.json({ ok: true });
+  };
+  assert.deepEqual(await fetchWidgetJson("https://example.com"), { ok: true });
+  globalThis.fetch = async (_url, init) => new Promise<Response>((_resolve, reject) => {
+    const signal = init?.signal;
+    assert.ok(signal);
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+  // AbortSignal.timeout uses an unref'ed timer in Node; keep the fixture alive.
+  const keepAlive = setTimeout(() => undefined, 100);
+  try { await assert.rejects(() => fetchWidgetJson("https://example.com", 5), /timeout/i); }
+  finally { clearTimeout(keepAlive); }
+} finally { globalThis.fetch = realFetch; }
+console.log("Round 60 provider payload, deadline and cache regressions passed");
