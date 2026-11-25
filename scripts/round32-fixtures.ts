@@ -163,3 +163,27 @@ assert.equal(await chromeSync.syncChromeSyncBackup(), "uploaded", "Empty reserve
 assert.equal(syncSetCalls, 1);
 assert.equal(syncStorage.unrelated, "keep");
 console.log("Round 96 incomplete remote frame protection regressions passed");
+
+const goodRemote107 = clone(syncStorage);
+const remoteMeta107 = goodRemote107.startTabSyncMeta as { contentUpdatedAt: number; chunks: number };
+localStorage.blockedSites = ["new-local-107.example"];
+localStorage.startTabDataRevision = { version: 1, updatedAt: remoteMeta107.contentUpdatedAt + 1000 };
+const newLocal107 = clone(localStorage);
+for (const damage107 of ["missing", "corrupt", "empty"]) {
+  syncStorage = clone(goodRemote107);
+  if (damage107 === "missing") delete syncStorage.startTabSyncChunk0;
+  else if (damage107 === "empty") syncStorage.startTabSyncChunk0 = "";
+  else syncStorage.startTabSyncChunk0 = String(syncStorage.startTabSyncChunk0) + "different";
+  const before107 = clone(syncStorage);
+  syncSetCalls = 0;
+  await assert.rejects(() => chromeSync.syncChromeSyncBackup(), /incomplete|checksum mismatch/);
+  assert.equal(syncSetCalls, 0, "A newer local revision cannot authorize overwriting an unverified differing remote frame");
+  assert.deepEqual(syncStorage, before107);
+  assert.deepEqual(localStorage, newLocal107);
+}
+syncStorage = clone(goodRemote107);
+syncSetCalls = 0;
+assert.equal(await chromeSync.syncChromeSyncBackup(), "uploaded", "A complete differing frame still permits the normal newer-local decision");
+assert.equal(syncSetCalls, 1);
+assert.equal(await chromeSync.syncChromeSyncBackup(), "unchanged");
+console.log("Round 107 differing remote frame verification regressions passed");
