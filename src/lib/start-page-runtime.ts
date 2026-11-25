@@ -857,6 +857,33 @@ export async function scheduleClockAlarm(instanceId: string, _clock: ClockRuntim
   });
 }
 
+/** A one-shot Chrome alarm is consumed before its handler runs. Re-arm only
+ * the still-current countdown after an early wake-up or failed transaction.
+ * Recheck under data-write so a later pause, reset or phase change wins. */
+export async function rearmClockAlarmIfPending(
+  instanceId: string,
+  token: string,
+  delayMs: number,
+): Promise<void> {
+  await withStorageLock("data-write", async () => {
+    const items = await chrome.storage.local.get([
+      START_PAGE_SETTINGS_KEY,
+      START_PAGE_RUNTIME_KEY,
+      LEGACY_INSTANCE_RUNTIME_KEY,
+    ]);
+    if (isFutureStartPageSchema(items[START_PAGE_SETTINGS_KEY])
+      || isFutureRuntimeSchema(items[START_PAGE_RUNTIME_KEY])) return;
+    const settings = normalizeStartPageSettings(items[START_PAGE_SETTINGS_KEY]);
+    const runtime = normalizeRuntimeState(items[START_PAGE_RUNTIME_KEY], settings, items[LEGACY_INSTANCE_RUNTIME_KEY]);
+    const clock = ownValue(runtime.clocks, instanceId);
+    if (!clock?.running || clock.type === "stopwatch" || clock.targetAt === null
+      || clock.completionToken !== token || clock.lastCompletedToken === token) return;
+    await chrome.alarms.create(clockAlarmName(instanceId, token), {
+      when: Math.max(clock.targetAt, Date.now() + Math.max(100, delayMs)),
+    });
+  });
+}
+
 export interface ClockCompletionResult {
   completed: boolean;
   block: Extract<BlockInstance, { type: ClockBlockType }> | null;

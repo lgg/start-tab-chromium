@@ -12,7 +12,9 @@ const [runtimeSource, serviceWorkerSource, round14Fixtures, newtabSource, recove
 ]);
 
 const alarmCreates = [...runtimeSource.matchAll(/chrome\.alarms\.create\(/g)];
-assert.equal(alarmCreates.length, 2, "Every low-level durable-alarm creation path must remain audited");
+assert.equal(alarmCreates.length, 3, "Every low-level durable-alarm creation path (snapshot restore, reconciliation, consumed-alarm retry) must remain audited");
+assert.match(runtimeSource, /export async function rearmClockAlarmIfPending[\s\S]*await chrome\.alarms\.create\(clockAlarmName\(instanceId, token\)/,
+  "Consumed-alarm retry must await creation of the exact active token");
 assert.equal(
   [...runtimeSource.matchAll(/await chrome\.alarms\.create\(/g)].length,
   alarmCreates.length,

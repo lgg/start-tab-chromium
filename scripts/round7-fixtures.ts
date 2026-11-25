@@ -10,6 +10,7 @@ const listeners = new Set<ChangeListener>();
 const messageListeners: MessageListener[] = [];
 interface AlarmState { name: string; scheduledTime: number; periodInMinutes?: number }
 const alarmState = new Map<string, AlarmState>();
+const alarmListeners: Array<(alarm: chrome.alarms.Alarm) => void> = [];
 function setAlarm(name: string, scheduledTime = Date.now() + 60_000, periodInMinutes?: number): void {
   alarmState.set(name, { name, scheduledTime, ...(typeof periodInMinutes === "number" ? { periodInMinutes } : {}) });
 }
@@ -97,7 +98,7 @@ const chromeMock = {
     onChanged: { addListener(listener: ChangeListener): void { listeners.add(listener); }, removeListener(listener: ChangeListener): void { listeners.delete(listener); } },
   },
   alarms: {
-    onAlarm: eventTarget(),
+    onAlarm: { addListener(listener: (alarm: chrome.alarms.Alarm) => void): void { alarmListeners.push(listener); } },
     async getAll(): Promise<AlarmState[]> { return structuredClone([...alarmState.values()]); },
     async clear(name: string): Promise<boolean> { return alarmState.delete(name); },
     create(name: string, info: chrome.alarms.AlarmCreateInfo): void {
@@ -718,3 +719,52 @@ const beforeStale90 = structuredClone(localState);
 await assert.rejects(() => i18nApi.setLocalePreference("auto", displayedLocale90), /language changed/);
 assert.deepEqual(localState, beforeStale90, "A stale popup locale write cannot overwrite a later Options change");
 console.log("Round 90 committed blocklist and stale popup locale regressions passed");
+
+const initial98 = await runtimeApi.getStartPageViewSnapshot();
+const settings98 = settingsApi.cloneSettings(initial98.settings);
+const timer98 = settingsApi.createBlockInstance("timer", { id: "round98-timer" });
+settings98.layout.blocks.push(timer98);
+await settingsApi.setStartPageSettings(settings98);
+await workerMessage({ type: "clock-action", instanceId: timer98.id, action: "start" });
+const running98 = await runtimeApi.getStartPageViewSnapshot();
+const token98 = running98.runtime.clocks[timer98.id]!.completionToken!;
+assert.ok(token98);
+const alarm98 = runtimeApi.clockAlarmName(timer98.id, token98);
+assert.equal(alarmListeners.length, 1);
+const drain98 = async (): Promise<void> => {
+  assert.deepEqual(await workerMessage({ type: "complete-clock", instanceId: timer98.id, token: "stale-round98-token" }), { ok: true });
+};
+function deliver98(name: string): void {
+  const alarm = alarmState.get(name);
+  assert.ok(alarm, "Chrome must have an alarm to deliver");
+  alarmState.delete(name); // Chrome consumes the one-shot alarm first.
+  alarmListeners[0]!(alarm);
+}
+const early98 = running98.runtime.clocks[timer98.id]!.targetAt!;
+assert.ok(early98 > Date.now() + 1000);
+deliver98(alarm98);
+await drain98();
+assert.equal(alarmState.get(alarm98)?.scheduledTime, early98, "An early alarm must be rearmed for the active countdown");
+const expired98 = await runtimeApi.getStartPageViewSnapshot();
+const expiredRuntime98 = structuredClone(expired98.runtime);
+const current98 = expiredRuntime98.clocks[timer98.id]!;
+current98.targetAt = Date.now() - 1_000;
+current98.startedAt = current98.targetAt - current98.durationMs;
+await runtimeApi.setStartPageRuntimeState(expiredRuntime98);
+const beforeRetry98 = structuredClone(localState);
+failSetAfterApplyForKey = "startPageRuntimeState";
+const firedAt98 = Date.now();
+deliver98(alarm98);
+await drain98();
+assert.deepEqual(localState, beforeRetry98, "Failed alarm completion must preserve the active token and all local data");
+assert.ok((alarmState.get(alarm98)?.scheduledTime ?? 0) >= firedAt98 + 30_000, "Consumed alarm must retry after a failed storage transaction");
+deliver98(alarm98);
+await drain98();
+const completed98 = (await runtimeApi.getStartPageViewSnapshot()).runtime.clocks[timer98.id]!;
+assert.equal(completed98.running, false);
+assert.equal(completed98.lastCompletedToken, token98);
+assert.equal(alarmState.has(alarm98), false, "Successful completion must not rearm the consumed token");
+alarmListeners[0]!({ name: alarm98, scheduledTime: Date.now() });
+await drain98();
+assert.equal(alarmState.has(alarm98), false, "A duplicate stale alarm must not resurrect a completed countdown");
+console.log("Round 98 consumed clock alarm retry regressions passed");
