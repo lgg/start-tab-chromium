@@ -79,7 +79,7 @@ const clearOptions = read("src/options/options.ts");
 assert.match(clearMessages, /case "clear":[\s\S]*Array\.isArray\(value\.expectedSites\)/);
 assert.match(clearWorker, /case "clear": await clearAll\(message\.expectedSites\)/);
 assert.match(blocklist, /runMutation\(\(\) => applyBlocklistMutation\(\(current\) => \{[\s\S]*!storedSitesEqual\(current\.sites, expected\)/);
-assert.match(clearPopup, /const expectedSites = await getBlockedSites\(\);[\s\S]*clearBlocklistConfirm[\s\S]*sendAction\(\{ type: "clear", expectedSites \}\)/);
+assert.match(clearPopup, /const expectedSites = await getBlockedSites\(\);[\s\S]*clearBlocklistConfirm[\s\S]*settlePopupAction\(\s*\(\) => sendMessage\(\{ type: "clear", expectedSites \}\)/);
 assert.match(clearOptions, /const expectedSites = \[\.\.\.blockedSites\];[\s\S]*clearBlocklistConfirm[\s\S]*clearAll\(expectedSites\)/);
 
 assert.match(google, /const MAX_GOOGLE_METADATA_BYTES = 4 \* 1024 \* 1024/);

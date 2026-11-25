@@ -109,5 +109,11 @@
   },
   "clockCompletedNotificationFailed": {
     "message": "The clock completed, but its notification could not be delivered."
+  },
+  "popupBlocklistSavedRefreshFailed": {
+    "message": "Blocklist cleared, but the popup could not refresh. Reopen the popup before another blocklist action."
+  },
+  "popupBlocklistRefreshRequired": {
+    "message": "Could not refresh the blocklist. Reopen the popup before another blocklist action."
   }
 }

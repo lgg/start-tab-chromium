@@ -271,3 +271,19 @@ assert.equal(await registry103.lookup(104, host103), "https://example.com/unavai
 await registry103.forget(104);
 assert.equal(await registry103.lookup(104, host103), null);
 console.log("Round 103 session storage degradation regressions passed");
+
+const { settlePopupAction } = await import("../src/popup/action-recovery.js");
+const mutationError112 = new Error("worker rejected stale blocklist");
+const refreshError112 = new Error("refresh failed");
+let writes112 = 0;
+let reads112 = 0;
+assert.deepEqual(await settlePopupAction(async () => { writes112++; }, async () => { reads112++; throw refreshError112; }),
+  { committed: true, refreshError: refreshError112 });
+assert.equal(writes112, 1, "A committed clear must not be repeated because a view read failed");
+assert.deepEqual(await settlePopupAction(async () => { throw mutationError112; }, async () => { reads112++; }),
+  { committed: false, error: mutationError112 });
+assert.deepEqual(await settlePopupAction(async () => { throw mutationError112; }, async () => { reads112++; throw refreshError112; }),
+  { committed: false, error: mutationError112, refreshError: refreshError112 });
+assert.equal(reads112, 3, "Failed and committed actions both refresh canonical state");
+assert.deepEqual(await settlePopupAction(async () => { writes112++; }, async () => { reads112++; }), { committed: true });
+console.log("Round 112 popup acknowledged mutation recovery regressions passed");

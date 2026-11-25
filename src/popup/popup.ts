@@ -11,6 +11,7 @@ import {
   type LocalePreference,
 } from "../lib/i18n.js";
 import { sendMessage, type Message } from "../lib/messages.js";
+import { settlePopupAction } from "./action-recovery.js";
 import { mayReloadPopupTarget, readStablePopupTarget, samePopupTarget, type PopupTarget } from "./popup-target.js";
 
 const titleEl = document.getElementById("title") as HTMLHeadingElement;
@@ -29,6 +30,7 @@ let localePreference: LocalePreference = "auto";
 let actionPending = true;
 let initialized = false;
 let localeNeedsRefresh = false;
+let blocklistNeedsRefresh = false;
 let renderGeneration = 0;
 
 async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {
@@ -60,8 +62,8 @@ function showError(error?: unknown): void {
 
 function setActionPending(pending: boolean): void {
   actionPending = pending || !initialized;
-  primaryEl.disabled = actionPending;
-  clearEl.disabled = actionPending;
+  primaryEl.disabled = actionPending || blocklistNeedsRefresh;
+  clearEl.disabled = actionPending || blocklistNeedsRefresh;
   languageEl.disabled = actionPending || localeNeedsRefresh;
   document.body.setAttribute("aria-busy", String(pending));
 }
@@ -78,14 +80,13 @@ async function reloadTabIfPossible(target: PopupTarget): Promise<void> {
 
 async function sendAction(message: Message): Promise<boolean> {
   try {
-    const ack = await sendMessage(message);
-    if (ack.ok) return true;
-    showError(ack.error);
-  } catch {
-    // The service worker can restart while the popup is open.
-    showError();
+    await sendMessage(message);
+    return true;
+  } catch (error) {
+    // Preserve the worker's real failure, including stale-action conflicts.
+    showError(error);
+    return false;
   }
-  return false;
 }
 
 function applyStaticText(): void {
@@ -119,12 +120,12 @@ async function render(): Promise<void> {
   siteEl.hidden = false;
 
   show(primaryEl, i18n.t(target.blockedHost ? "removeFromBlocklist" : "blockThisSite"));
-  primaryEl.disabled = actionPending;
+  primaryEl.disabled = actionPending || blocklistNeedsRefresh;
   primaryEl.onclick = () => void mutateDisplayedTarget(target).catch(showError);
 }
 
 async function mutateDisplayedTarget(expected: PopupTarget): Promise<void> {
-  if (actionPending) return;
+  if (actionPending || blocklistNeedsRefresh) return;
   setActionPending(true);
   try {
     const current = await getActiveTarget();
@@ -145,12 +146,26 @@ async function mutateDisplayedTarget(expected: PopupTarget): Promise<void> {
 }
 
 async function clearBlocklist(): Promise<void> {
-  if (actionPending) return;
+  if (actionPending || blocklistNeedsRefresh) return;
   setActionPending(true);
   try {
     const expectedSites = await getBlockedSites();
     if (!window.confirm(i18n.t("clearBlocklistConfirm"))) return;
-    if (await sendAction({ type: "clear", expectedSites })) await render();
+    const result = await settlePopupAction(
+      () => sendMessage({ type: "clear", expectedSites }),
+      render,
+    );
+    if ("refreshError" in result) {
+      blocklistNeedsRefresh = true;
+      hide(primaryEl);
+      show(noteEl, [
+        i18n.t(result.committed ? "popupBlocklistSavedRefreshFailed" : "popupBlocklistRefreshRequired"),
+        ...(!result.committed ? [errorText(result.error)] : []),
+        errorText(result.refreshError),
+      ].join(" · "));
+    } else if (!result.committed) {
+      showError(result.error);
+    }
   } catch (error) {
     showError(error);
   } finally {
