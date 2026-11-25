@@ -271,3 +271,35 @@ assert.equal(await registry103.lookup(104, host103), "https://example.com/unavai
 await registry103.forget(104);
 assert.equal(await registry103.lookup(104, host103), null);
 console.log("Round 103 session storage degradation regressions passed");
+
+const { readBlockedDestinationForSender } = await import("../src/lib/blocked-navigation.js");
+const page113 = "chrome-extension://starttab/blocked.html";
+const url113 = page113 + "?site=example.com";
+const sender113 = { url: url113, frameId: 0, documentLifecycle: "active", tab: { id: 113 } };
+let tab113: { id: number; url: string; pendingUrl?: string } = { id: 113, url: url113 };
+let lookups113 = 0;
+const read113 = async () => ({ ...tab113 });
+const lookup113 = async (id: number, host: string) => {
+  assert.equal(id, 113); assert.equal(host, "example.com"); lookups113++;
+  return "https://example.com/private";
+};
+assert.equal(await readBlockedDestinationForSender(sender113, page113, "example.com", read113, lookup113), "https://example.com/private");
+for (const stale113 of [
+  { ...sender113, frameId: 1 },
+  { ...sender113, frameId: undefined },
+  { ...sender113, documentLifecycle: "cached" },
+  { ...sender113, tab: {} },
+  { ...sender113, url: page113 + "?site=other.example" },
+  { ...sender113, url: url113 + "&site=other.example" },
+  { ...sender113, url: "https://example.com/blocked.html?site=example.com" },
+]) assert.equal(await readBlockedDestinationForSender(stale113, page113, "example.com", read113, lookup113), null);
+assert.equal(lookups113, 1, "Unrelated documents and subframes cannot access registry entries");
+tab113 = { id: 113, url: url113, pendingUrl: "https://other.example/" };
+assert.equal(await readBlockedDestinationForSender(sender113, page113, "example.com", read113, lookup113), null);
+tab113 = { id: 113, url: url113 };
+assert.equal(await readBlockedDestinationForSender(sender113, page113, "example.com", read113, async () => {
+  tab113 = { id: 113, url: page113 + "?site=other.example" };
+  return "https://example.com/private";
+}), null, "A navigation during the registry read must not leak its result");
+assert.equal(await readBlockedDestinationForSender(sender113, page113, "example.com", async () => { throw new Error("tab gone"); }, lookup113), null);
+console.log("Round 113 blocked destination sender regressions passed");

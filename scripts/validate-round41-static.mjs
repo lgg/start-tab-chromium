@@ -103,3 +103,8 @@ const registry103 = read("src/lib/blocked-navigation.ts");
 assert.match(registry103, /await this\.persist\(tabId, null\);\s*const host = await resolveHost\(url\)/);
 assert.match(registry103, /this\.unsaved\.has\(tabId\)/);
 assert.match(registry103, /await this\.storage\(\)\.set\(\{ \[key\]: null \}\)/);
+
+assert.match(worker, /case "blocked-original-url": \{[\s\S]*await readBlockedDestinationForSender\(/);
+assert.match(registry103, /sender\.frameId !== 0/);
+assert.match(registry103, /sites\.length === 1 && sites\[0\] === host/);
+assert.match(registry103, /if \(!await isCurrent\(\)\) return null;\s*const destination = await lookup\(id, host\);\s*return destination && await isCurrent\(\) \? destination : null/);

@@ -30,7 +30,7 @@ import { changedTabNavigationUrl, currentTabNavigationUrl, NewTabRedirectGuard }
 import { assertRuntimeMutationTarget } from "./lib/runtime-mutation-target.js";
 import { isMessage, type Ack, type ClockAction, type Message } from "./lib/messages.js";
 import { consumeNativeNewTabBypass, openNativeNewTab } from "./lib/native-new-tab.js";
-import { BlockedNavigationRegistry, isBlockedPageNavigation } from "./lib/blocked-navigation.js";
+import { BlockedNavigationRegistry, isBlockedPageNavigation, readBlockedDestinationForSender } from "./lib/blocked-navigation.js";
 import {
   completeClockInstance,
   defaultClockForBlock,
@@ -211,8 +211,11 @@ async function handle(message: Message, sender: chrome.runtime.MessageSender): P
     )); break;
     case "blocked-original-url": {
       // Only the actual blocked page can retrieve its own tab's destination.
-      if (!sender.url || !isBlockedPageNavigation(sender.url, blockedPageUrl())) return {};
-      const blockedUrl = await blockedNavigations.lookup(sender.tab?.id, message.host);
+      const blockedUrl = await readBlockedDestinationForSender(
+        sender, blockedPageUrl(), message.host,
+        (id) => chrome.tabs.get(id),
+        (id, host) => blockedNavigations.lookup(id, host),
+      );
       return blockedUrl ? { blockedUrl } : {};
     }
     case "record-unblock": await runStatsJob(() => recordUnblockAfterCountdown(message.host)); break;
