@@ -12,7 +12,7 @@ import { blockTitleKey, blockUsesDefaultTitle, type BlockInstance, type LocalTas
 import { actionButton, element, formatDuration } from "./block-renderer-common.js";
 import type { BlockRenderContext } from "./block-renderer-types.js";
 import { ClockRequestGate } from "./clock-request-gate.js";
-import { TaskFormSessions } from "./task-submission-gate.js";
+import { TaskFormSessions, type TaskFormSession } from "./task-submission-gate.js";
 import { NoteDraft } from "./note-draft.js";
 
 const clockRequests = new ClockRequestGate();
@@ -261,43 +261,48 @@ function cloneTasks(tasks: readonly LocalTask[]): LocalTask[] {
 async function saveTasks(
   block: Extract<BlockInstance, { type: "localTasks" }>,
   context: BlockRenderContext,
+  submissions: TaskFormSession,
   nextTasks: LocalTask[],
+  expectedTasks: LocalTask[],
 ): Promise<void> {
-  const expectedTasks = cloneTasks(ownValue(context.runtime.tasks, block.id) ?? []);
-  context.runtime.tasks[block.id] = cloneTasks(nextTasks);
-  await context.setRuntime({
+  const revision = await context.setRuntime({
     kind: "tasks",
     instanceId: block.id,
     tasks: cloneTasks(nextTasks),
-    expectedTasks,
+    expectedTasks: cloneTasks(expectedTasks),
   });
+  if (revision !== undefined) {
+    submissions.committed.observe(nextTasks, revision);
+  } else {
+    const { runtime } = await getStartPageViewSnapshot();
+    submissions.committed.observe(ownValue(runtime.tasks, block.id) ?? [], runtime.updatedAt);
+  }
 }
 
 function taskRow(
-  block: Extract<BlockInstance, { type: "localTasks" }>,
   task: LocalTask,
   context: BlockRenderContext,
-  redraw: () => void,
+  pending: boolean,
+  mutate: (change: (tasks: LocalTask[]) => LocalTask[]) => void,
 ): HTMLElement {
   const row = element("div", "task");
   const checkbox = element("input", "task__check");
   checkbox.type = "checkbox";
   checkbox.checked = task.done;
+  checkbox.disabled = pending;
   checkbox.setAttribute("aria-label", context.i18n.t("toggleTask", { title: task.title }));
   const title = element("span", task.done ? "task__title task__title--done" : "task__title", task.title);
-  const remove = actionButton("×", async () => {
-    const nextTasks = (ownValue(context.runtime.tasks, block.id) ?? []).filter((candidate) => candidate.id !== task.id);
-    await saveTasks(block, context, nextTasks);
-    redraw();
-  }, "icon-button");
+  const remove = actionButton("×", () => {
+    mutate((tasks) => tasks.filter((candidate) => candidate.id !== task.id));
+  }, "icon-button", context.reportError);
+  remove.disabled = pending;
   remove.title = context.i18n.t("removeTask");
   remove.setAttribute("aria-label", context.i18n.t("removeTask"));
   checkbox.addEventListener("change", () => {
-    const now = Date.now();
-    const nextTasks = (ownValue(context.runtime.tasks, block.id) ?? []).map((candidate) => candidate.id === task.id
-      ? { ...candidate, done: checkbox.checked, updatedAt: now }
-      : { ...candidate });
-    void saveTasks(block, context, nextTasks).then(redraw).catch(() => undefined);
+    const done = checkbox.checked;
+    mutate((tasks) => tasks.map((candidate) => candidate.id === task.id
+      ? { ...candidate, done, updatedAt: Math.max(Date.now(), candidate.updatedAt) }
+      : candidate));
   });
   row.append(checkbox, title, remove);
   return row;
@@ -317,17 +322,33 @@ export function renderLocalTasks(
   add.type = "submit";
   const list = element("div", "task-list");
   const submissions = taskForms.get(block.id);
+  submissions.committed.observe(ownValue(context.runtime.tasks, block.id) ?? [], context.runtime.updatedAt);
   input.dataset.widgetDraft = `task:${block.id}`;
   input.value = submissions.draft;
-  input.addEventListener("input", () => { submissions.draft = input.value; });
+  input.addEventListener("input", () => {
+    if (submissions.view === redraw) submissions.draft = input.value;
+  });
+  const settle = (): void => {
+    submissions.finish();
+    submissions.view?.();
+    context.requestRender();
+  };
+  const mutate = (change: (tasks: LocalTask[]) => LocalTask[]): void => {
+    if (submissions.view !== redraw || !submissions.begin()) return;
+    const current = submissions.committed.get([]);
+    const next = change(cloneTasks(current));
+    redraw();
+    void saveTasks(block, context, submissions, next, current)
+      .catch(context.reportError).finally(settle);
+  };
   const redraw = (): void => {
     if (input.value !== submissions.draft) input.value = submissions.draft;
-    const allTasks = ownValue(context.runtime.tasks, block.id) ?? [];
+    const allTasks = submissions.committed.get([]);
     const atCapacity = allTasks.length >= MAX_LOCAL_TASKS_PER_INSTANCE;
     input.disabled = atCapacity;
     add.disabled = atCapacity || submissions.pending;
     const tasks = allTasks.filter((task) => block.config.showCompleted || !task.done);
-    list.replaceChildren(...tasks.map((task) => taskRow(block, task, context, redraw)));
+    list.replaceChildren(...tasks.map((task) => taskRow(task, context, submissions.pending, mutate)));
     if (tasks.length === 0) list.append(element("p", "empty-state", context.i18n.t("emptyList")));
   };
   submissions.view = redraw;
@@ -337,17 +358,16 @@ export function renderLocalTasks(
   form.append(input, add);
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    const currentTasks = ownValue(context.runtime.tasks, block.id) ?? [];
+    if (submissions.view !== redraw) return;
+    const currentTasks = submissions.committed.get([]);
     if (currentTasks.length >= MAX_LOCAL_TASKS_PER_INSTANCE) {
       redraw();
       return;
     }
-    if (submissions.view !== redraw) return;
     const submittedDraft = input.value;
     submissions.draft = submittedDraft;
     const title = submittedDraft.trim().slice(0, MAX_LOCAL_TASK_TITLE_LENGTH);
     if (!title || !submissions.begin()) return;
-    add.disabled = true;
     const now = Date.now();
     const task: LocalTask = {
       id: globalThis.crypto?.randomUUID?.() ?? `task-${now.toString(36)}-${Math.random().toString(36).slice(2)}`,
@@ -356,15 +376,12 @@ export function renderLocalTasks(
       createdAt: now,
       updatedAt: now,
     };
-    const nextTasks = [...currentTasks.map((item) => ({ ...item })), task];
-    void saveTasks(block, context, nextTasks).then(() => {
+    const nextTasks = [...currentTasks, task];
+    redraw();
+    void saveTasks(block, context, submissions, nextTasks, currentTasks).then(() => {
       submissions.acknowledge(submittedDraft);
-    }).catch(() => undefined).finally(() => {
-      submissions.finish();
-      submissions.view?.();
-      // A renderer may have been rebuilt with an earlier runtime snapshot
-      // before the worker committed. Refresh the canonical list as well.
-      context.requestRender();
+    }).catch(context.reportError).finally(() => {
+      settle();
     });
   });
   container.append(form, list);

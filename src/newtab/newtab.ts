@@ -26,7 +26,7 @@ import {
 } from "../lib/start-page-settings.js";
 import { renderBlockContent, type BlockRenderContext } from "./block-renderers.js";
 import { hasUnsavedNoteDrafts, pruneTaskForms } from "./block-renderers-runtime.js";
-import { pruneSearchDrafts } from "./block-renderers-static.js";
+import { pruneSearchDrafts, pruneLinkPages } from "./block-renderers-static.js";
 import { LayoutEditor } from "./layout-editor.js";
 import { RenderScheduler } from "./render-scheduler.js";
 import { recoverRuntimeMutation } from "./runtime-mutation-recovery.js";
@@ -248,6 +248,7 @@ function render(): void {
   if (!editor.isActive) {
     pruneTaskForms(new Set(settings.layout.blocks.filter((block) => block.type === "localTasks").map((block) => block.id)));
     pruneSearchDrafts(new Set(settings.layout.blocks.filter((block) => block.type === "search").map((block) => block.id)));
+    pruneLinkPages(new Set(settings.layout.blocks.filter((block) => block.type === "links" || block.type === "startPinned").map((block) => block.id)));
   }
   const blocks = visibleBlocks(settings);
   applyTheme(getTheme(settings), background);
@@ -268,21 +269,19 @@ function render(): void {
               expectedValue: mutation.expectedValue,
             })).runtimeUpdatedAt;
           case "tasks":
-            await sendMessage({
+            return (await sendMessage({
               type: "runtime-tasks",
               instanceId: mutation.instanceId,
               tasks: mutation.tasks,
               expectedTasks: mutation.expectedTasks,
-            });
-            break;
+            })).runtimeUpdatedAt;
           case "linkPage":
-            await sendMessage({
+            return (await sendMessage({
               type: "runtime-link-page",
               instanceId: mutation.instanceId,
               page: mutation.page,
               expectedPage: mutation.expectedPage,
-            });
-            break;
+            })).runtimeUpdatedAt;
         }
       };
       const next = runtimeMutationJob.catch(() => undefined).then(operation);
