@@ -26,7 +26,7 @@ import { jsonContentEqual } from "./lib/json-content.js";
 import { MAX_NOTE_LENGTH } from "./lib/platform-limits.js";
 import { runIndependentEffects } from "./lib/independent-effects.js";
 import { containsSplitViewMarker } from "./lib/split-view-markers.js";
-import { changedTabNavigationUrl } from "./lib/tab-navigation-change.js";
+import { changedTabNavigationUrl, currentTabNavigationUrl, NewTabRedirectGuard } from "./lib/tab-navigation-change.js";
 import { assertRuntimeMutationTarget } from "./lib/runtime-mutation-target.js";
 import { isMessage, type Ack, type ClockAction, type Message } from "./lib/messages.js";
 import { consumeNativeNewTabBypass, openNativeNewTab } from "./lib/native-new-tab.js";
@@ -83,6 +83,20 @@ let runtimeJob: Promise<void> = Promise.resolve();
 let statsJob: Promise<void> = Promise.resolve();
 let nativeTabJob: Promise<void> = Promise.resolve();
 
+const newTabRedirectGuard = new NewTabRedirectGuard({
+  isEligible: (url) => !isStartTabUrl(url) && isBrowserNewTabUrl(url) && !isNativeSplitViewPickerUrl(url),
+  getTab: (tabId) => chrome.tabs.get(tabId),
+  shouldBypass: shouldBypassNativeNewTab,
+  isEnabled: shouldRedirectBrowserNewTabs,
+  redirect: async (tabId) => {
+    try {
+      await chrome.tabs.update(tabId, { url: chrome.runtime.getURL(START_TAB_PAGE) });
+    } catch {
+      // Some Chromium-derived browsers do not expose their internal new tab page.
+    }
+  },
+});
+
 function ignoreBackgroundError(): void {
   // Event listeners cannot surface async failures to callers in MV3.
 }
@@ -112,14 +126,16 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 chrome.tabs.onCreated.addListener((tab) => {
-  void redirectBrowserNewTab(tab.id, tab.url ?? tab.pendingUrl).catch(ignoreBackgroundError);
+  void newTabRedirectGuard.observe(tab.id, currentTabNavigationUrl(tab)).catch(ignoreBackgroundError);
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   const url = changedTabNavigationUrl(changeInfo);
   if (!url) return;
-  void redirectBrowserNewTab(tabId, url).catch(ignoreBackgroundError);
+  void newTabRedirectGuard.observe(tabId, url).catch(ignoreBackgroundError);
 });
+
+chrome.tabs.onRemoved.addListener((tabId) => newTabRedirectGuard.cancel(tabId));
 
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
   if (details.frameId !== 0 || !details.url) return;
@@ -310,19 +326,6 @@ async function reconcileClockAlarms(): Promise<void> {
   await reconcileStoredClockAlarms();
 }
 
-async function redirectBrowserNewTab(tabId: number | undefined, url: string | undefined): Promise<void> {
-  if (tabId === undefined || !url) return;
-  if (isStartTabUrl(url) || !isBrowserNewTabUrl(url)) return;
-  if (isNativeSplitViewPickerUrl(url)) return;
-  if (await shouldBypassNativeNewTab(tabId)) return;
-  if (!await shouldRedirectBrowserNewTabs()) return;
-  try {
-    await chrome.tabs.update(tabId, { url: chrome.runtime.getURL(START_TAB_PAGE) });
-  } catch {
-    // Some Chromium-derived browsers do not expose their internal new tab page.
-  }
-}
-
 async function shouldRedirectBrowserNewTabs(): Promise<boolean> {
   const manifest = chrome.runtime.getManifest();
   if (manifest.chrome_url_overrides?.newtab !== START_TAB_PAGE) return false;
@@ -368,9 +371,18 @@ async function rememberIfBlocked(url: string): Promise<void> {
 }
 
 async function migrateAndSyncRules(): Promise<void> {
-  await migrateLegacyStorage();
-  const settings = await getStartPageSettings();
-  await getStartPageRuntimeState(settings);
-  await reconcileClockAlarms();
-  await syncRules();
+  // Settings migration and alarms are independent of DNR reconciliation.
+  // A damaged layout must not prevent startup repair of the site blocker,
+  // and a blocker migration error must not prevent clock recovery.
+  await runIndependentEffects([
+    async () => {
+      const settings = await getStartPageSettings();
+      await getStartPageRuntimeState(settings);
+    },
+    reconcileClockAlarms,
+    async () => {
+      await migrateLegacyStorage();
+      await syncRules();
+    },
+  ], "Start Tab startup reconciliation was incomplete");
 }
