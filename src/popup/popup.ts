@@ -5,7 +5,6 @@
 
 import { blockedSiteForUrl, getBlockedSites, hostFromUrl } from "../lib/blocklist.js";
 import {
-  getLocalePreference,
   loadI18n,
   setLocalePreference,
   type I18n,
@@ -28,6 +27,8 @@ const languageRussianEl = document.getElementById("languageRussian") as HTMLOpti
 let i18n: I18n;
 let localePreference: LocalePreference = "auto";
 let actionPending = true;
+let initialized = false;
+let localeNeedsRefresh = false;
 let renderGeneration = 0;
 
 async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {
@@ -62,10 +63,10 @@ function showError(error?: unknown): void {
 }
 
 function setActionPending(pending: boolean): void {
-  actionPending = pending;
-  primaryEl.disabled = pending;
-  clearEl.disabled = pending;
-  languageEl.disabled = pending;
+  actionPending = pending || !initialized;
+  primaryEl.disabled = actionPending;
+  clearEl.disabled = actionPending;
+  languageEl.disabled = actionPending || localeNeedsRefresh;
   document.body.setAttribute("aria-busy", String(pending));
 }
 
@@ -159,19 +160,44 @@ async function clearBlocklist(): Promise<void> {
   }
 }
 
+async function refreshPopupLanguage(): Promise<void> {
+  const loaded = await loadI18n();
+  i18n = loaded;
+  localePreference = loaded.preference;
+  languageEl.value = localePreference;
+  applyStaticText();
+}
+
 async function changeLanguage(): Promise<void> {
-  if (actionPending) return;
+  if (actionPending || localeNeedsRefresh) return;
   const requested = languageEl.value as LocalePreference;
   setActionPending(true);
+  let saved = false;
   try {
-    await setLocalePreference(requested);
+    await setLocalePreference(requested, localePreference);
+    saved = true;
     localePreference = requested;
-    i18n = await loadI18n();
-    applyStaticText();
+    await refreshPopupLanguage();
     await render();
   } catch (error) {
-    languageEl.value = localePreference;
-    showError(error);
+    if (!saved) {
+      // A concurrent Options/Popup edit may have won the CAS. Re-read the
+      // committed language and keep the rejected action visible.
+      try {
+        await refreshPopupLanguage();
+        await render();
+        showError(error);
+      } catch (refreshError) {
+        localeNeedsRefresh = true;
+        languageEl.value = localePreference;
+        showError(i18n.t("popupLanguageRefreshRequired") + " · " + errorText(error) + " · " + errorText(refreshError));
+      }
+    } else {
+      // A catalog/view read failure cannot undo a committed locale write.
+      localeNeedsRefresh = true;
+      languageEl.value = localePreference;
+      showError(i18n.t("popupLanguageSavedRefreshFailed") + " · " + errorText(error));
+    }
   } finally {
     setActionPending(false);
   }
@@ -188,11 +214,9 @@ languageEl.addEventListener("change", () => {
 
 async function init(): Promise<void> {
   setActionPending(true);
-  i18n = await loadI18n();
-  localePreference = await getLocalePreference();
-  languageEl.value = localePreference;
-  applyStaticText();
+  await refreshPopupLanguage();
   await render();
+  initialized = true;
   setActionPending(false);
 }
 

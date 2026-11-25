@@ -80,3 +80,16 @@ for (const phrase of ["267 tracked files", "native-new-tab", "generation", "popu
 }
 
 console.log("Round 41 static validation passed");
+
+const blocklist90 = read("src/lib/blocklist.ts");
+assert.match(blocklist90, /export async function getBlockedSites[\s\S]*return withStorageLock\("data-write", readBlockedSites\)/);
+assert.match(blocklist90, /export async function getLastBlockedUrl[\s\S]*return withStorageLock\("data-write", async \(\) =>/);
+assert.match(popup, /await setLocalePreference\(requested, localePreference\)/);
+assert.match(popup, /localePreference = loaded\.preference;\s*languageEl\.value = localePreference/);
+assert.match(popup, /actionPending = pending \|\| !initialized/);
+assert.match(popup, /languageEl\.disabled = actionPending \|\| localeNeedsRefresh/);
+assert.match(popup, /popupLanguageSavedRefreshFailed/);
+for (const catalog of [en, ru]) {
+  assert.ok(catalog.popupLanguageSavedRefreshFailed?.message);
+  assert.ok(catalog.popupLanguageRefreshRequired?.message);
+}

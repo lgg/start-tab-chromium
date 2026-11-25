@@ -100,5 +100,11 @@
   },
   "runtimeSavedRefreshFailed": {
     "message": "Change saved, but the latest widget state could not be loaded. The page will refresh; do not repeat the action."
+  },
+  "popupLanguageRefreshRequired": {
+    "message": "Could not refresh the saved language. Reopen the popup before changing it again."
+  },
+  "popupLanguageSavedRefreshFailed": {
+    "message": "Language saved, but the popup could not refresh. Reopen the popup."
   }
 }

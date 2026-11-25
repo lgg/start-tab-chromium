@@ -170,7 +170,9 @@ async function writeCanonicalLastBlockedUrls(urls: Record<string, string>): Prom
 
 export async function getBlockedSites(): Promise<string[]> {
   await migrateLegacyStorage();
-  return readBlockedSites();
+  // A blocklist mutation publishes storage before DNR and its revision.
+  // UI readers must wait for that entire transaction to commit or roll back.
+  return withStorageLock("data-write", readBlockedSites);
 }
 
 async function readBlockedSites(): Promise<string[]> {
@@ -265,8 +267,10 @@ export async function rememberBlockedNavigation(url: string): Promise<string | n
 export async function getLastBlockedUrl(host: string): Promise<string | null> {
   const normalized = normalizeStoredHost(host);
   if (!normalized) return null;
-  const urls = await getLastBlockedUrls();
-  return ownValue(urls, normalized) ?? null;
+  return withStorageLock("data-write", async () => {
+    const urls = await getLastBlockedUrls();
+    return ownValue(urls, normalized) ?? null;
+  });
 }
 
 export async function clearLastBlockedUrl(host: string): Promise<void> {
