@@ -187,3 +187,37 @@ assert.equal(await chromeSync.syncChromeSyncBackup(), "uploaded", "A complete di
 assert.equal(syncSetCalls, 1);
 assert.equal(await chromeSync.syncChromeSyncBackup(), "unchanged");
 console.log("Round 107 differing remote frame verification regressions passed");
+
+const normalFrame109 = clone(syncStorage);
+const normalMeta109 = normalFrame109.startTabSyncMeta as Record<string, unknown>;
+for (const incompatible109 of [
+  { ...normalMeta109, version: 4 },
+  { ...normalMeta109, backupVersion: 5 },
+  { ...normalMeta109, contentUpdatedAt: Number.MAX_SAFE_INTEGER },
+]) {
+  syncStorage = clone(normalFrame109);
+  syncSetCalls = 0;
+  let fullRead109 = false;
+  beforeSyncRead96 = (keys) => {
+    if (keys === null) fullRead109 = true;
+    else if (fullRead109 && keys === "startTabSyncMeta") syncStorage.startTabSyncMeta = clone(incompatible109);
+  };
+  try {
+    await assert.rejects(() => chromeSync.uploadChromeSyncBackup(), /newer extension version|invalid data revision/);
+    assert.equal(fullRead109, true);
+    assert.equal(syncSetCalls, 0, "Explicit Upload must recheck compatibility just before overwriting a remote frame");
+    assert.deepEqual(syncStorage.startTabSyncMeta, incompatible109);
+  } finally { beforeSyncRead96 = null; }
+}
+const beforeRestore109 = clone(localStorage);
+syncStorage = { startTabSyncChunk0: normalFrame109.startTabSyncChunk0 };
+await assert.rejects(() => chromeSync.restoreChromeSyncBackup(), /metadata or chunks are incomplete/);
+syncStorage = { startTabSyncMeta: { ...normalMeta109, checksum: "broken" } };
+await assert.rejects(() => chromeSync.restoreChromeSyncBackup(), /metadata or chunks are incomplete/);
+syncStorage = { startTabSyncChunk0: "" };
+await assert.rejects(() => chromeSync.restoreChromeSyncBackup(), /No Start Tab backup found/);
+assert.deepEqual(localStorage, beforeRestore109, "Unusable remote backup must not touch local data or recovery state");
+syncStorage = clone(normalFrame109);
+await chromeSync.restoreChromeSyncBackup();
+assert.equal(await chromeSync.syncChromeSyncBackup(), "unchanged");
+console.log("Round 109 explicit sync compatibility and restore diagnostics regressions passed");

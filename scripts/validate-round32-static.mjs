@@ -59,3 +59,6 @@ assert.match(chromeSync, /if \(expectedRemote === null\) \{[\s\S]*const current 
 
 assert.match(chromeSync, /await readVerifiedRemoteBundle\(remote\);\s*const local = await readLocalMeta\(\);/,
   "Smart Sync must verify differing remote content before choosing upload or restore");
+
+assert.match(chromeSync, /else \{\s*\/\/ Explicit Upload[\s\S]*await readRemoteMeta\(\);\s*\}\s*await chrome\.storage\.sync\.set\(payload\)/);
+assert.match(chromeSync, /async function restoreChromeSyncBackupInTransaction[\s\S]*assertEmptyRemoteFrame\(current\);\s*throw new Error\("No Start Tab backup found/);
