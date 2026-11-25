@@ -269,3 +269,37 @@ const nextSnapshot91 = await runtimeApi.getStartPageViewSnapshot();
 assert.equal(nextSnapshot91.localePreference, nextLocale91);
 assert.equal(nextSnapshot91.settings.layout.showBlockTitles, committed91.layout.showBlockTitles);
 console.log("Round 91 coherent layout and locale snapshot regressions passed");
+
+const committed94 = await settingsApi.getStartPageSettings();
+const report94 = await settingsApi.getStartPageMigrationReport();
+const exact94 = structuredClone(localState);
+let entered94!: () => void;
+let release94!: () => void;
+const ready94 = new Promise<void>((resolve) => { entered94 = resolve; });
+const held94 = withStorageLock("data-write", async () => {
+  const provisional94 = settingsApi.cloneSettings(committed94);
+  provisional94.startTab.enabled = !committed94.startTab.enabled;
+  provisional94.updatedAt += 100;
+  localState.startPageSettings = provisional94;
+  localState.startPageMigrationReport = { fromVersion: 1, toVersion: 4, migratedBlocks: 99, skippedBlocks: 0, issues: [] };
+  entered94();
+  await new Promise<void>((resolve) => { release94 = resolve; });
+  for (const key of ["startPageSettings", "startPageMigrationReport"]) {
+    if (Object.hasOwn(exact94, key)) localState[key] = structuredClone(exact94[key]);
+    else delete localState[key];
+  }
+});
+await ready94;
+let settingsRead94 = false;
+let reportRead94 = false;
+const settings94 = settingsApi.getStartPageSettings().then((value) => { settingsRead94 = true; return value; });
+const migration94 = settingsApi.getStartPageMigrationReport().then((value) => { reportRead94 = true; return value; });
+await new Promise<void>((resolve) => setTimeout(resolve, 0));
+const pending94 = [settingsRead94, reportRead94];
+release94();
+await held94;
+assert.deepEqual(pending94, [false, false], "Normalized settings and migration report readers must wait for rollback");
+assert.deepEqual(await settings94, committed94);
+assert.deepEqual(await migration94, report94);
+assert.deepEqual(localState, exact94, "A committed normalized read must not mutate the storage revision");
+console.log("Round 94 committed settings and migration report regressions passed");

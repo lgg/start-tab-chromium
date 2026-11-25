@@ -599,3 +599,44 @@ await chromeSync.restoreChromeSyncBackup();
 assert.deepEqual(localStorage.blockedSites, ["remote-atomic.example"]);
 assert.deepEqual(localStorage.startTabLocalSyncMeta, syncStorage.startTabSyncMeta);
 console.log("Round 70 atomic recovery and sync-baseline regressions passed");
+
+const calendarEvent95 = { id: "event95", summary: "Target meeting", start: { dateTime: "2027-01-01T10:00:00Z" }, end: { dateTime: "2027-01-01T11:00:00Z" } };
+let page95 = 0;
+try {
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    assert.equal(url.searchParams.get("q"), "Target");
+    page95++;
+    if (page95 === 1) {
+      assert.equal(url.searchParams.has("pageToken"), false);
+      return Response.json({ items: [{ ...calendarEvent95, id: "other", summary: "Other meeting" }], nextPageToken: "next" });
+    }
+    assert.equal(url.searchParams.get("pageToken"), "next");
+    return Response.json({ items: [calendarEvent95] });
+  };
+  assert.deepEqual((await google.listCalendarEvents("primary", 2, "Target")).map((event) => event.id), ["event95"]);
+  assert.equal(page95, 2, "An exhausted valid listing may return fewer than the display limit");
+
+  page95 = 0;
+  globalThis.fetch = async () => { page95++; return Response.json({ items: [calendarEvent95], nextPageToken: "repeated" }); };
+  await assert.rejects(() => google.listCalendarEvents("primary", 2), /did not advance/);
+  assert.equal(page95, 2, "A repeated token must not publish a partial calendar result");
+
+  globalThis.fetch = async () => Response.json({ items: [], nextPageToken: 123 });
+  await assert.rejects(() => google.listCalendarEvents(), /did not advance/);
+
+  page95 = 0;
+  globalThis.fetch = async () => Response.json({ items: [], nextPageToken: "page-" + (++page95) });
+  await assert.rejects(() => google.listCalendarEvents(), /safe pagination limit/);
+  assert.equal(page95, 20);
+
+  page95 = 0;
+  globalThis.fetch = async () => { page95++; return Response.json({ items: [calendarEvent95], nextPageToken: "more" }); };
+  assert.equal((await google.listCalendarEvents("primary", 1)).length, 1);
+  assert.equal(page95, 1, "A filled widget does not need to exhaust pagination");
+  globalThis.fetch = async () => Response.json({ items: [] });
+  assert.deepEqual(await google.listCalendarEvents(), [], "A genuinely empty calendar remains valid");
+} finally {
+  globalThis.fetch = originalFetch;
+}
+console.log("Round 95 complete calendar pagination regressions passed");
