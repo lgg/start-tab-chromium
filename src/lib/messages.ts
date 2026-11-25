@@ -8,7 +8,7 @@ import {
   MAX_NOTE_LENGTH,
   MAX_START_PAGE_BLOCKS,
 } from "./platform-limits.js";
-import type { LocalTask } from "./start-page-types.js";
+import type { LocalTask, StartPageSettings } from "./start-page-types.js";
 import { isLocalePreference, type LocaleChange } from "./i18n.js";
 
 export type ClockAction = "toggle" | "reset";
@@ -31,7 +31,7 @@ export type Message =
   | { type: "record-unblock"; host: string }
   | { type: "reset-stats" };
 
-export interface Ack { ok: boolean; error?: string; changed?: boolean; runtimeUpdatedAt?: number }
+export interface Ack { ok: boolean; error?: string; changed?: boolean; runtimeUpdatedAt?: number; savedSettings?: StartPageSettings }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;

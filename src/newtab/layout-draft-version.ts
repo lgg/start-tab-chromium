@@ -1,6 +1,15 @@
 import { MAX_FREE_GEOMETRY } from "../lib/platform-limits.js";
 import { blockDescriptor } from "../lib/start-page-defaults.js";
-import type { BlockInstance } from "../lib/start-page-types.js";
+import type { BlockInstance, StartPageSettings } from "../lib/start-page-types.js";
+import { jsonContentEqual } from "../lib/json-content.js";
+
+export function chooseAcknowledgedSettings(observed: StartPageSettings, acknowledged?: StartPageSettings): StartPageSettings {
+  return acknowledged && acknowledged.updatedAt >= observed.updatedAt ? acknowledged : observed;
+}
+
+export function pointerDraftChanged(original: BlockInstance, current: BlockInstance | undefined): boolean {
+  return !current || !jsonContentEqual(original, current);
+}
 
 export function clampFreeGeometry(block: BlockInstance): BlockInstance {
   const descriptor = blockDescriptor(block.type);
