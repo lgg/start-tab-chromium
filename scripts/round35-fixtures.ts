@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { GeneralFormDraft } from "../src/options/general-form-draft.js";
 import { ClockRequestGate } from "../src/newtab/clock-request-gate.js";
 import { TaskSubmissionGate } from "../src/newtab/task-submission-gate.js";
 import { remainingCountdownSeconds } from "../src/blocked/countdown.js";
@@ -118,3 +119,17 @@ submissions.finish();
 assert.equal(submissions.begin(), true, "A finished or failed submit must permit retry");
 submissions.finish();
 console.log("Round 57 task submission regressions passed");
+
+const general = new GeneralFormDraft("original");
+let confirmations = 0;
+assert.equal(general.mayReplace("original", () => { confirmations++; return false; }), true);
+assert.equal(confirmations, 0, "Unchanged form does not require a discard prompt");
+assert.equal(general.isDirty("draft"), true);
+assert.equal(general.mayReplace("draft", () => { confirmations++; return false; }), false);
+assert.equal(general.isDirty("draft"), true, "Declining another action retains the pending form");
+assert.equal(general.mayReplace("draft", () => { confirmations++; return true; }), true);
+assert.equal(general.isDirty("draft"), true, "Confirmation alone cannot acknowledge a failed write");
+general.acknowledge("draft");
+assert.equal(general.isDirty("draft"), false);
+assert.equal(general.isDirty("next edit"), true);
+console.log("Round 62 options form draft regressions passed");

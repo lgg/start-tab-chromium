@@ -49,7 +49,8 @@ import {
   createBlockInstanceDraft,
   canAddBlock,
   cloneSettings,
-  createCustomTheme,
+  createCustomThemeDraft,
+  saveNewCustomTheme,
   deleteCustomTheme,
   duplicateBlockInstance,
   duplicateTheme,
@@ -78,6 +79,7 @@ import {
 } from "../lib/start-page-settings.js";
 import { editTheme } from "../lib/theme-editor.js";
 import { OptionsActionGuard } from "./action-guard.js";
+import { GeneralFormDraft } from "./general-form-draft.js";
 import { restoreDeferredSectionAnchor } from "./deferred-section.js";
 
 function requireElement<T extends HTMLElement>(id: string): T {
@@ -159,6 +161,7 @@ async function readJsonFile(file: File): Promise<unknown> {
 }
 
 function readNumber(input: HTMLInputElement, fallback: number): number {
+  if (!input.value.trim()) return fallback;
   const parsed = Number(input.value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
@@ -189,6 +192,13 @@ let blockedSites: string[];
 let rendering = false;
 let renderGeneration = 0;
 const actionGuard = new OptionsActionGuard();
+let generalDraft: { state: GeneralFormDraft; signature: () => string; root: HTMLElement } | null = null;
+
+window.addEventListener("beforeunload", (event) => {
+  if (!generalDraft?.state.isDirty(generalDraft.signature())) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
 
 function setStatus(message: string, error = false): void {
   status.textContent = message;
@@ -220,7 +230,12 @@ function actionFailureText(error: unknown): string {
 async function runAction<T>(
   action: () => Promise<T>,
   successMessage: string | ((result: T) => string),
+  savingGeneral = false,
 ): Promise<void> {
+  if (actionGuard.pending) return;
+  if (!savingGeneral && generalDraft && !generalDraft.state.mayReplace(
+    generalDraft.signature(), () => window.confirm(i18n.t("discardChangesConfirm")),
+  )) return;
   if (!actionGuard.tryStart()) return;
   setActionBusy(true);
   setStatus(i18n.t("working"));
@@ -233,7 +248,9 @@ async function runAction<T>(
     let failure: unknown = error;
     try {
       await reloadState();
-      render();
+      // Preserve the failed general form and its original CAS baseline.
+      // A user can explicitly discard it to load the refreshed state.
+      render(savingGeneral);
     } catch (refreshError) {
       failure = new AggregateError([error, refreshError], "The action failed and Options could not reload the latest state");
     }
@@ -293,6 +310,9 @@ function renderNavigation(sectionItems: Array<{ id: string; label: string }>): v
 function renderGeneral(): HTMLElement {
   const item = section("general", i18n.t("sectionGeneral"), i18n.t("sectionGeneralDescription"));
   const form = element("form", "option-form");
+  const baseSettings = cloneSettings(settings);
+  const baseRuntimeUpdatedAt = runtime.updatedAt;
+  const baseLocale = localePreference;
   const startTabEnabled = checkbox(settings.startTab.enabled);
   startTabEnabled.disabled = !startTabPageAvailable;
   const locale = select<LocalePreference>(localePreference, [
@@ -359,15 +379,33 @@ function renderGeneral(): HTMLElement {
   );
   const save = button(i18n.t("saveGeneralSettings"), "button button--primary");
   save.type = "submit";
-  form.append(actionRow(save));
+  const discard = button(i18n.t("cancel"), "button button--secondary");
+  const signature = (): string => JSON.stringify([
+    startTabEnabled.checked, locale.value, buttonVisibility.value, hoverArea.value,
+    mode.value, zone.value, columns.value, rowHeight.value, gap.value,
+    containedMaxWidth.value, showTitles.checked, preset.value, defaultMinutes.value, dedupeSeconds.value,
+  ]);
+  const draftState = new GeneralFormDraft(signature());
+  generalDraft = { state: draftState, signature, root: item.root };
+  const updateDiscard = (): void => { discard.disabled = !draftState.isDirty(signature()); };
+  form.addEventListener("input", updateDiscard);
+  form.addEventListener("change", updateDiscard);
+  discard.addEventListener("click", () => {
+    if (actionGuard.pending || !draftState.mayReplace(signature(), () => window.confirm(i18n.t("discardChangesConfirm")))) return;
+    // Fetch current state before abandoning the old baseline. If the read
+    // fails, the existing controls and unsaved values remain intact.
+    void runAction(async () => undefined, "", true);
+  });
+  updateDiscard();
+  form.append(actionRow(discard, save));
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     if (!form.reportValidity()) return;
-    let next = cloneSettings(settings);
-    if (preset.value !== "custom" && !layoutMatchesPreset(settings, preset.value as LayoutPresetId)) {
+    let next = cloneSettings(baseSettings);
+    if (preset.value !== "custom" && !layoutMatchesPreset(baseSettings, preset.value as LayoutPresetId)) {
       next = settingsWithLayoutPreset(next, preset.value as LayoutPresetId);
     }
-    next.startTab.enabled = startTabPageAvailable ? startTabEnabled.checked : settings.startTab.enabled;
+    next.startTab.enabled = startTabPageAvailable ? startTabEnabled.checked : baseSettings.startTab.enabled;
     next.settingsButton.visibility = buttonVisibility.value as typeof next.settingsButton.visibility;
     next.settingsButton.hoverArea = hoverArea.value as typeof next.settingsButton.hoverArea;
     next.layout.mode = mode.value as LayoutMode;
@@ -385,36 +423,28 @@ function renderGeneral(): HTMLElement {
     next.focusStats.defaultMinutesPerAvoidedVisit = readNumber(defaultMinutes, next.focusStats.defaultMinutesPerAvoidedVisit);
     next.focusStats.avoidedVisitDedupeSeconds = readNumber(dedupeSeconds, next.focusStats.avoidedVisitDedupeSeconds);
 
-    const removesUserData = layoutReplacementRemovesUserData(settings, next, runtime);
+    const removesUserData = layoutReplacementRemovesUserData(baseSettings, next, runtime);
     if (removesUserData && !window.confirm(i18n.t("applyPresetWithDataConfirm"))) return;
 
     void runAction(async () => {
-      const localeChanged = locale.value !== localePreference;
-      const settingsChanged = !jsonContentEqual(next, settings);
-      let settingsPersisted = false;
-      try {
-        if (settingsChanged) {
-          await sendMessage({
-            type: "replace-start-page-settings",
-            settings: next,
-            expectedSettingsUpdatedAt: settings.updatedAt,
-            expectedRuntimeUpdatedAt: runtime.updatedAt,
-          });
-          settingsPersisted = true;
-        }
-        if (localeChanged) {
-          await setLocalePreference(locale.value as LocalePreference);
-          localePreference = locale.value as LocalePreference;
-          location.reload();
-        }
-      } catch (error) {
-        if (settingsPersisted) {
-          await reloadState();
-          render();
-        }
-        throw error;
+      const localeChanged = locale.value !== baseLocale;
+      const settingsChanged = !jsonContentEqual(next, baseSettings);
+      if (settingsChanged) {
+        await sendMessage({
+          type: "replace-start-page-settings",
+          settings: next,
+          expectedSettingsUpdatedAt: baseSettings.updatedAt,
+          expectedRuntimeUpdatedAt: baseRuntimeUpdatedAt,
+        });
       }
-    }, i18n.t("settingsSaved"));
+      if (localeChanged) {
+        await setLocalePreference(locale.value as LocalePreference);
+        localePreference = locale.value as LocalePreference;
+        draftState.acknowledge(signature());
+        location.reload();
+      }
+      draftState.acknowledge(signature());
+    }, i18n.t("settingsSaved"), true);
   });
   item.body.append(form);
   return item.root;
@@ -555,10 +585,10 @@ function renderThemes(): HTMLElement {
   const create = button(i18n.t("createTheme"), "button button--primary");
   create.disabled = themeCapacityReached;
   create.addEventListener("click", () => runUiTask(async () => {
-    const created = await createCustomTheme(i18n.t("newCustomTheme"), settings.themes.selectedThemeId);
+    const created = createCustomThemeDraft(settings, i18n.t("newCustomTheme"), settings.themes.selectedThemeId);
     const edited = await editTheme(created, i18n);
     if (!edited) return;
-    await runAction(async () => { await updateCustomTheme(edited); }, i18n.t("themeUpdated"));
+    await runAction(() => saveNewCustomTheme(edited), i18n.t("themeUpdated"));
   }));
   const importButton = button(i18n.t("importTheme"), "button button--secondary");
   importButton.disabled = themeCapacityReached;
@@ -688,15 +718,22 @@ async function renderStatistics(): Promise<HTMLElement> {
 }
 
 async function reloadState(): Promise<void> {
-  settings = await getStartPageSettings();
-  runtime = await getStartPageRuntimeState(settings);
-  localePreference = await getLocalePreference();
-  blockedSites = await getBlockedSites();
+  const nextSettings = await getStartPageSettings();
+  const nextRuntime = await getStartPageRuntimeState(nextSettings);
+  const nextLocale = await getLocalePreference();
+  const nextSites = await getBlockedSites();
+  // A failed read must not leave half the UI using a new baseline while
+  // the remaining controls still belong to the previous snapshot.
+  settings = nextSettings;
+  runtime = nextRuntime;
+  localePreference = nextLocale;
+  blockedSites = nextSites;
 }
 
-function render(): void {
+function render(preserveGeneral = false): void {
   if (rendering) return;
   rendering = true;
+  try {
   const generation = ++renderGeneration;
   renderHeader();
   const navigationItems = [
@@ -708,7 +745,8 @@ function render(): void {
     { id: "statistics", label: i18n.t("sectionStatistics") },
   ];
   renderNavigation(navigationItems);
-  const placeholders = [renderGeneral(), renderBlocks(), renderThemes(), renderBackup(), renderBlocker()];
+  const general = preserveGeneral && generalDraft ? generalDraft.root : renderGeneral();
+  const placeholders = [general, renderBlocks(), renderThemes(), renderBackup(), renderBlocker()];
   sections.replaceChildren(...placeholders);
   void renderStatistics().then((statistics) => {
     if (generation !== renderGeneration) return;
@@ -722,7 +760,9 @@ function render(): void {
     restoreDeferredSectionAnchor(failed.root);
     reportUiError(error);
   });
-  rendering = false;
+  } finally {
+    rendering = false;
+  }
 }
 
 backupImportInput.addEventListener("change", () => {
