@@ -71,3 +71,59 @@ assert.equal(pointerDraftChanged(gesture81, structuredClone(gesture81)), false);
 assert.equal(pointerDraftChanged(gesture81, { ...gesture81, free: { ...gesture81.free, x: gesture81.free.x + 20 } }), true);
 assert.equal(pointerDraftChanged(gesture81, undefined), true);
 console.log("Round 81 acknowledgement and no-op gesture regressions passed");
+
+const { RenderScheduler } = await import("../src/newtab/render-scheduler.js");
+const frames86: Array<() => void> = [];
+const errors86: unknown[] = [];
+let renders86 = 0;
+let refreshes86 = 0;
+let failRefresh86 = true;
+let failRender86 = false;
+const scheduler86 = new RenderScheduler({
+  requestFrame: (callback) => frames86.push(callback),
+  refresh: async () => {
+    refreshes86++;
+    if (failRefresh86) throw new Error("refresh failure");
+    return false;
+  },
+  render: () => {
+    renders86++;
+    if (failRender86) throw new Error("render failure");
+  },
+  onError: (error) => errors86.push(error),
+});
+const flush86 = async () => {
+  assert.ok(frames86.length > 0);
+  frames86.shift()!();
+  await scheduler86.waitForIdle();
+};
+scheduler86.queueRefresh(false);
+await flush86();
+assert.equal(renders86, 0, "A failed conditional storage refresh must not rebuild the page");
+assert.equal(errors86.length, 1);
+scheduler86.queueRefresh(false);
+scheduler86.queueRender();
+assert.equal(frames86.length, 1, "A later explicit render upgrades the queued frame");
+await flush86();
+assert.equal(renders86, 1, "The explicit UI change must render even if refresh fails");
+assert.equal(errors86.length, 2, "Fallback rendering does not hide the storage error");
+failRender86 = true;
+scheduler86.queueRefresh();
+await flush86();
+assert.ok(errors86[2] instanceof AggregateError);
+assert.equal((errors86[2] as AggregateError).errors.length, 2);
+failRender86 = false;
+failRefresh86 = false;
+scheduler86.queueRefresh(false);
+await flush86();
+assert.equal(renders86, 2, "A successful unchanged snapshot remains conditional");
+scheduler86.queueRender();
+await flush86();
+assert.equal(renders86, 3, "A failed refresh or render cannot poison later scheduler work");
+assert.equal(refreshes86, 4);
+scheduler86.queueRefresh();
+scheduler86.dispose();
+await flush86();
+assert.equal(renders86, 3);
+assert.equal(refreshes86, 4);
+console.log("Round 86 refresh failure and fallback render regressions passed");

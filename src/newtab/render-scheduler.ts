@@ -55,7 +55,21 @@ export class RenderScheduler {
     this.renderRequested = false;
     const operation = async (): Promise<void> => {
       if (this.disposed) return;
-      const changed = refresh ? await this.options.refresh() : false;
+      let changed: void | boolean = false;
+      try {
+        if (refresh) changed = await this.options.refresh();
+      } catch (error) {
+        // Explicit UI changes (e.g. settling a draft or dismissing a recovery
+        // row) must still render from the last committed snapshot when a
+        // storage refresh fails. A storage-only hint must not force a render.
+        if (forceRender && !this.disposed) {
+          try { this.options.render(); }
+          catch (renderError) {
+            throw new AggregateError([error, renderError], "Start Tab refresh and fallback render failed");
+          }
+        }
+        throw error;
+      }
       if (!this.disposed && (forceRender || changed !== false)) this.options.render();
     };
     const next = this.job.catch(() => undefined).then(operation);
