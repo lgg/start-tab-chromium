@@ -1,6 +1,7 @@
 import { exportBackupSnapshot, importBackup, type BackupBundle } from "./backup.js";
 import { withStorageLock } from "./storage-lock.js";
 import { assertStartTabDataRevisionUnchanged } from "./data-revision.js";
+import { validCalendarDateTime, validDateOnly } from "./date-validation.js";
 
 const GOOGLE_CALENDAR_EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/{calendarId}/events";
 const GOOGLE_DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files";
@@ -24,6 +25,7 @@ export interface GoogleCalendarEvent {
 interface CalendarEventPayload {
   id?: string;
   summary?: string;
+  status?: string;
   start?: { dateTime?: string; date?: string };
   end?: { dateTime?: string; date?: string };
 }
@@ -102,15 +104,21 @@ function normalizedCalendarMaxResults(maxResults: number): number {
   return Math.min(MAX_CALENDAR_RESULTS, Math.max(MIN_CALENDAR_RESULTS, Math.round(maxResults)));
 }
 
-function calendarEvent(payload: CalendarEventPayload): GoogleCalendarEvent {
-  return {
-    id: typeof payload.id === "string" && payload.id ? payload.id : crypto.randomUUID(),
+function calendarEvent(payload: CalendarEventPayload): GoogleCalendarEvent | null {
+  if (payload.status === "cancelled" || typeof payload.id !== "string" || !payload.id.trim()) return null;
+  const event: GoogleCalendarEvent = {
+    id: payload.id,
     title: payload.summary?.trim() ?? "",
     start: typeof payload.start?.dateTime === "string" ? payload.start.dateTime : typeof payload.start?.date === "string" ? payload.start.date : "",
     end: typeof payload.end?.dateTime === "string" ? payload.end.dateTime : typeof payload.end?.date === "string" ? payload.end.date : "",
     allDay: Boolean(typeof payload.start?.date === "string" && payload.start.date
       && !(typeof payload.start.dateTime === "string" && payload.start.dateTime)),
   };
+  if (event.allDay) {
+    if (!validDateOnly(event.start) || !validDateOnly(event.end) || event.end <= event.start) return null;
+  } else if (!validCalendarDateTime(event.start) || !validCalendarDateTime(event.end)
+    || Date.parse(event.end) < Date.parse(event.start)) return null;
+  return event;
 }
 
 /**
@@ -127,6 +135,7 @@ export async function listCalendarEvents(
   const normalizedQuery = query.trim();
   const titleQuery = normalizedQuery.toLocaleLowerCase();
   const events: GoogleCalendarEvent[] = [];
+  const seenEventIds = new Set<string>();
   const timeMin = new Date().toISOString();
   const seenPageTokens = new Set<string>();
   let pageToken = "";
@@ -150,7 +159,11 @@ export async function listCalendarEvents(
       if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
       if (candidate.summary !== undefined && typeof candidate.summary !== "string") continue;
       const event = calendarEvent(candidate);
-      if (!titleQuery || event.title.toLocaleLowerCase().includes(titleQuery)) events.push(event);
+      if (!event || seenEventIds.has(event.id)) continue;
+      if (!titleQuery || event.title.toLocaleLowerCase().includes(titleQuery)) {
+        seenEventIds.add(event.id);
+        events.push(event);
+      }
       if (events.length >= limit) break;
     }
     pagesRead += 1;

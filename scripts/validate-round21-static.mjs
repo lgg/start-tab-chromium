@@ -53,3 +53,8 @@ assert.match(options, /runAction\(syncChromeSyncBackup, \(result\) => i18n\.t/,
   "Smart Sync must display uploaded/restored/unchanged instead of overwriting it with a generic status");
 
 console.log("Round 21 static validation passed");
+
+assert.match(google, /const seenEventIds = new Set<string>\(\)/);
+assert.match(google, /if \(!event \|\| seenEventIds\.has\(event\.id\)\) continue/);
+assert.match(google, /validCalendarDateTime\(event\.start\)/);
+assert.match(google, /validDateOnly\(event\.start\)/);
