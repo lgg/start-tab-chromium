@@ -474,3 +474,40 @@ assert.ok((localState[revisionApi.DATA_REVISION_KEY] as { updatedAt: number }).u
 assert.equal((await settingsApi.getStartPageSettings()).schemaVersion, settingsApi.START_PAGE_SCHEMA_VERSION);
 
 console.log("Round 7 fixtures passed");
+
+const resetWallClock68 = Date.now;
+try {
+  const resetBaseline68 = await settingsApi.getStartPageSettings();
+  const defaultNote68 = resetBaseline68.layout.blocks.find((block) => block.type === "note");
+  assert.ok(defaultNote68);
+  const high68 = resetBaseline68.updatedAt + 10_000;
+  const oldSettings68 = settingsApi.cloneSettings(resetBaseline68);
+  const oldNote68 = oldSettings68.layout.blocks.find((block) => block.id === defaultNote68.id)!;
+  oldNote68.updatedAt = high68 + 20;
+  localState.startPageSettings = oldSettings68;
+  const oldRuntime68 = runtimeApi.normalizeRuntimeState({
+    version: 2, updatedAt: high68, notes: { [oldNote68.id]: "old note" },
+  }, oldSettings68);
+  localState.startPageRuntimeState = structuredClone(oldRuntime68);
+  Date.now = () => 5000;
+  const projected68 = settingsApi.cloneSettings(oldSettings68);
+  projected68.layout.blocks = projected68.layout.blocks.filter((block) => block.id !== oldNote68.id);
+  const runtimeBeforeProjection68 = structuredClone(localState);
+  const view68 = await runtimeApi.getStartPageRuntimeState(projected68);
+  assert.equal(view68.notes[oldNote68.id], undefined, "Draft runtime view excludes removed widgets");
+  assert.deepEqual(localState, runtimeBeforeProjection68, "A draft projection must not persist or prune canonical runtime data");
+  await runtimeApi.resetStartPageRuntimeState();
+  await assert.rejects(() => runtimeApi.setStartPageRuntimeState(oldRuntime68), /changed in another extension context/,
+    "A reset runtime must not accept a stale nonzero snapshot before lazy initialization");
+  const freshRuntime68 = await runtimeApi.getStartPageRuntimeState();
+  assert.ok(freshRuntime68.updatedAt > oldRuntime68.updatedAt, "Lazy runtime creation after reset must advance beyond the reset revision floor");
+  assert.equal(freshRuntime68.notes[oldNote68.id], undefined);
+  const resetSettings68 = await runtimeApi.resetStartPageData();
+  assert.ok(resetSettings68.updatedAt > oldNote68.updatedAt, "Full reset must advance past old block revisions, not only root time");
+  const freshNote68 = resetSettings68.layout.blocks.find((block) => block.id === oldNote68.id);
+  assert.ok(freshNote68 && freshNote68.updatedAt > oldNote68.updatedAt);
+  await assert.rejects(() => settingsApi.updateBlockInstance(oldNote68.id, (block) => ({ ...block, title: "stale edit" }), oldNote68.updatedAt), /changed in another extension context/);
+} finally {
+  Date.now = resetWallClock68;
+}
+console.log("Round 68 reset revision and draft projection regressions passed");
