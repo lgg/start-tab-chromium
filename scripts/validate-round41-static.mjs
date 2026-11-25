@@ -103,3 +103,11 @@ const registry103 = read("src/lib/blocked-navigation.ts");
 assert.match(registry103, /await this\.persist\(tabId, null\);\s*const host = await resolveHost\(url\)/);
 assert.match(registry103, /this\.unsaved\.has\(tabId\)/);
 assert.match(registry103, /await this\.storage\(\)\.set\(\{ \[key\]: null \}\)/);
+
+assert.match(popup, /async function sendAction[\s\S]*catch \(error\) \{[\s\S]*showError\(error\)/);
+assert.match(popup, /const result = await settlePopupAction\([\s\S]*"refreshError" in result[\s\S]*blocklistNeedsRefresh = true/);
+assert.match(popup, /clearEl\.disabled = actionPending \|\| blocklistNeedsRefresh/);
+for (const catalog of [en, ru]) {
+  assert.ok(catalog.popupBlocklistSavedRefreshFailed?.message);
+  assert.ok(catalog.popupBlocklistRefreshRequired?.message);
+}
