@@ -297,7 +297,7 @@ function render(): void {
     settings,
     runtime,
     setRuntime: async (mutation) => {
-      const operation = async (): Promise<number | undefined> => {
+      const operation = async () => {
         switch (mutation.kind) {
           case "note":
             return (await sendMessage({
@@ -305,21 +305,21 @@ function render(): void {
               instanceId: mutation.instanceId,
               value: mutation.value,
               expectedValue: mutation.expectedValue,
-            })).runtimeUpdatedAt;
+            }));
           case "tasks":
             return (await sendMessage({
               type: "runtime-tasks",
               instanceId: mutation.instanceId,
               tasks: mutation.tasks,
               expectedTasks: mutation.expectedTasks,
-            })).runtimeUpdatedAt;
+            }));
           case "linkPage":
             return (await sendMessage({
               type: "runtime-link-page",
               instanceId: mutation.instanceId,
               page: mutation.page,
               expectedPage: mutation.expectedPage,
-            })).runtimeUpdatedAt;
+            }));
         }
       };
       const next = runtimeMutationJob.catch(() => undefined).then(operation);

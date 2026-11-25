@@ -165,12 +165,12 @@ export function renderNote(
   context: BlockRenderContext,
 ): void {
   const canonicalValue = ownValue(context.runtime.notes, block.id) ?? "";
-  const save = (value: string, expectedValue: string): Promise<number | undefined> => context.setRuntime({
+  const save = async (value: string, expectedValue: string): Promise<number | undefined> => (await context.setRuntime({
     kind: "note",
     instanceId: block.id,
     value,
     expectedValue,
-  });
+  })).runtimeUpdatedAt;
   const session: NoteSession = noteSessions.get(block.id) ?? {
     draft: new NoteDraft(canonicalValue, context.runtime.updatedAt),
     timer: undefined,
@@ -333,14 +333,14 @@ async function saveTasks(
   nextTasks: LocalTask[],
   expectedTasks: LocalTask[],
 ): Promise<void> {
-  const revision = await context.setRuntime({
+  const ack = await context.setRuntime({
     kind: "tasks",
     instanceId: block.id,
     tasks: cloneTasks(nextTasks),
     expectedTasks: cloneTasks(expectedTasks),
   });
-  if (revision !== undefined) {
-    submissions.committed.observe(nextTasks, revision);
+  if (ack.runtimeUpdatedAt !== undefined && Array.isArray(ack.savedTasks)) {
+    submissions.committed.observe(ack.savedTasks, ack.runtimeUpdatedAt);
   } else {
     await refreshAfterAcknowledgedRuntimeWrite(async () => {
       const { runtime } = await getStartPageViewSnapshot();

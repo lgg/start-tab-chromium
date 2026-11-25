@@ -32,7 +32,7 @@ export type Message =
   | { type: "record-unblock"; host: string }
   | { type: "reset-stats" };
 
-export interface Ack { ok: boolean; error?: string; changed?: boolean; runtimeUpdatedAt?: number; savedSettings?: StartPageSettings; blockedUrl?: string }
+export interface Ack { ok: boolean; error?: string; changed?: boolean; runtimeUpdatedAt?: number; savedSettings?: StartPageSettings; blockedUrl?: string; savedTasks?: LocalTask[]; savedLinkPage?: number }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;

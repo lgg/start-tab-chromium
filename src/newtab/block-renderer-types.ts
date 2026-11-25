@@ -1,3 +1,4 @@
+import type { Ack } from "../lib/messages.js";
 import type { I18n } from "../lib/i18n.js";
 import type { LocalTask, StartPageRuntimeState, StartPageSettings } from "../lib/start-page-settings.js";
 
@@ -10,7 +11,7 @@ export interface BlockRenderContext {
   i18n: I18n;
   settings: StartPageSettings;
   runtime: StartPageRuntimeState;
-  setRuntime: (mutation: RuntimeMutation) => Promise<number | undefined>;
+  setRuntime: (mutation: RuntimeMutation) => Promise<Ack>;
   requestRender: () => void;
   reportError: (error: unknown) => void;
   registerCleanup: (cleanup: () => void) => void;

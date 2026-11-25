@@ -200,6 +200,29 @@ const stalePageAck = await workerMessage({ type: "runtime-link-page", instanceId
 assert.equal(stalePageAck.ok, false);
 assert.equal((await runtimeApi.getStartPageRuntimeState()).linkPages[linksBlock.id], 1);
 
+const canonical101 = await runtimeApi.getStartPageRuntimeState();
+const submitted101 = [
+  { id: " duplicate ", title: "  Trim me  ", done: false, createdAt: 1.2, updatedAt: 2.6 },
+  { id: "duplicate", title: "Another task", done: true, createdAt: 1, updatedAt: 2 },
+];
+const ack101 = await workerMessage({ type: "runtime-tasks", instanceId: tasksBlock.id, tasks: submitted101,
+  expectedTasks: canonical101.tasks[tasksBlock.id] ?? [] }) as { ok: boolean; runtimeUpdatedAt?: number; savedTasks?: typeof submitted101 };
+const saved101 = await runtimeApi.getStartPageRuntimeState();
+assert.equal(ack101.ok, true);
+assert.equal(ack101.runtimeUpdatedAt, saved101.updatedAt);
+assert.deepEqual(ack101.savedTasks, saved101.tasks[tasksBlock.id], "Acknowledgement must contain exact committed normalized tasks");
+assert.equal(ack101.savedTasks?.[0]?.title, "Trim me");
+assert.notEqual(ack101.savedTasks?.[0]?.id, ack101.savedTasks?.[1]?.id);
+assert.notDeepEqual(ack101.savedTasks, submitted101);
+const second101 = await workerMessage({ type: "runtime-tasks", instanceId: tasksBlock.id, tasks: [task], expectedTasks: ack101.savedTasks });
+assert.equal(second101.ok, true, "The exact acknowledged value can be used as the next CAS baseline");
+const page101 = await workerMessage({ type: "runtime-link-page", instanceId: linksBlock.id, page: 0, expectedPage: 1 }) as { ok: boolean; runtimeUpdatedAt?: number; savedLinkPage?: number };
+assert.equal(page101.ok, true);
+assert.equal(page101.savedLinkPage, 0, "Page zero is a real committed value");
+assert.equal(page101.runtimeUpdatedAt, (await runtimeApi.getStartPageRuntimeState()).updatedAt);
+assert.equal((await workerMessage({ type: "runtime-link-page", instanceId: linksBlock.id, page: 1, expectedPage: page101.savedLinkPage })).ok, true);
+console.log("Round 101 exact normalized widget acknowledgement regressions passed");
+
 const settingsBeforeRevisionFailure = structuredClone(localState);
 const revisionFailingSettings = settingsApi.cloneSettings(await settingsApi.getStartPageSettings());
 revisionFailingSettings.layout.gap = revisionFailingSettings.layout.gap === 31 ? 30 : revisionFailingSettings.layout.gap + 1;
