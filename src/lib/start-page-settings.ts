@@ -149,6 +149,14 @@ function blockContentEqual(left: BlockInstance, right: BlockInstance): boolean {
   );
 }
 
+function nextEntityRevision(previous: number, now = Date.now()): number {
+  const revision = Math.max(now, previous + 1);
+  if (!Number.isSafeInteger(revision) || revision >= Number.MAX_SAFE_INTEGER) {
+    throw new Error("Start Tab entity revision exceeds the safe integer range");
+  }
+  return revision;
+}
+
 function withBlockTimestamps(previous: StartPageSettings | null, next: StartPageSettings, now: number): StartPageSettings {
   const previousById = new Map(previous?.layout.blocks.map((block) => [block.id, block]) ?? []);
   return {
@@ -159,7 +167,9 @@ function withBlockTimestamps(previous: StartPageSettings | null, next: StartPage
       blocks: next.layout.blocks.map((block) => {
         const prior = previousById.get(block.id);
         const createdAt = prior?.createdAt || block.createdAt || now;
-        const updatedAt = prior && blockContentEqual(prior, block) ? prior.updatedAt : now;
+        const updatedAt = prior
+          ? blockContentEqual(prior, block) ? prior.updatedAt : nextEntityRevision(prior.updatedAt, now)
+          : now;
         return { ...block, createdAt, updatedAt };
       }),
     },
@@ -620,7 +630,7 @@ export async function updateCustomTheme(theme: StartPageTheme, expectedUpdatedAt
       ...theme,
       builtIn: false,
       createdAt: existing.createdAt,
-      updatedAt: Date.now(),
+      updatedAt: nextEntityRevision(existing.updatedAt),
     }, existing);
     normalized.builtIn = false;
     return {
