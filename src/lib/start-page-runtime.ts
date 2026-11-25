@@ -248,6 +248,21 @@ async function readRuntimeSettingsSnapshot(requireCompatible: boolean): Promise<
   return { settings: normalizeStartPageSettings(raw), future };
 }
 
+/** Only use valid numeric timestamps as revision floors, including during an
+ * explicit reset of a future schema. The revision allocator rejects overflow. */
+function rawRevisionFloor(value: unknown): number {
+  return isRecord(value) && typeof value.updatedAt === "number" && Number.isSafeInteger(value.updatedAt)
+    ? Math.max(0, value.updatedAt) : 0;
+}
+
+function nextRuntimeRevision(floor: number, now = Date.now()): number {
+  const revision = Math.max(now, floor + 1);
+  if (!Number.isSafeInteger(revision) || revision >= Number.MAX_SAFE_INTEGER || revision <= floor) {
+    throw new Error("Start Tab runtime revision exceeds the safe integer range");
+  }
+  return revision;
+}
+
 async function persistRuntimeInTransaction(
   state: StartPageRuntimeState,
   settings: StartPageSettings,
@@ -255,20 +270,25 @@ async function persistRuntimeInTransaction(
   expectedUpdatedAt: number | null = null,
   removeLegacy = false,
 ): Promise<StartPageRuntimeState> {
-  const items = await chrome.storage.local.get(START_PAGE_RUNTIME_KEY);
+  const items = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, DATA_REVISION_KEY]);
   const raw = items[START_PAGE_RUNTIME_KEY];
   if (!allowFutureOverwrite && isFutureRuntimeSchema(raw)) {
     throw new Error("Start Tab runtime data was created by a newer extension version and cannot be modified safely");
   }
   const currentUpdatedAt = isFutureRuntimeSchema(raw) ? 0 : normalizeRuntimeState(raw, settings).updatedAt;
   if (!allowFutureOverwrite && expectedUpdatedAt !== null
-    && currentUpdatedAt > 0 && currentUpdatedAt !== expectedUpdatedAt) {
+    && currentUpdatedAt !== expectedUpdatedAt) {
     throw new Error("Start Tab runtime changed in another extension context; reload before saving");
   }
+  // A missing runtime is normal after a reset. Recreating it must not
+  // resurrect an old CAS token even when the system clock moved backward.
+  const floor = currentUpdatedAt === 0
+    ? Math.max(settings.updatedAt, rawRevisionFloor(items[DATA_REVISION_KEY]))
+    : currentUpdatedAt;
   const stamped: StartPageRuntimeState = {
     ...state,
     version: RUNTIME_SCHEMA_VERSION,
-    updatedAt: Math.max(Date.now(), currentUpdatedAt + 1),
+    updatedAt: nextRuntimeRevision(floor),
   };
   await commitStorageMutationWithRevision(
     removeLegacy ? [START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY] : [START_PAGE_RUNTIME_KEY],
@@ -282,26 +302,29 @@ async function persistRuntimeInTransaction(
 }
 
 export async function getStartPageRuntimeState(inputSettings?: StartPageSettings): Promise<StartPageRuntimeState> {
+  const view = (canonical: StartPageRuntimeState): StartPageRuntimeState =>
+    inputSettings ? normalizeRuntimeState(canonical, inputSettings) : canonical;
   const settingsSnapshot = await readRuntimeSettingsSnapshot(false);
-  const settings = inputSettings ?? settingsSnapshot.settings;
   const items = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
   const raw = items[START_PAGE_RUNTIME_KEY];
-  const normalized = normalizeRuntimeState(raw, settings, items[LEGACY_INSTANCE_RUNTIME_KEY]);
-  if (settingsSnapshot.future || isFutureRuntimeSchema(raw) || jsonContentEqual(raw, normalized)) return normalized;
+  // A caller may pass a transient editor layout. It is a projection, not
+  // authority for persisting/pruning runtime data or deciding migration.
+  const normalized = normalizeRuntimeState(raw, settingsSnapshot.settings, items[LEGACY_INSTANCE_RUNTIME_KEY]);
+  if (settingsSnapshot.future || isFutureRuntimeSchema(raw) || jsonContentEqual(raw, normalized)) return view(normalized);
 
   return withStorageLock("data-write", async () => {
     const freshSettingsSnapshot = await readRuntimeSettingsSnapshot(false);
     const freshItems = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
     const freshRaw = freshItems[START_PAGE_RUNTIME_KEY];
     const freshNormalized = normalizeRuntimeState(freshRaw, freshSettingsSnapshot.settings, freshItems[LEGACY_INSTANCE_RUNTIME_KEY]);
-    if (freshSettingsSnapshot.future || isFutureRuntimeSchema(freshRaw) || jsonContentEqual(freshRaw, freshNormalized)) return freshNormalized;
-    return persistRuntimeInTransaction(
+    if (freshSettingsSnapshot.future || isFutureRuntimeSchema(freshRaw) || jsonContentEqual(freshRaw, freshNormalized)) return view(freshNormalized);
+    return view(await persistRuntimeInTransaction(
       freshNormalized,
       freshSettingsSnapshot.settings,
       true,
       null,
       freshItems[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined,
-    );
+    ));
   });
 }
 
@@ -568,14 +591,13 @@ export async function replaceStartPageSettingsWithRuntime(
     const retainedIds = new Set(prepared.settings.layout.blocks.map((block) => block.id));
     const removesBlockIds = previousSettings.layout.blocks.some((block) => !retainedIds.has(block.id));
     if (removesBlockIds
-      && previousRuntime.updatedAt > 0
-      && expectedRuntimeUpdatedAt !== previousRuntime.updatedAt) {
+      && previousRuntime.updatedAt !== expectedRuntimeUpdatedAt) {
       throw new Error("Start Tab runtime changed in another extension context; reload before replacing the layout");
     }
     const prunedRuntime = normalizeRuntimeState(previousRuntime, prepared.settings);
     const runtime: StartPageRuntimeState = {
       ...prunedRuntime,
-      updatedAt: Math.max(Date.now(), previousRuntime.updatedAt + 1),
+      updatedAt: nextRuntimeRevision(previousRuntime.updatedAt),
     };
     const previousAlarms = await readClockAlarmSnapshot();
     try {
@@ -606,9 +628,15 @@ export async function replaceStartPageSettingsWithRuntime(
   });
 }
 
-function resetSettings(raw: unknown, now: number): StartPageSettings {
+function resetSettings(raw: unknown, runtime: unknown, dataRevision: unknown, now: number): StartPageSettings {
   const previous = isFutureStartPageSchema(raw) ? null : normalizeStartPageSettings(raw);
-  return createDefaultStartPageSettings(Math.max(now, (previous?.updatedAt ?? 0) + 1));
+  const floor = Math.max(
+    rawRevisionFloor(raw), rawRevisionFloor(runtime), rawRevisionFloor(dataRevision),
+    previous?.updatedAt ?? 0,
+    ...(previous?.layout.blocks.map((block) => block.updatedAt) ?? []),
+    ...(previous?.themes.customThemes.map((theme) => theme.updatedAt) ?? []),
+  );
+  return createDefaultStartPageSettings(nextRuntimeRevision(floor, now));
 }
 
 function absentStorageKeys(storage: Record<string, unknown>, keys: readonly string[]): string[] {
@@ -630,7 +658,7 @@ export async function resetStartPageRuntimeState(): Promise<void> {
     try {
       await chrome.storage.local.remove([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
       await clearClockAlarms();
-      await markStartTabDataChanged();
+      await markStartTabDataChanged(nextRuntimeRevision(rawRevisionFloor(previous[START_PAGE_RUNTIME_KEY])));
     } catch (error) {
       try {
         await runIndependentEffects([
@@ -650,7 +678,9 @@ export async function resetStartPageData(): Promise<StartPageSettings> {
   return withStorageLock("data-write", async () => {
     const previous = await chrome.storage.local.get([...RESET_STORAGE_KEYS]);
     const previousAlarms = await readClockAlarmSnapshot();
-    const settings = resetSettings(previous[START_PAGE_SETTINGS_KEY], Date.now());
+    const settings = resetSettings(
+      previous[START_PAGE_SETTINGS_KEY], previous[START_PAGE_RUNTIME_KEY], previous[DATA_REVISION_KEY], Date.now(),
+    );
 
     try {
       await chrome.storage.local.set({ [START_PAGE_SETTINGS_KEY]: settings });
