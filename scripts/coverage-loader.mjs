@@ -1,6 +1,6 @@
 import { registerHooks } from "node:module";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import { transformSync } from "esbuild";
 
@@ -31,7 +31,7 @@ registerHooks({
       loader: "ts",
       format: "esm",
       target: "node22",
-      sourcefile: filename,
+      sourcefile: pathToFileURL(filename).href,
       sourcemap: "inline",
       sourcesContent: true,
       tsconfigRaw: { compilerOptions: { verbatimModuleSyntax: true } },
