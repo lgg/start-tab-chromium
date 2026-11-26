@@ -92,6 +92,40 @@ try {
   await google.restoreDriveBackup();
   assert.deepEqual(control.state.blockedSites,["restored.example"]);
   assert.equal(mediaReads,1);
+
+  // The real provider reader must reject empty/error responses, release
+  // locked streams on invalid JSON, and not wait for failed cancellation.
+  {
+    const {fetchWidgetJson,MAX_WIDGET_RESPONSE_BYTES}=await import("../src/newtab/widget-network.js");
+    const endpoint="https://provider.example/";
+    globalThis.fetch=async()=>new Response(null,{status:503});
+    await assert.rejects(fetchWidgetJson(endpoint),/503/);
+    globalThis.fetch=async()=>new Response(null,{status:204});
+    await assert.rejects(fetchWidgetJson(endpoint),/empty response/);
+    let released=0,cancelled=0;
+    const oversizedReader={
+      read:async()=>({done:false,value:new Uint8Array(MAX_WIDGET_RESPONSE_BYTES+1)}),
+      cancel:async()=>{cancelled++;throw Error("provider refuses cancellation")},
+      releaseLock:()=>{released++}
+    };
+    globalThis.fetch=async()=>({ok:true,body:{getReader:()=>oversizedReader}});
+    await assert.rejects(fetchWidgetJson(endpoint),/size limit/);
+    assert.equal(cancelled,1);assert.equal(released,1);
+    let bodyCancelled=0;
+    globalThis.fetch=async()=>({ok:false,status:429,body:{cancel:async()=>{bodyCancelled++;throw Error("cancel rejected")}}});
+    await assert.rejects(fetchWidgetJson(endpoint),/429/);
+    assert.equal(bodyCancelled,1);
+    const malformed=new Response("{invalid");
+    globalThis.fetch=async()=>malformed;
+    await assert.rejects(fetchWidgetJson(endpoint),SyntaxError);
+    assert.equal(malformed.body.locked,false);
+    const data=JSON.stringify({city:"Москва",temperature:14});
+    const encoded=new TextEncoder().encode(data);
+    const chunks=new ReadableStream({start(controller){for(const byte of encoded)controller.enqueue(Uint8Array.of(byte));controller.close()}});
+    globalThis.fetch=async()=>new Response(chunks);
+    assert.deepEqual(await fetchWidgetJson(endpoint),{city:"Москва",temperature:14});
+    console.log("Widget provider: empty and HTTP errors, cancellation rejection, bounded streaming, UTF-8 and lock release");
+  }
   console.log("Google: absent items, timed event precedence, bounded pagination and successful media restore");
   console.log("Locale and Google failure matrix: auto detection, fallback, CAS, malformed responses, invalid tokens, retry, size limit, calendar dates and Drive listing");
 } finally {restoreFetch();dom.window.close();}
