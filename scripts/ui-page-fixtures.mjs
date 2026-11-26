@@ -229,6 +229,19 @@ try {
     assert.deepEqual(control.state.startPageSettings,preCancel);
     assert.equal(control.messages.length,countBeforeCancel);
     window.confirm=()=>true;
+
+    const existingRow=[...section("blocks").querySelectorAll(".instance-row")].find(el=>el.querySelector(".instance-row__title")?.textContent?.includes("Options note"));
+    const savedBeforeEdit=structuredClone(control.state.startPageSettings);
+    btn(existingRow,"edit").click();
+    btn(one(document,"dialog[open]"),"cancel").click();
+    await delay(20);
+    assert.deepEqual(control.state.startPageSettings,savedBeforeEdit);
+    for(const id of ["backupImportInput","themeImportInput"]){
+      const input=one(document,"#"+id);
+      Object.defineProperty(input,"files",{configurable:true,value:[]});
+      event(input,"change");
+    }
+    assert.deepEqual(control.state.startPageSettings,savedBeforeEdit);
     assert.equal(btn(section("backup"), "driveUpload").disabled, true);
     const backupApi = await import("../src/lib/backup.js");
     const themeApi = await import("../src/lib/start-page-settings.js");
@@ -395,6 +408,16 @@ try {
     await until(() => document.getElementById("onboarding"), "onboarding modal");
     const onboarding = one(document, "#onboarding");
     const onboardingButtons = [...onboarding.querySelectorAll("button")];
+    const panel=one(onboarding,'[role="dialog"]');
+    const nonTab=new window.KeyboardEvent("keydown",{key:"Enter",bubbles:true,cancelable:true});
+    panel.dispatchEvent(nonTab);assert.equal(nonTab.defaultPrevented,false);
+    for(const b of onboardingButtons)b.disabled=true;
+    const noFocus=new window.KeyboardEvent("keydown",{key:"Tab",bubbles:true,cancelable:true});
+    panel.dispatchEvent(noFocus);
+    assert.equal(noFocus.defaultPrevented,true);
+    assert.equal(document.activeElement,panel);
+    for(const b of onboardingButtons)b.disabled=false;
+
     onboardingButtons[0].focus();
     key(onboardingButtons[0], "Tab", { shiftKey: true });
     assert.equal(document.activeElement, onboardingButtons.at(-1));
@@ -423,6 +446,11 @@ try {
     control.state.localeOverride = "en";
     control.chrome.storage.onChanged.emit({ localeOverride: { newValue: "en" } }, "local");
     await until(() => !document.querySelector(".draft-recovery:not([hidden]) button"), "locale change reverted");
+
+    const externalLocale=await loadI18n();
+    control.state.startPageSettings.layout.gap=21;
+    control.chrome.storage.onChanged.emit({startPageSettings:{newValue:control.state.startPageSettings}},"local");
+    await until(()=>one(document,"#statusRegion").textContent.includes(externalLocale.t("externalSettingsChangeIgnored")), "external settings notice");
     const focusedCard=one(document,'[data-block-id="page-note"]');
     focusedCard.focus();
     window.dispatchEvent(new window.Event("resize"));
