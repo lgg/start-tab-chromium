@@ -126,4 +126,96 @@ try{
     assert.equal(one(document,"#language").disabled,true);
   },()=>{globalThis.fetch=async()=>new Response(null,{status:404})});
   console.log("Popup: unblock stale tab, committed/failed refresh, locale CAS and catalog failures");
+  // Gate starts in the browser's split context even when discovered through
+  // an opener rather than window.name. Failure to list tabs must keep the
+  // native/Settings fallback usable.
+  const gateDom=await installDom("newtab/newtab.html","https://extension.example/newtab.html");
+  const gate=installChrome(seed());
+  const overlay=()=>document.getElementById("startTabGateOverlay");
+  const native=()=>one(overlay(),"[data-native-new-tab]");
+  let generation=0;
+  window.addEventListener("start-tab-gate-change",()=>generation++);
+  try {
+    delete gate.state.localeOverride;
+    gate.chrome.i18n.getUILanguage=()=>"ru-RU";
+    gate.tab={id:1,openerTabId:10,url:"https://extension.example/newtab.html"};
+    gate.chrome.tabs.get=async id=>({id,title:"Side-by-side tab picker"});
+    gate.chrome.tabs.query=async()=>{throw Error("tabs unavailable")};
+    const originalSet=gate.chrome.storage.local.set;
+    gate.chrome.storage.local.set=async values=>{
+      if(Object.hasOwn(values,"startTabLastNativeNewTabContext"))throw Error("diagnostic denied");
+      return originalSet(values);
+    };
+    await import("../src/newtab/newtab-gate.js?case="+(++serial));
+    await window.startTabGateReady;
+    assert.ok(overlay());
+    assert.equal(overlay().querySelectorAll("button").length,2);
+    assert.equal(one(document,"#startPage").hasAttribute("inert"),true);
+    assert.equal(document.activeElement,native());
+    const panel=one(overlay(),'[role="dialog"]');
+    const buttons=[...panel.querySelectorAll("button")];
+    for(const b of buttons)b.disabled=true;
+    const tabKey=new window.KeyboardEvent("keydown",{key:"Tab",bubbles:true,cancelable:true});
+    panel.dispatchEvent(tabKey);
+    assert.equal(tabKey.defaultPrevented,true);
+    assert.equal(document.activeElement,panel);
+    for(const b of buttons)b.disabled=false;
+    const enter=new window.KeyboardEvent("keydown",{key:"Enter",bubbles:true,cancelable:true});
+    panel.dispatchEvent(enter);assert.equal(enter.defaultPrevented,false);
+    gate.chrome.tabs.query=async()=>[
+      {id:1,url:"https://current.example"},
+      {id:2,url:" https://untitled.example/ ",title:"  "},
+      {id:3,url:"https://no-title.example/"},
+      {id:4,url:undefined},
+      {id:5,url:"chrome://settings/"},
+      {id:6,url:"invalid"}
+    ];
+    const before=generation;
+    gate.chrome.storage.onChanged.emit({startPageSettings:{newValue:gate.state.startPageSettings}},"sync");
+    await delay(20);assert.equal(generation,before);
+    gate.chrome.storage.onChanged.emit({startPageSettings:{newValue:gate.state.startPageSettings}},"local");
+    await until(()=>overlay()?.querySelectorAll("button").length===4);
+    assert.match(overlay().textContent,/https:\/\/untitled\.example\//);
+    assert.match(overlay().textContent,/https:\/\/no-title\.example\//);
+    gate.chrome.tabs.getCurrent=async()=>({});
+    one(overlay(),"button").click();await delay(20);
+    assert.ok(!gate.calls.some(c=>Array.isArray(c)&&c[0]==="update"));
+    gate.chrome.tabs.getCurrent=async()=>({...gate.tab});
+    let settle;
+    gate.handler=()=>new Promise(resolve=>settle=resolve);
+    const oldButton=native();
+    oldButton.click();await until(()=>settle);
+    assert.equal(oldButton.getAttribute("aria-busy"),"true");
+    const beforeRebuild=generation;
+    gate.chrome.storage.onChanged.emit({startPageSettings:{newValue:gate.state.startPageSettings}},"local");
+    await until(()=>generation>beforeRebuild&&!oldButton.isConnected);
+    assert.equal(native().getAttribute("aria-busy"),"true");
+    const count=gate.messages.length;
+    native().click();assert.equal(gate.messages.length,count);
+    settle({ok:false,error:"native denied"});
+    await until(()=>overlay().querySelector('[role="alert"]:not([hidden])'));
+    assert.equal(native().hasAttribute("aria-busy"),false);
+    gate.handler=async()=>({ok:true});
+    native().click();await until(()=>!native().hasAttribute("aria-busy"));
+    assert.equal(one(overlay(),'[role="alert"]').hidden,true);
+    // Failed opener lookup must not leave a stale split overlay.
+    gate.chrome.tabs.get=async()=>{throw Error("opener gone")};
+    gate.chrome.tabs.getCurrent=async()=>({...gate.tab});
+    gate.chrome.storage.local.set=originalSet;
+    gate.chrome.storage.onChanged.emit({startPageSettings:{newValue:gate.state.startPageSettings}},"local");
+    await until(()=>!overlay());
+    assert.equal(one(document,"#startPage").hasAttribute("inert"),false);
+    // If the catalog and Chrome i18n fail to supply strings, use readable
+    // built-in fallback text. A failed tab lookup is not a split signal.
+    gate.chrome.tabs.getCurrent=async()=>{throw Error("tab closed")};
+    globalThis.fetch=async()=>{throw Error("catalog offline")};
+    gate.chrome.i18n.getMessage=()=>"";
+    gate.chrome.i18n.getUILanguage=undefined;
+    gate.state.startPageSettings.startTab.enabled=false;
+    gate.chrome.storage.onChanged.emit({localeOverride:{newValue:undefined}},"local");
+    await until(()=>overlay()?.textContent.includes("Start Tab is disabled"));
+    assert.match(overlay().textContent,/Open browser new tab/);
+    console.log("Gate: opener detection, diagnostic/query errors, stale overlay lease, focus trap, locale and native fallbacks");
+  }finally{globalThis.fetch=catalog;gateDom.window.close()}
+
 }finally{restoreFetch()}
