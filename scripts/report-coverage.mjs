@@ -10,7 +10,7 @@ const npmCli = process.env.npm_execpath;
 if (!npmCli) throw new Error("Run via npm run test:coverage");
 try {
   const args = [npmCli, "exec", "--yes", "--package=c8@10.1.3", "--", "c8",
-    "--all", "--src", "src", "--extension", ".ts", "--include", "src/**/*.ts",
+    "--all", "--src", "src", "--extension", ".ts", "--extension", ".js", "--include", "src/**/*.ts", "--include", "src/**/*.js",
     "--exclude-after-remap", "--reporter=text", "--reporter=json-summary",
     "--reports-dir", temporary, "--temp-directory", path.join(temporary, "raw"),
     "node", "scripts/run-coverage-fixtures.mjs"];
@@ -25,7 +25,7 @@ try {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const full = path.join(directory, entry.name);
       if (entry.isDirectory()) result.push(...await sourceFiles(full));
-      else if (entry.isFile() && entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts")) result.push(path.relative(root, full).replaceAll("\\", "/"));
+      else if (entry.isFile() && /\.(ts|js)$/.test(entry.name) && !entry.name.endsWith(".d.ts")) result.push(path.relative(root, full).replaceAll("\\", "/"));
     }
     return result;
   }
@@ -37,7 +37,7 @@ try {
   const metric = (item, name) => item[name].pct + "% (" + item[name].covered + "/" + item[name].total + ")";
   const header = "| File | Lines | Functions | Branches | Statements |\n|---|---:|---:|---:|---:|";
   const row = (name, item) => "| " + name + " | " + ["lines", "functions", "branches", "statements"].map(key => metric(item, key)).join(" | ") + " |";
-  const report = ["## Source coverage (c8 / V8)", "Production TypeScript only; includes files not imported by tests. V8 branch coverage is engine-derived; browser E2E is not measured here.", header,
+  const report = ["## Source coverage (c8 / V8)", "Production TypeScript and JavaScript; includes files not imported by tests. V8 branch coverage is engine-derived; browser E2E is not measured here.", header,
     row("**All source**", summary.total), ...entries.sort(([a], [b]) => a.localeCompare(b)).map(([name, item]) => row(path.relative(root, name).replaceAll("\\", "/"), item))].join("\n");
   console.log(report);
   console.log("COVERAGE_TOTAL " + JSON.stringify({ ...summary.total, sourceFiles: expected.length, zeroLineFiles: entries.filter(([, item]) => item.lines.covered === 0).length }));
