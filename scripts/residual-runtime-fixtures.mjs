@@ -116,3 +116,52 @@ assert.equal(v.normalizeEntityId(undefined,"fallback"),"fallback");
 assert.deepEqual(v.legacyConfigSource("timer",{}),{});
 assert.equal(v.normalizeSearchProviders([{urlTemplate:"https://example.com/?q={query}"}],[],"providers",[]).length,1);
 console.log("Residual runtime: legacy migration, clock phases, future schema, alarm rollback, orphan cleanup, capacity and revision exhaustion");
+
+const bl=await import("../src/lib/blocklist.js");
+await assert.rejects(bl.blockHost(""),/Invalid host/);
+await assert.rejects(bl.unblockHost("ftp://example.com"),/Invalid host/);
+assert.equal(bl.hostFromUrl("https://./"),null);
+assert.equal(bl.hostFromUrl("https://.example.com/"),null);
+assert.equal(bl.hostFromUrl("https://[::1]/"),null);
+assert.equal(await bl.rememberBlockedNavigation("chrome://settings/"),null);
+await local.set({blockedSites:"broken",blocked:{legacy:"bad"}});
+await bl.migrateLegacyStorage();
+assert.deepEqual(control.state.blockedSites,[]);
+assert.equal(control.state.blocked,undefined);
+await bl.replaceBlockedSites(["example.com"]);
+assert.equal(await bl.rememberBlockedNavigation("https://unrelated.example/"),null);
+await bl.clearLastBlockedUrl("missing.example");
+const dnr=control.chrome.declarativeNetRequest;
+const originalUpdate=dnr.updateDynamicRules;
+let collisions=0;
+dnr.updateDynamicRules=async ({removeRuleIds=[],addRules=[]})=>{
+  if(collisions===0&&addRules.some(rule=>rule.condition.requestDomains?.includes("new.example"))){
+    const contested=addRules.find(rule=>rule.condition.requestDomains?.includes("new.example"));
+    collisions++;
+    await originalUpdate({addRules:[{id:contested.id,priority:1,action:{type:"block"},condition:{urlFilter:"||foreign.example^"}}]});
+    throw Error("DNR ID was claimed concurrently");
+  }
+  return originalUpdate({removeRuleIds,addRules});
+};
+try{
+  await bl.blockHost("new.example");
+  assert.equal(collisions,1);
+  assert.deepEqual(await bl.getBlockedSites(),["example.com","new.example"]);
+  const rules=await dnr.getDynamicRules();
+  assert.equal(new Set(rules.map(rule=>rule.id)).size,rules.length);
+  assert.ok(rules.some(rule=>rule.action.type==="block"));
+  assert.equal((await bl.readDynamicRulesSnapshot()).length,2);
+}finally{dnr.updateDynamicRules=originalUpdate}
+// Page contexts must delegate, not alter local durable state directly.
+const {installDom}=await import("./ui-fixture-dom.mjs");
+const dom=await installDom();
+try{
+  const stored=await local.get(null);
+  assert.deepEqual(await bl.replaceBlockedSites(["WWW.Example.COM","example.com"]),["example.com"]);
+  assert.deepEqual(control.messages.at(-1),{type:"replace-blocked-sites",sites:["example.com"]});
+  await assert.rejects(bl.clearAll(),/confirmed site snapshot/);
+  await bl.clearAll(["example.com"]);
+  assert.deepEqual(control.messages.at(-1),{type:"clear",expectedSites:["example.com"]});
+  assert.deepEqual(await local.get(null),stored);
+}finally{dom.window.close()}
+console.log("Blocklist residual: invalid host, malformed legacy state, concurrent DNR ID claims and delegated page mutations");

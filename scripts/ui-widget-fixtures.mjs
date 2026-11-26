@@ -288,6 +288,31 @@ try {
   const countBefore=writes.length;
   submit(one(full.root,"form"));
   assert.equal(writes.length,countBefore);
+
+  // Detached asynchronous results must not mutate obsolete DOM nodes.
+  const baseFetch=globalThis.fetch;
+  let rejectCalendar,finishWeather;
+  try{
+    globalThis.fetch=async url=>{
+      const parsed=new URL(String(url));
+      if(parsed.host==="www.googleapis.com")return new Promise((_,reject)=>{rejectCalendar=reject});
+      return new Promise(resolve=>{finishWeather=resolve});
+    };
+    const staleCalendar=widget("googleCalendar",{calendarId:"detached-error"},"detached-calendar");
+    await until(()=>rejectCalendar);
+    staleCalendar.root.remove();rejectCalendar(Error("obsolete calendar request"));
+    await delay(20);assert.equal(staleCalendar.root.textContent,"googleCalendarLoading");
+    const staleWeather=widget("weather",{city:"",forecastEndpoint:"https://detached.example/"},"detached-weather");
+    await until(()=>finishWeather);
+    staleWeather.root.remove();
+    finishWeather(Response.json({current:{temperature_2m:14,weather_code:0}}));
+    await delay(20);assert.equal(staleWeather.root.textContent,"weatherLoading");
+    const staleCommandRoot=widget("commands",{},"detached-command").root;
+    const staleCommand=button(staleCommandRoot,"commandResetClocks");
+    const priorMessages=control.messages.length;
+    staleCommandRoot.remove();staleCommand.click();await delay(20);
+    assert.equal(control.messages.length,priorMessages);
+  }finally{globalThis.fetch=baseFetch}
   console.log("Widget failure and boundary matrix passed");
   console.log("Widgets: dates, search, hidden drafts, IP, pagination, notes, tasks, clocks, history, pinned, stats, calendar, weather and commands");
 } finally {
