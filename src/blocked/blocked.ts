@@ -152,6 +152,15 @@ async function finishUnblock(): Promise<void> {
 }
 
 async function init(): Promise<void> {
+  // DNR redirects only main-frame navigations. The web-accessible page
+  // can also be framed by arbitrary sites; never arm actions in that case.
+  if (window.top !== window.self) {
+    unblockEl.disabled = true;
+    cancelEl.disabled = true;
+    actionsEl.hidden = true;
+    countdownEl.hidden = true;
+    return;
+  }
   i18n = await loadI18n();
   document.title = i18n.t("blockedPageTitle");
   unblockEl.textContent = i18n.t("unblockThisSite");
