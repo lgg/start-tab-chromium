@@ -231,6 +231,64 @@ try {
   await until(() => download.name.startsWith("start-tab-backup-"));
   window.HTMLAnchorElement.prototype.click = oldClick;
   assert.ok(renders > 5);
+  // Fresh cache keys force every real provider error and weather summary branch.
+  const goodFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => { throw Error("provider offline"); };
+    const offlineIp = widget("ip", { endpoint: "https://offline.example/" }, "offline-ip");
+    const offlineWeather = widget("weather", { city: "Offline", geocodingEndpoint: "https://offline.example/" }, "offline-weather");
+    const offlineCalendar = widget("googleCalendar", { calendarId: "offline" }, "offline-calendar");
+    await until(() => offlineIp.root.textContent === "ipUnavailable");
+    await until(() => offlineWeather.root.textContent === "weatherUnavailable");
+    await until(() => offlineCalendar.root.textContent === "googleCalendarUnavailable");
+    globalThis.fetch = async () => Response.json({ results: [] });
+    const missingCity = widget("weather", { city: "Unknown City", geocodingEndpoint: "https://unknown.example/" }, "unknown-city");
+    await until(() => missingCity.root.textContent === "weatherUnavailable");
+    for (const [code, expected] of [[0,"weatherClear"],[2,"weatherCloudy"],[45,"weatherFog"],[61,"weatherRain"],[71,"weatherSnow"],[81,"weatherShowers"],[95,"weatherThunderstorm"],[100,"weatherUnknown"],[null,"weatherUnknown"]]) {
+      globalThis.fetch = async () => Response.json({ current: { temperature_2m: 14, weather_code: code }, current_units: { temperature_2m: "°C" }, daily: {time: [],temperature_2m_min:[],temperature_2m_max:[],weather_code:[]} });
+      const w = widget("weather", { city: "", forecastEndpoint: "https://weather.example/" + code }, "weather-code-" + code);
+      await until(() => w.root.querySelector(".weather__current"), "weather " + code);
+      assert.match(w.root.textContent, new RegExp(expected));
+    }
+    globalThis.fetch = async () => Response.json({});
+    for (const mode of ["current","week"]) {
+      const empty=widget("weather",{city:"",displayMode:mode,forecastEndpoint:"https://empty.example/"+mode},"empty-weather-"+mode);
+      await until(()=>empty.root.textContent==="weatherUnavailable");
+    }
+    globalThis.fetch = async () => Response.json({items:[]});
+    const emptyCalendar=widget("googleCalendar",{calendarId:"empty"},"empty-calendar");
+    await until(()=>emptyCalendar.root.textContent.includes("emptyList"));
+    const oldHistory=control.chrome.history.search;
+    control.chrome.history.search=async()=>[];
+    const emptyRecent=widget("recent",{maxResults:7},"empty-recent");
+    await until(()=>emptyRecent.root.textContent==="emptyList");
+    control.chrome.history.search=async()=>{throw Error("history unavailable")};
+    const failedRecent=widget("recent",{maxResults:8},"failed-recent");
+    await until(()=>failedRecent.root.textContent==="recentUnavailable");
+    control.chrome.history.search=oldHistory;
+    const originalGet=control.chrome.storage.local.get;
+    control.chrome.storage.local.get=async()=>{throw Error("stats unavailable")};
+    const failedStats=widget("stats",{},"failed-stats");
+    await until(()=>failedStats.root.textContent==="somethingWentWrong");
+    control.chrome.storage.local.get=originalGet;
+  } finally {globalThis.fetch=goodFetch}
+  const integration = await import("../src/newtab/block-renderers-integrations.js");
+  const eventLabel={id:"e",title:"",start:"",end:"",allDay:false};
+  assert.equal(integration.calendarEventLabel(eventLabel,i18n),"calendarUntitledEvent");
+  assert.equal(integration.calendarEventLabel({...eventLabel,start:"bad"},i18n),"calendarUntitledEvent");
+  assert.equal(integration.calendarEventLabel({...eventLabel,start:"2027-02-30",allDay:true},i18n),"calendarUntitledEvent · calendarAllDay");
+  assert.match(integration.calendarEventLabel({...eventLabel,start:"2027-02-01",allDay:true},i18n),/calendarAllDay/);
+  const limits=await import("../src/lib/platform-limits.js");
+  const fullId="full-tasks";
+  context.runtime.tasks[fullId]=Array.from({length:limits.MAX_LOCAL_TASKS_PER_INSTANCE},(_,i)=>({id:"task-"+i,title:"task "+i,done:true,createdAt:100,updatedAt:100}));
+  const full=widget("localTasks",{showCompleted:false},fullId);
+  assert.equal(one(full.root,"input").disabled,true);
+  assert.equal(one(full.root,"button").disabled,true);
+  assert.equal(full.root.querySelectorAll(".task").length,0);
+  const countBefore=writes.length;
+  submit(one(full.root,"form"));
+  assert.equal(writes.length,countBefore);
+  console.log("Widget failure and boundary matrix passed");
   console.log("Widgets: dates, search, hidden drafts, IP, pagination, notes, tasks, clocks, history, pinned, stats, calendar, weather and commands");
 } finally {
   for (const cleanup of cleanups.reverse()) cleanup();
