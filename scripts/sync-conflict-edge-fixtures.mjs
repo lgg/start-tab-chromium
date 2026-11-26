@@ -104,3 +104,55 @@ try{
 }finally{remote.get=realGet}
 assert.deepEqual(await realGet(null),verified);
 console.log("Browser Sync: remote metadata changes during content verification and late future-version refusal");
+
+
+// First synchronization with no common baseline: a genuinely pristine
+// installation should accept an older remote backup, but each kind of local
+// user data must independently prevent that destructive decision.
+const pristine=api.createDefaultStartPageSettings(100);
+const pristineRuntime=normalizeRuntimeState(undefined,pristine);
+const noteId=pristine.layout.blocks.find(b=>b.type==="note").id;
+const remoteSeed=installChrome({startPageSettings:pristine,startPageRuntimeState:pristineRuntime,blockedSites:["remote-only.example"]});
+await sync.uploadChromeSyncBackup();
+const remoteSeedFrame=await remoteSeed.chrome.storage.sync.get(null);
+const oldFrame={...remoteSeedFrame,[metaKey]:{...remoteSeedFrame[metaKey],contentUpdatedAt:1}};
+for(const kind of ["pristine","settings","note","blocked","onboarding","locale","statistics"]){
+  const s=structuredClone(pristine),runtime=structuredClone(pristineRuntime);
+  const initial={startPageSettings:s,startPageRuntimeState:runtime,blockedSites:[],startTabDataRevision:{version:1,updatedAt:Date.now()+10000}};
+  if(kind==="settings")s.layout.gap+=1;
+  if(kind==="note")runtime.notes[noteId]="locally written";
+  if(kind==="blocked")initial.blockedSites=["local-only.example"];
+  if(kind==="onboarding")initial.startPageOnboarding={onboarded:true};
+  if(kind==="locale")initial.localeOverride="ru";
+  const fresh=installChrome(initial);
+  if(kind==="statistics"){
+    const stats=await import("../src/lib/focus-stats.js");
+    await stats.recordUnblockAfterCountdown("local.example");
+  }
+  await fresh.chrome.storage.sync.set(oldFrame);
+  const result=await sync.syncChromeSyncBackup();
+  assert.equal(result,kind==="pristine"?"restored":"uploaded",kind);
+  if(kind==="pristine")assert.deepEqual(fresh.state.blockedSites,["remote-only.example"]);
+  else {
+    assert.deepEqual(fresh.state.blockedSites,initial.blockedSites);
+    if(kind==="note")assert.equal(fresh.state.startPageRuntimeState.notes[noteId],"locally written");
+    if(kind==="settings")assert.equal(fresh.state.startPageSettings.layout.gap,s.layout.gap);
+    if(kind==="locale")assert.equal(fresh.state.localeOverride,"ru");
+    if(kind==="onboarding")assert.equal(fresh.state.startPageOnboarding.onboarded,true);
+    if(kind==="statistics")assert.equal((await (await import("../src/lib/focus-stats.js")).getFocusStats()).totals.unblocksAfterCountdown,1);
+  }
+}
+// A remote frame may arrive exactly at the final absence check. The smart
+// operation must retry its decision instead of overwriting newly arrived data.
+const race=installChrome({startPageSettings:pristine,startPageRuntimeState:pristineRuntime,blockedSites:[]});
+const raceSync=race.chrome.storage.sync;
+const raceGet=raceSync.get;
+let fullReads=0;
+raceSync.get=async keys=>{
+  if(keys===null&&++fullReads===2)await raceSync.set(oldFrame);
+  return raceGet(keys);
+};
+assert.equal(await sync.syncChromeSyncBackup(),"restored");
+assert.ok(fullReads>=2);
+assert.deepEqual(race.state.blockedSites,["remote-only.example"]);
+console.log("Browser Sync: first-contact pristine/non-pristine decision matrix and a frame arriving at the final absence guard");

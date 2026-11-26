@@ -147,6 +147,69 @@ try {
   assert.equal(control.calls.length,previousCount);
   chrome.runtime.getManifest=oldManifest;
   console.log("Worker residual: translation fallbacks, interrupted pomodoro, rejected browser redirect and blocker-only manifest");
+
+  {
+  // Browser event listeners must ignore unrelated events and recover from
+  // failures without poisoning the serialized runtime job.
+  const beforeIgnored=structuredClone(control.state);
+  chrome.tabs.onUpdated.emit(1,{status:"complete"});
+  chrome.webNavigation.onBeforeNavigate.emit({tabId:1,frameId:0,url:""});
+  chrome.webNavigation.onBeforeNavigate.emit({tabId:1,frameId:0,url:blocked});
+  chrome.webNavigation.onBeforeNavigate.emit({tabId:1,frameId:2,url:"https://other.example/"});
+  chrome.alarms.onAlarm.emit({name:"foreign-alarm"});
+  await new Promise(resolve=>setTimeout(resolve,30));
+  assert.deepEqual(control.state,beforeIgnored);
+  const rtApi=await import("../src/lib/start-page-runtime.js");
+  const alarmId="worker-timer";
+  await ok({type:"clock-action",instanceId:alarmId,action:"start"});
+  let alarmClock=control.state.startPageRuntimeState.clocks[alarmId];
+  const alarmName=rtApi.clockAlarmName(alarmId,alarmClock.completionToken);
+  alarmClock.startedAt=Date.now();alarmClock.targetAt=Date.now()+10000;
+  control.alarms.delete(alarmName);
+  chrome.alarms.onAlarm.emit({name:alarmName});
+  await until(()=>control.alarms.has(alarmName),"early alarm rearmed");
+  assert.equal(control.state.startPageRuntimeState.clocks[alarmId].running,true);
+  // Fail the completion's storage read once, then verify that the alarm is
+  // rearmed with backoff and its original token remains live.
+  alarmClock=control.state.startPageRuntimeState.clocks[alarmId];
+  alarmClock.startedAt=Date.now()-5000;alarmClock.targetAt=Date.now()-4000;
+  const localArea=chrome.storage.local, readBeforeAlarm=localArea.get;
+  let failAlarmRead=true;
+  localArea.get=async keys=>{
+    if(failAlarmRead){failAlarmRead=false;throw Error("transient alarm storage read")}
+    return readBeforeAlarm(keys);
+  };
+  control.alarms.delete(alarmName);
+  try{
+    chrome.alarms.onAlarm.emit({name:alarmName});
+    await until(()=>control.alarms.has(alarmName),"failed alarm retried");
+    assert.ok(control.alarms.get(alarmName).scheduledTime>=Date.now()+29000);
+    assert.equal(control.state.startPageRuntimeState.clocks[alarmId].running,true);
+  }finally{localArea.get=readBeforeAlarm}
+  await ok({type:"complete-clock",instanceId:alarmId,token:alarmClock.completionToken});
+  assert.equal(control.state.startPageRuntimeState.clocks[alarmId].running,false);
+  // A new job following a string-valued platform rejection must still work.
+  localArea.get=async()=>{throw "storage bridge denied"};
+  try{await reject({type:"runtime-note",instanceId:"worker-note",value:"x",expectedValue:""},/storage bridge denied/)}
+  finally{localArea.get=readBeforeAlarm}
+  await ok({type:"runtime-note",instanceId:"worker-note",value:"recovered",expectedValue:""});
+  assert.equal((await view()).runtime.notes["worker-note"],"recovered");
+  // All supported internal new-tab URL variants, and non-new-tab URLs that
+  // must never be redirected (even if their pathname contains 'newtab').
+  for(const url of ["about:newtab","edge://new-tab/","brave://new_tab/","chrome-search://local-ntp/","https://example.com/newtab","not a URL","chrome://settings/","https://extension.example/newtab.html"]){
+    const count=control.calls.length;
+    control.tab={id:1,url};
+    chrome.tabs.onUpdated.emit(1,{url},control.tab);
+    if(url==="about:newtab"||url.startsWith("edge:")||url.startsWith("brave:")||url.startsWith("chrome-search:")){
+      await until(()=>control.calls.length>count,"internal new tab: "+url);
+      assert.deepEqual(control.calls.at(-1),["update",1,{url:"https://extension.example/newtab.html"}]);
+    }else{
+      await new Promise(resolve=>setTimeout(resolve,30));
+      assert.equal(control.calls.length,count,url);
+    }
+  }
+  console.log("Worker: ignored events, early alarm and failed alarm retry, queue recovery and browser URL matrix");
+  }
   await ok({ type: "reset-clocks" });
   await ok({ type: "reset-stats" });
   assert.equal((await getFocusStats()).totals.unblocksAfterCountdown, 0);

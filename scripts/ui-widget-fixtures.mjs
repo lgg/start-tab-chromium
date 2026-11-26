@@ -313,6 +313,37 @@ try {
     staleCommandRoot.remove();staleCommand.click();await delay(20);
     assert.equal(control.messages.length,priorMessages);
   }finally{globalThis.fetch=baseFetch}
+
+  // Search submission should preserve the draft on browser navigation
+  // failure, and must ignore events sent to an already detached form.
+  const searchFailure=widget("search",{provider:"missing"},"search-navigation-failure");
+  const searchForm=one(searchFailure.root,"form");
+  const searchField=one(searchForm,"input");
+  value(searchField,"test query");
+  const realLocation=globalThis.location;
+  let attemptedUrl;
+  const navError=Error("navigation refused");
+  globalThis.location={set href(url){attemptedUrl=url;throw navError}};
+  try{
+    submit(searchForm);
+    assert.ok(attemptedUrl.includes("test%20query")||attemptedUrl.includes("test+query"));
+    assert.ok(errors.includes(navError));
+    assert.ok(hiddenSearchDrafts(new Set()).some(d=>d.value==="test query"));
+    searchFailure.root.remove();
+    attemptedUrl=undefined;
+    submit(searchForm);
+    assert.equal(attemptedUrl,undefined);
+  }finally{globalThis.location=realLocation}
+  const fetchBeforeIp=globalThis.fetch;
+  try{
+    globalThis.fetch=async()=>Response.json({});
+    const malformedIp=widget("ip",{endpoint:"https://malformed-ip.example/"},"malformed-ip");
+    await until(()=>malformedIp.root.textContent==="ipUnavailable");
+    globalThis.fetch=async()=>Response.json({ip:"198.51.100.1"});
+    const countryMissing=widget("ip",{endpoint:"https://missing-country.example/"},"country-missing");
+    await until(()=>countryMissing.root.textContent.includes("198.51.100.1"));
+    assert.match(countryMissing.root.textContent,/ipUnknownCountry/);
+  }finally{globalThis.fetch=fetchBeforeIp}
   console.log("Widget failure and boundary matrix passed");
   console.log("Widgets: dates, search, hidden drafts, IP, pagination, notes, tasks, clocks, history, pinned, stats, calendar, weather and commands");
 } finally {

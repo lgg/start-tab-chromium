@@ -176,6 +176,20 @@ await local.remove(native.NATIVE_NEW_TAB_BYPASS_KEY);
 const {installDom}=await import("./ui-fixture-dom.mjs");
 const dom=await installDom();
 try{
+
+  const {focusExistingSettingsDialog,nextSettingsDialogTitleId}=await import("../src/lib/settings-dialog-guard.js");
+  assert.equal(focusExistingSettingsDialog(),false);
+  const emptyDialog=document.createElement("dialog");
+  emptyDialog.className="settings-dialog";emptyDialog.setAttribute("open","");emptyDialog.tabIndex=-1;
+  document.body.append(emptyDialog);
+  assert.equal(focusExistingSettingsDialog(),true);
+  assert.equal(document.activeElement,emptyDialog);
+  const enabledButton=document.createElement("button");
+  emptyDialog.append(enabledButton);
+  assert.equal(focusExistingSettingsDialog(),true);
+  assert.equal(document.activeElement,enabledButton);
+  assert.notEqual(nextSettingsDialogTitleId("settings"),nextSettingsDialogTitleId("settings"));
+  emptyDialog.remove();
   control.handler=async m=>({ok:true,changed:m.host==="example.com"});
   assert.equal(await bl.unblockHost("example.com"),true);
   assert.equal(await bl.unblockHost("missing.example"),false);
@@ -185,3 +199,47 @@ try{
   assert.deepEqual(control.messages.at(-1),{type:"delete-instance-runtime",instanceId:"example",expectedBlockUpdatedAt:1,expectedRuntimeUpdatedAt:2});
 }finally{dom.window.close()}
 console.log("Navigation: failed session lookup, DNR repair, native grant cleanup and UI-to-worker mutation boundaries");
+
+ // Residual pure helpers: success/failure isolation, stable JSON, missing
+ // navigation metadata, and a task acknowledgement with mismatched text.
+{
+  const {runIndependentEffects}=await import("../src/lib/independent-effects.js");
+  const calls=[];
+  await runIndependentEffects([async()=>{calls.push(1)},async()=>{calls.push(2)}],"effects");
+  assert.deepEqual(calls,[1,2]);
+  const first=Error("first"),second=Error("second");
+  await assert.rejects(runIndependentEffects([async()=>{throw first},async()=>{calls.push(3)}],"effects"),error=>error===first);
+  assert.deepEqual(calls,[1,2,3]);
+  await assert.rejects(runIndependentEffects([async()=>{throw first},async()=>{calls.push(4);throw second},async()=>{calls.push(5)}],"effects"),error=>error instanceof AggregateError&&error.message==="effects"&&error.errors[0]===first&&error.errors[1]===second);
+  assert.deepEqual(calls,[1,2,3,4,5]);
+  const {canonicalJsonValue,jsonContentEqual}=await import("../src/lib/json-content.js");
+  assert.deepEqual(canonicalJsonValue({z:1,a:[{b:2,a:1},null]}),{a:[{a:1,b:2},null],z:1});
+  assert.equal(jsonContentEqual({z:1,a:2},{a:2,z:1}),true);
+  assert.equal(jsonContentEqual([1,2],[2,1]),false);
+  const {containsSplitViewMarker,SPLIT_VIEW_MARKERS}=await import("../src/lib/split-view-markers.js");
+  assert.equal(containsSplitViewMarker(null),false);
+  assert.equal(containsSplitViewMarker(undefined),false);
+  for(const marker of SPLIT_VIEW_MARKERS)assert.equal(containsSplitViewMarker("prefix-"+marker.toUpperCase()+"-suffix"),true);
+  const {NewTabRedirectGuard,currentTabNavigationUrl,changedTabNavigationUrl}=await import("../src/lib/tab-navigation-change.js");
+  const calls2=[];
+  const guard=new NewTabRedirectGuard({isEligible:()=>true,getTab:async()=>{calls2.push("get");throw Error("tab closed")},shouldBypass:async()=>false,isEnabled:async()=>true,redirect:async()=>{calls2.push("redirect")}});
+  await guard.observe(undefined,"chrome://newtab/");
+  await guard.observe(1,undefined);
+  assert.deepEqual(calls2,[]);
+  await guard.observe(1,"chrome://newtab/");
+  assert.deepEqual(calls2,["get"]);
+  assert.equal(currentTabNavigationUrl({url:"old",pendingUrl:""}),"old");
+  assert.equal(changedTabNavigationUrl({url:42}),null);
+  const {TaskFormSession}=await import("../src/newtab/task-submission-gate.js");
+  const taskSession=new TaskFormSession();
+  taskSession.draft="next draft";
+  const draft=taskSession.snapshotDraft();
+  taskSession.acknowledge({...draft,value:"different"});
+  assert.equal(taskSession.draft,"next draft");
+  taskSession.acknowledge(draft);
+  assert.equal(taskSession.draft,"");
+  const {formatDateParts,createDatePartsFormatter}=await import("../src/newtab/date-pattern.js");
+  assert.equal(formatDateParts("YYYY-MM DD HH:mm:ss",{}),"-MM  ::");
+  assert.equal(createDatePartsFormatter("en-GB","UTC")(new Date("2026-11-26T12:34:56Z")).hour,"12");
+  console.log("Residual helpers: effect aggregation, canonical data, split-view markers, tab lifecycle and draft acknowledgement");
+}

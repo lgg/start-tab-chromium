@@ -101,6 +101,60 @@ try{
 await rt.deleteInstanceRuntime(note.id);
 assert.equal((await rt.getStartPageRuntimeState()).notes[note.id],undefined);
 
+
+  // Reset completed timers to their full duration, and manually advance a
+  // non-auto-starting pomodoro without starting another work session.
+  const finishedTimer={...rt.defaultClockForBlock(timer),accumulatedMs:timer.config.durationSeconds*1000};
+  const restarted=rt.startClockState(finishedTimer,500);
+  assert.equal(restarted.accumulatedMs,0);
+  assert.equal(restarted.targetAt,500+finishedTimer.durationMs);
+  const manualSettings=structuredClone(settings);
+  manualSettings.layout.blocks.find(b=>b.id===pomodoro.id).config.autoStartNextPhase=false;
+  await local.set({startPageSettings:manualSettings});
+  let manual=rt.startClockState(rt.defaultClockForBlock(pomodoro),Date.now()-120000);
+  await rt.updateStartPageRuntimeState(r=>{r.clocks[pomodoro.id]=manual;return r});
+  const manualBreak=await rt.completeClockInstance(pomodoro.id,manual.completionToken);
+  assert.equal(manualBreak.completed,true);
+  assert.equal(manualBreak.clock.running,false);
+  assert.equal(manualBreak.clock.phase,"break");
+  assert.equal(manualBreak.clock.targetAt,null);
+  assert.equal(manualBreak.clock.startedAt,null);
+  assert.equal(manualBreak.clock.completionToken,null);
+  assert.equal(manualBreak.startedWork,false);
+  manual=rt.startClockState(manualBreak.clock,Date.now()-120000);
+  await rt.updateStartPageRuntimeState(r=>{r.clocks[pomodoro.id]=manual;return r});
+  const manualWork=await rt.completeClockInstance(pomodoro.id,manual.completionToken);
+  assert.equal(manualWork.clock.phase,"work");
+  assert.equal(manualWork.clock.running,false);
+  assert.equal(manualWork.startedWork,false);
+  // A persisted completed token must be idempotent even if the browser
+  // delivers another alarm while the clock is still marked as running.
+  const duplicateClock=rt.startClockState(rt.defaultClockForBlock(timer),Date.now()-120000);
+  duplicateClock.lastCompletedToken=duplicateClock.completionToken;
+  await rt.updateStartPageRuntimeState(r=>{r.clocks[timer.id]=duplicateClock;return r});
+  const duplicateResult=await rt.completeClockInstance(timer.id,duplicateClock.completionToken);
+  assert.equal(duplicateResult.completed,false);
+  assert.equal((await rt.getStartPageRuntimeState()).clocks[timer.id].running,true);
+  await rt.resetAllClockRuntimeWithAlarms();
+
+  // Reset failures must preserve old state and report a failed rollback as
+  // an AggregateError, rather than claiming a reset was committed.
+  const beforeReset=await local.get(null);
+  const beforeResetAlarms=await rt.readClockAlarmSnapshot();
+  local.remove=async keys=>{if(Array.isArray(keys)&&keys.includes(rt.START_PAGE_RUNTIME_KEY))throw Error("reset removal denied");return remove(keys)};
+  try{
+    await assert.rejects(rt.resetStartPageData(),/reset removal denied/);
+    assert.deepEqual(await local.get(null),beforeReset);
+    assert.deepEqual(await rt.readClockAlarmSnapshot(),beforeResetAlarms);
+  }finally{local.remove=remove}
+  local.remove=async keys=>{if(Array.isArray(keys)&&keys.includes(rt.START_PAGE_RUNTIME_KEY))throw Error("reset removal denied");return remove(keys)};
+  local.set=async values=>{if(Object.hasOwn(values,rt.START_PAGE_RUNTIME_KEY))throw Error("reset rollback denied");return set(values)};
+  try{
+    await assert.rejects(rt.resetStartPageData(),e=>e instanceof AggregateError&&/restore the previous state/.test(e.message));
+  }finally{local.remove=remove;local.set=set}
+  await local.set(beforeReset);
+  console.log("Runtime: completed timer restart, manual pomodoro phase transition, duplicate completion token and reset rollback");
+
 // Public settings APIs must refuse additions/duplications at the real cap.
 const full={...settings,layout:{...settings.layout,mode:"free",blocks:Array.from({length:MAX_START_PAGE_BLOCKS},(_,i)=>api.createBlockInstance("note",{id:"capacity-"+i,createdAt:100,updatedAt:100}))}};
 await local.set({startPageSettings:api.normalizeStartPageSettings(full)});
