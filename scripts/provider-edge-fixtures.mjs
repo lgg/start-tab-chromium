@@ -71,5 +71,27 @@ try {
   await assert.rejects(google.restoreDriveBackup(),/No Start Tab backup/);
   globalThis.fetch=async()=>response({files:[],nextPageToken:"loop"});
   await assert.rejects(google.restoreDriveBackup(),/did not advance/);
+
+  globalThis.fetch=async()=>response({});
+  assert.deepEqual(await google.listCalendarEvents(),[]);
+  globalThis.fetch=async()=>response({items:[{...allDay,start:{date:"2027-01-01",dateTime:"2027-01-01T10:00:00Z"},end:{dateTime:"2027-01-01T11:00:00Z"}}]});
+  assert.equal((await google.listCalendarEvents())[0].allDay,false);
+  let pages=0;
+  globalThis.fetch=async()=>response({files:[],nextPageToken:"page-"+(++pages)});
+  await assert.rejects(google.restoreDriveBackup(),/safe pagination limit/);
+  assert.equal(pages,100);
+  const backup=await import("../src/lib/backup.js");
+  const bundle=await backup.exportBackup();
+  bundle.storage.blockedSites=["restored.example"];
+  let mediaReads=0;
+  globalThis.fetch=async url=>{
+    const parsed=new URL(url);
+    if(parsed.searchParams.get("alt")==="media"){mediaReads++;return response(bundle)}
+    return response({files:[{id:"test-file",name:"start-tab-backup.json"}]});
+  };
+  await google.restoreDriveBackup();
+  assert.deepEqual(control.state.blockedSites,["restored.example"]);
+  assert.equal(mediaReads,1);
+  console.log("Google: absent items, timed event precedence, bounded pagination and successful media restore");
   console.log("Locale and Google failure matrix: auto detection, fallback, CAS, malformed responses, invalid tokens, retry, size limit, calendar dates and Drive listing");
 } finally {restoreFetch();dom.window.close();}
