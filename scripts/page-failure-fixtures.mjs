@@ -16,6 +16,8 @@ async function blocked(query,run,options={}){
   window.clearInterval=()=>{tick=undefined};
   try{
     if(options.inactive)control.state.blockedSites=[];
+    if(options.locale)control.state.localeOverride=options.locale;
+    if(options.prepare)await options.prepare(control);
     if(options.badCatalog)globalThis.fetch=async()=>new Response(null,{status:404});
     await import("../src/blocked/blocked.ts?case="+(++serial));
     if(options.badCatalog)await until(()=>!one(document,"#unblockError").hidden);
@@ -62,6 +64,45 @@ try{
     assert.equal(one(document,"#unblock").disabled,true);
     assert.equal(one(document,"#actions").hidden,true);
   },{badCatalog:true});
+
+  for(const locale of ["en","ru"]){
+    await blocked("?site=blocked.example",async(control,advance,getTick)=>{
+      const t=await loadI18n();
+      const count=one(document,"#countdownText");
+      const unblock=one(document,"#unblock"),cancel=one(document,"#cancel");
+      const units=[[10,"secondMany"],[5,"secondMany"],[4,locale==="ru"?"secondFew":"secondMany"],[2,locale==="ru"?"secondFew":"secondMany"],[1,"secondOne"]];
+      unblock.click();
+      let previous=10;
+      for(const [seconds,unit] of units){
+        advance((previous-seconds)*1000);
+        assert.equal(count.textContent,t.t("unblockingCountdown",{host:"blocked.example",remaining:seconds,unit:t.t(unit)}));
+        previous=seconds;
+      }
+      cancel.click();assert.equal(getTick(),undefined);
+      assert.equal(unblock.disabled,false);
+      assert.equal(one(document,"#actions").hidden,false);
+      control.handler=async m=>m.type==="blocked-original-url"?{ok:true,blockedUrl:"https://sub.blocked.example/old"}:{ok:false,error:"unblock denied"};
+      unblock.click();advance(10001);
+      await until(()=>!one(document,"#unblockError").hidden);
+      assert.equal(unblock.disabled,false);
+      assert.equal(control.messages.filter(m=>m.type==="record-unblock").length,0);
+      control.handler=async m=>m.type==="blocked-original-url"?{ok:true,blockedUrl:"https://unrelated.example/"}:m.type==="unblock"?{ok:true,changed:true}:{ok:false,error:"statistics unavailable"};
+      unblock.click();advance(10001);
+      await until(()=>control.messages.some(m=>m.type==="record-unblock"));
+      await delay(20);
+      assert.equal(control.messages.filter(m=>m.type==="record-unblock").length,1);
+    },{locale});
+  }
+  await blocked("?site=blocked.example",async(control,advance)=>{
+    let release;
+    control.handler=m=>m.type==="blocked-original-url"?Promise.resolve({ok:true,blockedUrl:"https://blocked.example/"}):new Promise(resolve=>release=resolve);
+    one(document,"#unblock").click();advance(10001);
+    await until(()=>release);
+    window.dispatchEvent(new window.Event("pagehide"));
+    release({ok:true,changed:true});
+    await delay(20);
+    assert.equal(control.messages.some(m=>m.type==="record-unblock"),false);
+  });
   console.log("Blocked page: malformed URL, stale asynchronous pagehide, already removed, fallback and startup failure");
 
   async function popup(run,prepare=()=>{}){
@@ -125,6 +166,36 @@ try{
     assert.equal(one(document,"#primary").disabled,true);
     assert.equal(one(document,"#language").disabled,true);
   },()=>{globalThis.fetch=async()=>new Response(null,{status:404})});
+
+  await popup(async control=>{
+    control.chrome.tabs.reload=async()=>{throw Error("reload not supported")};
+    let closed=0;window.close=()=>closed++;
+    control.handler=async()=>({ok:true,changed:true});
+    one(document,"#primary").click();
+    await until(()=>closed===1);
+    assert.equal(control.messages.at(-1).type,"unblock");
+  });
+  await popup(async control=>{
+    window.confirm=()=>false;
+    one(document,"#clear").click();await until(()=>!one(document,"#clear").disabled);
+    assert.equal(control.messages.length,0);
+    window.confirm=()=>true;
+    control.handler=async()=>({ok:false,error:"clear refused"});
+    one(document,"#clear").click();
+    await until(()=>one(document,"#note").textContent.includes("clear refused"));
+    assert.equal(one(document,"#clear").disabled,false);
+    assert.deepEqual(control.state.blockedSites,["blocked.example"]);
+    control.chrome.storage.local.get=async()=>{throw "read refused"};
+    one(document,"#clear").click();
+    await until(()=>one(document,"#note").textContent.includes("read refused"));
+    assert.equal(one(document,"#clear").disabled,false);
+  });
+  await popup(async control=>{
+    control.handler=async()=>({ok:false,error:"block refused"});
+    one(document,"#primary").click();
+    await until(()=>one(document,"#note").textContent.includes("block refused"));
+    assert.equal(control.messages.at(-1).type,"block");
+  },control=>{control.tab={id:1,url:"https://new.example/"}}); 
   console.log("Popup: unblock stale tab, committed/failed refresh, locale CAS and catalog failures");
   // Gate starts in the browser's split context even when discovered through
   // an opener rather than window.name. Failure to list tabs must keep the

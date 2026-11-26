@@ -97,6 +97,56 @@ try {
   assert.equal((await view()).runtime.clocks["worker-timer"].running, false);
   assert.equal(failedNotice.notificationFailed, true);
   chrome.notifications.create = originalNotice;
+
+  // Worker uses the browser locale if catalog reads fail; alarm completion
+  // must remain committed regardless of translation or delivery failures.
+  const originalFetch=globalThis.fetch, originalMessage=chrome.i18n.getMessage;
+  const originalLocale=control.state.localeOverride;
+  try{
+    for(const mode of ["http","throw","empty","auto"]){
+      control.state.localeOverride=mode==="auto"?undefined:"ru";
+      chrome.i18n.getMessage=()=>mode==="empty"?"":"native fallback";
+      globalThis.fetch=async()=>{
+        if(mode==="throw")throw Error("catalog unavailable");
+        return mode==="http"?new Response("",{status:503}):Response.json({});
+      };
+      await ok({type:"clock-action",instanceId:"worker-timer",action:"reset"});
+      await ok({type:"clock-action",instanceId:"worker-timer",action:"start"});
+      const clock=control.state.startPageRuntimeState.clocks["worker-timer"];
+      // Restore a valid persisted countdown whose deadline already elapsed.
+      clock.startedAt=Date.now()-3000;clock.targetAt=Date.now()-2000;
+      await ok({type:"complete-clock",instanceId:"worker-timer",token:clock.completionToken});
+      assert.equal((await view()).runtime.clocks["worker-timer"].running,false);
+      const notification=control.calls.filter(c=>c[0]==="notification").at(-1)[2];
+      assert.equal(notification.message,mode==="empty"?"timerDone":"native fallback");
+    }
+  }finally{globalThis.fetch=originalFetch;chrome.i18n.getMessage=originalMessage;control.state.localeOverride=originalLocale}
+  await ok({type:"clock-action",instanceId:"worker-pomodoro",action:"start"});
+  const focusStart=control.state.startPageRuntimeState.clocks["worker-pomodoro"];
+  focusStart.startedAt=Date.now()-3000;focusStart.focusSessionStartedAt=focusStart.startedAt;
+  await ok({type:"clock-action",instanceId:"worker-pomodoro",action:"reset"});
+  assert.equal((await view()).runtime.clocks["worker-pomodoro"].running,false);
+  assert.ok((await getFocusStats()).totals.focusSessionsInterrupted>=1);
+  // Failure of a native browser redirect must be contained by the event
+  // listener, then a later observation must be able to redirect normally.
+  const redirectUpdateBefore=chrome.tabs.update;
+  let rejectedRedirect=0;
+  control.tab={id:1,url:"chrome://newtab/"};
+  chrome.tabs.update=async()=>{rejectedRedirect++;throw Error("internal tab denied")};
+  chrome.tabs.onUpdated.emit(1,{url:"chrome://newtab/"},control.tab);
+  await until(()=>rejectedRedirect===1,"rejected internal redirect");
+  chrome.tabs.update=redirectUpdateBefore;
+  chrome.tabs.onUpdated.emit(1,{url:"chrome://newtab/"},control.tab);
+  await until(()=>control.calls.some(c=>c[0]==="update"&&c[2]?.url==="https://extension.example/newtab.html"),"redirect after refusal");
+  const previousCount=control.calls.length;
+  const oldManifest=chrome.runtime.getManifest;
+  chrome.runtime.getManifest=()=>({});
+  control.tab={id:1,url:"chrome://newtab/"};
+  chrome.tabs.onUpdated.emit(1,{url:"chrome://newtab/"},control.tab);
+  await new Promise(resolve=>setTimeout(resolve,40));
+  assert.equal(control.calls.length,previousCount);
+  chrome.runtime.getManifest=oldManifest;
+  console.log("Worker residual: translation fallbacks, interrupted pomodoro, rejected browser redirect and blocker-only manifest");
   await ok({ type: "reset-clocks" });
   await ok({ type: "reset-stats" });
   assert.equal((await getFocusStats()).totals.unblocksAfterCountdown, 0);
