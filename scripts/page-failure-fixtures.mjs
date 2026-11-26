@@ -19,7 +19,7 @@ async function blocked(query,run,options={}){
     if(options.badCatalog)globalThis.fetch=async()=>new Response(null,{status:404});
     await import("../src/blocked/blocked.ts?case="+(++serial));
     if(options.badCatalog)await until(()=>!one(document,"#unblockError").hidden);
-    else if(!options.inactive)await until(()=>document.title!=="");
+    else if(!options.inactive)await until(()=>one(document,"#site").textContent!=="");
     await run(control,ms=>{now+=ms;tick?.()},()=>tick);
   }finally{globalThis.fetch=catalog;Object.defineProperty(globalThis,"performance",{configurable:true,writable:true,value:originalPerformance});dom.window.close()}
 }
