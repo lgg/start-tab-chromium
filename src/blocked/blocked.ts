@@ -16,12 +16,15 @@ const errorEl = document.getElementById("unblockError") as HTMLParagraphElement;
 const host = readBlockedHost();
 let interval: number | undefined;
 let countdownActive = false;
+let pageActive = true;
 let i18n: I18n;
 
 function readBlockedHost(): string {
-  const value = new URLSearchParams(location.search).get("site") ?? "";
+  const sites = new URLSearchParams(location.search).getAll("site");
+  if (sites.length !== 1) return "";
+  const value = sites[0]!;
   const normalized = normalizeHost(value);
-  return normalized && hostFromUrl(`https://${normalized}/`) === normalized ? normalized : "";
+  return normalized && normalized === value && hostFromUrl(`https://${normalized}/`) === normalized ? normalized : "";
 }
 
 async function blockedHostIsActive(): Promise<boolean> {
@@ -52,7 +55,7 @@ function clearCountdownTimer(): void {
 }
 
 function startCountdown(): void {
-  if (!host || countdownActive) return;
+  if (!pageActive || !host || countdownActive) return;
   countdownActive = true;
   errorEl.hidden = true;
   errorEl.textContent = "";
@@ -63,7 +66,7 @@ function startCountdown(): void {
   const deadline = performance.now() + WAIT_SECONDS * 1000;
 
   const tick = (): void => {
-    if (!countdownActive) return;
+    if (!pageActive || !countdownActive) return;
     const remaining = remainingCountdownSeconds(deadline, performance.now());
     countdownTextEl.textContent = i18n.t("unblockingCountdown", {
       host,
@@ -83,6 +86,7 @@ function startCountdown(): void {
 }
 
 function cancelCountdown(): void {
+  if (!pageActive || cancelEl.disabled) return;
   clearCountdownTimer();
   countdownActive = false;
   unblockEl.disabled = false;
@@ -92,6 +96,7 @@ function cancelCountdown(): void {
 }
 
 function showUnblockFailed(): void {
+  if (!pageActive) return;
   clearCountdownTimer();
   errorEl.textContent = i18n.t("failedToUnblock");
   errorEl.hidden = false;
@@ -116,7 +121,7 @@ type UnblockResult = "removed" | "unchanged" | "failed";
 
 async function requestUnblock(): Promise<UnblockResult> {
   try {
-    if (!await blockedHostIsActive()) return "unchanged";
+    if (!await blockedHostIsActive() || !pageActive) return "unchanged";
     const ack = await sendMessage({ type: "unblock", host });
     return ack.changed === true ? "removed" : "unchanged";
   } catch {
@@ -140,7 +145,9 @@ async function redirectUrlAfterUnblock(): Promise<string> {
 async function finishUnblock(): Promise<void> {
   countdownTextEl.textContent = i18n.t("unblockingNow", { host });
   const redirectUrl = await redirectUrlAfterUnblock();
+  if (!pageActive) return;
   const result = await requestUnblock();
+  if (!pageActive) return;
   if (result === "failed") {
     showUnblockFailed();
     return;
@@ -148,7 +155,7 @@ async function finishUnblock(): Promise<void> {
   if (result === "removed") {
     await sendMessage({ type: "record-unblock", host }).catch(() => undefined);
   }
-  location.replace(redirectUrl);
+  if (pageActive) location.replace(redirectUrl);
 }
 
 async function init(): Promise<void> {
@@ -162,17 +169,19 @@ async function init(): Promise<void> {
     return;
   }
   i18n = await loadI18n();
+  if (!pageActive) return;
   document.title = i18n.t("blockedPageTitle");
   unblockEl.textContent = i18n.t("unblockThisSite");
   cancelEl.textContent = i18n.t("cancelUnblocking");
   if (host && !await blockedHostIsActive()) {
-    location.replace(await redirectUrlAfterUnblock());
+    const redirectUrl = await redirectUrlAfterUnblock();
+    if (pageActive) location.replace(redirectUrl);
     return;
   }
+  if (!pageActive) return;
   unblockEl.disabled = !host;
   unblockEl.addEventListener("click", startCountdown);
   cancelEl.addEventListener("click", cancelCountdown);
-  window.addEventListener("pagehide", clearCountdownTimer);
   // A restored BFCache page must not retain a stopped, non-restartable countdown.
   window.addEventListener("pageshow", (event) => {
     if (event.persisted) location.reload();
@@ -180,4 +189,9 @@ async function init(): Promise<void> {
   renderMessage();
 }
 
-void init().catch(showStartupFailed);
+window.addEventListener("pagehide", () => {
+  pageActive = false;
+  countdownActive = false;
+  clearCountdownTimer();
+});
+void init().catch((error: unknown) => { if (pageActive) showStartupFailed(error); });
