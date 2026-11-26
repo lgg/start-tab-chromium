@@ -215,6 +215,7 @@ async function handle(message: Message, sender: chrome.runtime.MessageSender): P
         sender, blockedPageUrl(), message.host,
         (id) => chrome.tabs.get(id),
         (id, host) => blockedNavigations.lookup(id, host),
+        (id) => chrome.webNavigation.getFrame({ tabId: id, frameId: 0 }),
       );
       return blockedUrl ? { blockedUrl } : {};
     }
