@@ -7,10 +7,10 @@ first use. CI executes it on the dedicated Windows runner.
 
 The existing runtime fixture suites are discovered from npm test and run
 in separate processes against individually transpiled TypeScript modules
-with inline source maps. The build-only fixture keeps its original runner.
+with inline source maps. Build and tooling fixtures keep their original runners.
 Static regex checks and builds are not counted as runtime execution.
 
-c8 includes all production .ts files under src, including unimported files.
+c8 includes all production .ts and .js files under src, including unimported files.
 The report is checked for missing files and printed per file to the job log
 and GitHub Actions job summary. Reports and raw coverage are held in a
 unique temporary directory and deleted after the run, without uploading
