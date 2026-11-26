@@ -435,5 +435,72 @@ try {
   assert.ok([...limitCard.querySelectorAll("button")].some(b=>b.disabled&&b.title.startsWith("blockCapacityReached")));
   limitEditor.cancel();
   console.log("Layout editor: free-mode add/duplicate, no-data delete confirmation, pointer release failure and capacity");
+
+  // A saved layout may change while old cards are still mounted. Every old
+  // card action must be harmless when the target no longer exists.
+  {
+    const s=cloneSettings(settings);
+    const staleToolbar=host(),stalePalette=host(),staleGrid=host();
+    const staleEditor=new LayoutEditor(s,{i18n,toolbarHost:staleToolbar,paletteHost:stalePalette,getRuntime:()=>runtime,requestRender:()=>{},previewBlock:()=>{},onSaved:()=>{},onError:e=>errors.push(e)});
+    staleEditor.enter();
+    const oldCard=document.createElement("article");
+    staleGrid.append(oldCard);staleEditor.decorateCard(oldCard,s.layout.blocks[0]);
+    const latest=cloneSettings(s);latest.updatedAt=s.updatedAt+1;
+    latest.layout.blocks=latest.layout.blocks.filter(b=>b.id!==note.id);
+    staleEditor.replaceSavedSettings(latest);
+    const before=cloneSettings(staleEditor.settings);
+    let confirms=0;const oldConfirm=window.confirm;window.confirm=()=>{confirms++;return true};
+    try{
+      for(const action of ["editBlock","disableBlock","duplicateBlock","deleteBlock"])button(oldCard,action).click();
+      key(oldCard,"ArrowRight");
+      pointer(one(oldCard,".card__drag-handle"),"pointerdown",10,10);
+      await Promise.resolve();
+      assert.equal(staleEditor.isPointerActive,false);
+      assert.equal(document.querySelector("dialog[open]"),null);
+      assert.equal(confirms,0);
+      assert.deepEqual(staleEditor.settings,before);
+      assert.equal(staleEditor.hasUnsavedChanges,false);
+    }finally{window.confirm=oldConfirm;staleEditor.cancel()}
+  }
+  // Saving is a single in-flight transaction; stale controls cannot start
+  // another save, change geometry, or abandon the draft during the request.
+  {
+    const s=cloneSettings(settings), t=host(), p=host(), g=host();
+    const ed=new LayoutEditor(s,{i18n,toolbarHost:t,paletteHost:p,getRuntime:()=>runtime,requestRender:()=>{},previewBlock:()=>{},onSaved:()=>{},onError:e=>errors.push(e)});
+    ed.enter();const c=document.createElement("article");g.append(c);ed.decorateCard(c,s.layout.blocks[0]);
+    let finish;const previousHandler=control.handler;
+    control.handler=m=>new Promise(resolve=>{finish=()=>resolve({ok:true,savedSettings:{...m.settings,updatedAt:999}})});
+    try{
+      const saving=ed.save();await until(()=>finish);
+      const before=cloneSettings(ed.settings),n=control.messages.length;
+      await ed.save();ed.cancel();ed.enter();
+      button(c,"editBlock").click();button(c,"disableBlock").click();
+      key(c,"ArrowDown");
+      pointer(one(c,".card__drag-handle"),"pointerdown",10,10);
+      assert.equal(control.messages.length,n);assert.equal(ed.isPointerActive,false);
+      assert.equal(document.querySelector("dialog[open]"),null);assert.deepEqual(ed.settings,before);
+      finish();await saving;
+      assert.equal(ed.isActive,false);
+      assert.equal(ed.settings.updatedAt,999);
+    }finally{control.handler=previousHandler}
+  }
+  // Generated collection item IDs remain available in browsers without
+  // crypto.randomUUID, and edits preserve the IDs on subsequent saves.
+  {
+    const descriptor=Object.getOwnPropertyDescriptor(globalThis,"crypto");
+    try{
+      Object.defineProperty(globalThis,"crypto",{configurable:true,value:undefined});
+      const editing=editBlockInstance(createBlockInstance("links"),i18n);
+      const dialog=one(document,"dialog[open]");
+      button(dialog,"addLink").click();
+      const row=[...dialog.querySelectorAll(".collection-row")].at(-1);
+      value(one(row,'[aria-label="linkTitle"]'),"Fallback link");
+      value(one(row,'[aria-label="linkUrl"]'),"https://fallback.example/");
+      submit(one(dialog,"form"));
+      const item=(await editing).config.items.find(i=>i.title==="Fallback link");
+      assert.match(item.id,/^link-/);
+      assert.equal(item.url,"https://fallback.example/");
+    }finally{Object.defineProperty(globalThis,"crypto",descriptor)}
+  }
   console.log("Theme editor: 4 background kinds, 7 effects, panel preservation, DOM CSS application, cancel");
 } finally { dom.window.close(); }
