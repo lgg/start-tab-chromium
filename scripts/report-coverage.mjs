@@ -11,7 +11,7 @@ if (!npmCli) throw new Error("Run via npm run test:coverage");
 try {
   const args = [npmCli, "exec", "--yes", "--package=c8@10.1.3", "--", "c8",
     "--all", "--src", "src", "--extension", ".ts", "--extension", ".js", "--include", "src/**/*.ts", "--include", "src/**/*.js",
-    "--exclude-after-remap", "--reporter=text", "--reporter=json-summary",
+    "--exclude-after-remap", "--reporter=text", "--reporter=json-summary", "--reporter=json",
     "--reports-dir", temporary, "--temp-directory", path.join(temporary, "raw"),
     "node", "scripts/run-coverage-fixtures.mjs"];
   const child = spawnSync(process.execPath, args, { cwd: root, stdio: "inherit" });
@@ -40,6 +40,18 @@ try {
   const report = ["## Source coverage (c8 / V8)", "Production TypeScript and JavaScript; includes files not imported by tests. V8 branch coverage is engine-derived; browser E2E is not measured here.", header,
     row("**All source**", summary.total), ...entries.sort(([a], [b]) => a.localeCompare(b)).map(([name, item]) => row(path.relative(root, name).replaceAll("\\", "/"), item))].join("\n");
   console.log(report);
+  // Keep exact missed ranges in logs for targeted follow-up; the temporary
+  // report stays local to the runner and is removed in finally.
+  const detail = JSON.parse(await readFile(path.join(temporary, "coverage-final.json"), "utf8"));
+  for (const [name, file] of Object.entries(detail).sort(([a], [b]) => a.localeCompare(b))) {
+    const missed = Object.entries(file.b ?? {}).flatMap(([id, counts]) =>
+      counts.flatMap((count, index) => {
+        if (count !== 0) return [];
+        const loc = file.branchMap?.[id]?.locations?.[index];
+        return loc ? [`${loc.start.line}:${loc.start.column}-${loc.end.line}:${loc.end.column}`] : [];
+      }));
+    if (missed.length) console.log("UNCOVERED_BRANCHES " + path.relative(root, name).replaceAll("\\", "/") + " " + missed.join(", "));
+  }
   console.log("COVERAGE_TOTAL " + JSON.stringify({ ...summary.total, sourceFiles: expected.length, zeroLineFiles: entries.filter(([, item]) => item.lines.covered === 0).length }));
   if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, report + "\n", "utf8");
 } finally {
