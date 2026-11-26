@@ -289,4 +289,37 @@ try{
     console.log("Gate: opener detection, diagnostic/query errors, stale overlay lease, focus trap, locale and native fallbacks");
   }finally{globalThis.fetch=catalog;gateDom.window.close()}
 
+
+  // A web-accessible blocked page embedded as a subframe must never expose
+  // an active countdown or send unblock messages.
+  const frameDom=await installDom("blocked/blocked.html","https://extension.example/blocked.html?site=blocked.example");
+  const frameControl=installChrome(seed());
+  const topWindow=window,topDocument=document,topLocation=location;
+  try{
+    const frame=topDocument.createElement("iframe");
+    topDocument.body.append(frame);
+    frame.contentDocument.body.innerHTML=topDocument.body.innerHTML.split("<iframe")[0];
+    globalThis.window=frame.contentWindow;
+    globalThis.document=frame.contentDocument;
+    globalThis.location=frame.contentWindow.location;
+    await import("../src/blocked/blocked.ts?case="+(++serial));
+    assert.equal(one(document,"#unblock").disabled,true);
+    assert.equal(one(document,"#cancel").disabled,true);
+    assert.equal(one(document,"#actions").hidden,true);
+    one(document,"#unblock").click();
+    assert.equal(frameControl.messages.length,0);
+  }finally{globalThis.window=topWindow;globalThis.document=topDocument;globalThis.location=topLocation;frameDom.window.close()}
+  // Fatal initialization errors are shown instead of a blank, unusable UI.
+  for(const page of ["newtab","options"]){
+    const failDom=await installDom(page+"/"+page+".html");
+    const failControl=installChrome(seed());
+    failControl.chrome.storage.local.get=async()=>{throw Error("startup storage unavailable")};
+    try{
+      await import("../src/"+page+"/"+page+".ts?case="+(++serial));
+      const selector=page==="newtab"?"#grid .fatal-error":"#status";
+      await until(()=>document.querySelector(selector)?.textContent.includes("startup storage unavailable"),page+" fatal initialization");
+      assert.equal(failControl.messages.length,0);
+    }finally{failDom.window.close()}
+  }
+  console.log("Page initialization: blocked subframe and fatal startup reads");
 }finally{restoreFetch()}
