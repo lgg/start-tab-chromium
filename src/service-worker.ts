@@ -30,7 +30,7 @@ import { changedTabNavigationUrl, currentTabNavigationUrl, NewTabRedirectGuard }
 import { assertRuntimeMutationTarget } from "./lib/runtime-mutation-target.js";
 import { isMessage, type Ack, type ClockAction, type Message } from "./lib/messages.js";
 import { consumeNativeNewTabBypass, openNativeNewTab } from "./lib/native-new-tab.js";
-import { BlockedNavigationRegistry, isBlockedPageNavigation, readBlockedDestinationForSender, mayMutateFromBlockedPage } from "./lib/blocked-navigation.js";
+import { BlockedNavigationRegistry, isBlockedPageNavigation, readBlockedDestinationForSender, mayMutateFromBlockedPage, isCurrentBlockedPageSender } from "./lib/blocked-navigation.js";
 import {
   completeClockInstance,
   defaultClockForBlock,
@@ -188,7 +188,17 @@ async function handle(message: Message, sender: chrome.runtime.MessageSender): P
   }
   switch (message.type) {
     case "block": await blockHost(message.host); break;
-    case "unblock": return { changed: await unblockHost(message.host) };
+    case "unblock": {
+      const fromBlockedPage = !!sender.url && isBlockedPageNavigation(sender.url, blockedPageUrl());
+      const assertCurrent = fromBlockedPage ? async () => {
+        if (!await isCurrentBlockedPageSender(
+          sender, blockedPageUrl(), message.host,
+          (id) => chrome.tabs.get(id),
+          (id) => chrome.webNavigation.getFrame({ tabId: id, frameId: 0 }),
+        )) throw new Error("Blocked page changed before unblocking; no site was removed");
+      } : undefined;
+      return { changed: await unblockHost(message.host, assertCurrent) };
+    }
     case "clear": await clearAll(message.expectedSites); break;
     case "replace-blocked-sites": await replaceBlockedSites(message.sites); break;
     case "open-native-new-tab": await runNativeTabJob(openNativeNewTab); break;
