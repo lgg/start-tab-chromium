@@ -217,6 +217,95 @@ try {
   await rt.resetStartPageRuntimeState();
   assert.equal((await rt.getStartPageRuntimeState()).notes[block.id] ?? "", "");
   assert.equal(control.alarms.size, 0);
+  // Durable mutation rollback and a stale guard must never change persisted
+  // blocklist rules or navigation data.
+  const bl=await import("../src/lib/blocklist.js");
+  await bl.replaceBlockedSites(["example.com","sub.example.com"]);
+  assert.equal(await bl.isBlocked("https://sub.example.com/"),true);
+  assert.equal(await bl.isBlocked("chrome://settings/"),false);
+  assert.equal(await bl.rememberBlockedNavigation("https://sub.example.com/path"),"sub.example.com");
+  assert.equal(await bl.getLastBlockedUrl("sub.example.com"),"https://sub.example.com/path");
+  assert.equal(await bl.getLastBlockedUrl("invalid / host"),null);
+  await bl.clearLastBlockedUrl("sub.example.com");
+  assert.equal(await bl.getLastBlockedUrl("sub.example.com"),null);
+  await bl.clearLastBlockedUrl("invalid / host");
+  const beforeSites=structuredClone(control.state.blockedSites);
+  const beforeRules=await bl.readDynamicRulesSnapshot();
+  await assert.rejects(bl.unblockHost("example.com",async()=>{throw Error("stale page")}),/stale page/);
+  assert.deepEqual(control.state.blockedSites,beforeSites);
+  assert.deepEqual(await bl.readDynamicRulesSnapshot(),beforeRules);
+  const dnr=chrome.declarativeNetRequest;
+  const updateRules=dnr.updateDynamicRules;
+  let failOnce=true;
+  dnr.updateDynamicRules=async opts=>{if(failOnce){failOnce=false;throw Error("DNR unavailable")}return updateRules(opts)};
+  await assert.rejects(bl.blockHost("new.example"),/DNR unavailable/);
+  assert.deepEqual(control.state.blockedSites,beforeSites);
+  assert.deepEqual(await bl.readDynamicRulesSnapshot(),beforeRules);
+  dnr.updateDynamicRules=updateRules;
+  await bl.blockHost("new.example");
+  assert.ok(control.state.blockedSites.includes("new.example"));
+  const totalLimit=dnr.MAX_NUMBER_OF_DYNAMIC_RULES;
+  dnr.MAX_NUMBER_OF_DYNAMIC_RULES=1;
+  await assert.rejects(bl.blockHost("fourth.example"),/capacity|rollback/);
+  dnr.MAX_NUMBER_OF_DYNAMIC_RULES=totalLimit;
+  assert.ok(!control.state.blockedSites.includes("fourth.example"));
+  await bl.clearAll();
+  assert.deepEqual(control.state.blockedSites,[]);
+  assert.deepEqual(await bl.readDynamicRulesSnapshot(),[]);
+  assert.equal(bl.hostFromUrl("not a url"),null);
+  assert.deepEqual(bl.normalizeBlockedSites([null,1,"https://WWW.Example.com/path","ftp://example.com","example.com"]),["example.com"]);
+  assert.deepEqual({...bl.normalizeLastBlockedUrls({"example.com":"https://sub.example.com/path","bad.example":1,"mismatch.example":"https://other.example/"})},{"example.com":"https://sub.example.com/path"});
+
+  // Native tab API: absent tab ID, timeout, cleanup failure, and user-owned
+  // navigation after creation. Never close a tab that has become user-owned.
+  const getTab=chrome.tabs.get, removeTab=chrome.tabs.remove;
+  const nativeOptions={consumptionTimeoutMs:2,pollIntervalMs:1};
+  chrome.tabs.create=async()=>({});
+  await assert.rejects(native.openNativeNewTab(nativeOptions),/did not return a tab id/);
+  chrome.tabs.create=async opts=>{control.tab={id:9,...opts};return {...control.tab}};
+  chrome.tabs.get=async()=>({...control.tab});
+  chrome.tabs.update=async(id,opts)=>{control.tab={id,...opts};return {...control.tab}};
+  const removed=[];
+  chrome.tabs.remove=async id=>{removed.push(id)};
+  await assert.rejects(native.openNativeNewTab(nativeOptions),/rejected every native/);
+  assert.deepEqual(removed,[9]);
+  assert.equal(control.state[native.NATIVE_NEW_TAB_BYPASS_KEY],undefined);
+  chrome.tabs.remove=async()=>{throw Error("cannot remove")};
+  await assert.rejects(native.openNativeNewTab(nativeOptions),/cleanup.*incomplete/);
+  chrome.tabs.remove=async id=>{removed.push(id)};
+  chrome.tabs.update=async(id,opts)=>{control.tab={id,url:"https://user.example/"};throw Error("navigation changed")};
+  await assert.rejects(native.openNativeNewTab(nativeOptions),/rejected every native/);
+  assert.deepEqual(removed,[9]);
+  assert.equal(control.tab.url,"https://user.example/");
+  chrome.tabs.create=originalCreate;chrome.tabs.get=getTab;chrome.tabs.update=originalUpdate;chrome.tabs.remove=removeTab;
+  console.log("Blocklist and native tab: rollback, stale precondition, capacity, navigation data, timeout and ownership");
+
+  // Runtime schema guards and state restoration on alarm failure.
+  let persisted=await view();
+  const storedRuntime=structuredClone(control.state.startPageRuntimeState);
+  control.state.startPageRuntimeState={version:999,updatedAt:123};
+  await assert.rejects(rt.setStartPageRuntimeState(persisted.runtime),/newer extension version/);
+  await assert.rejects(rt.deleteInstanceRuntime(block.id),/newer extension version/);
+  assert.deepEqual(control.state.startPageRuntimeState,{version:999,updatedAt:123});
+  control.state.startPageRuntimeState=storedRuntime;
+  const storedSettings=structuredClone(control.state.startPageSettings);
+  control.state.startPageSettings={schemaVersion:999,updatedAt:123};
+  await assert.rejects(rt.setStartPageRuntimeState(persisted.runtime),/newer extension version/);
+  control.state.startPageSettings=storedSettings;
+  persisted=await view();
+  const beforeReset=structuredClone(control.state);
+  const removeStorage=chrome.storage.local.remove;
+  let removeFail=true;
+  chrome.storage.local.remove=async keys=>{if(removeFail){removeFail=false;throw Error("reset storage failure")}return removeStorage(keys)};
+  await assert.rejects(rt.resetStartPageData(),/reset storage failure/);
+  assert.deepEqual(control.state,beforeReset);
+  chrome.storage.local.remove=removeStorage;
+  await assert.rejects(rt.deleteInstanceRuntime(block.id,persisted.settings.layout.blocks.find(x=>x.id===block.id).updatedAt,0),/runtime changed/);
+  await rt.deleteInstanceRuntime(block.id);
+  assert.equal(rt.parseClockAlarmName("unrelated"),null);
+  assert.equal(rt.parseClockAlarmName(rt.clockAlarmName("a:b","c:d")).instanceId,"a:b");
+  assert.equal(rt.parseClockAlarmName(rt.clockAlarmName("a:b","c:d")).token,"c:d");
+  console.log("Runtime: future schema preservation, reset rollback and revision guards");
   console.log("Theme normalization and storage: effects, legacy migration, invalid image, duplicate IDs, CRUD, import/export and layout APIs");
   console.log("Worker: real message router, blocklist, document validation, runtime CAS, clocks, notifications, redirect and startup");
 } finally { restoreFetch(); }
