@@ -116,3 +116,6 @@ assert.match(worker, /case "blocked-original-url": \{[\s\S]*await readBlockedDes
 assert.match(registry103, /sender\.frameId !== 0/);
 assert.match(registry103, /sites\.length === 1 && sites\[0\] === host/);
 assert.match(registry103, /if \(!await isCurrent\(\)\) return null;\s*const destination = await lookup\(id, host\);\s*return destination && await isCurrent\(\) \? destination : null/);
+
+assert.match(worker, /chrome\.webNavigation\.getFrame\(\{ tabId: id, frameId: 0 \}\)/);
+assert.match(registry103, /frame\?\.documentId === sender\.documentId/);
