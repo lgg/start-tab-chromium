@@ -367,5 +367,17 @@ try {
   assert.equal(escape.defaultPrevented,true);
   window.confirm=()=>true;button(invalidDialog,"cancel").click();
   assert.equal(await invalidTheme,null);
+
+  const existingImage={...theme,background:{kind:"image",url:"https://example.com/existing.png",fit:"contain",position:"left top"}};
+  const imageEdit=editTheme(existingImage,i18n);
+  const imageDialog=one(document,"dialog[open]");
+  assert.equal(field(imageDialog,"backgroundImageUrl").value,existingImage.background.url);
+  assert.equal(field(imageDialog,"backgroundImageFit").value,"contain");
+  value(field(imageDialog,"themeHeadingScale"),"5");
+  submit(one(imageDialog,"form"));
+  assert.equal(imageDialog.isConnected,true);
+  value(field(imageDialog,"themeHeadingScale"),existingImage.tokens.headingScale);
+  submit(one(imageDialog,"form"));
+  assert.deepEqual((await imageEdit).background,existingImage.background);
   console.log("Theme editor: 4 background kinds, 7 effects, panel preservation, DOM CSS application, cancel");
 } finally { dom.window.close(); }
