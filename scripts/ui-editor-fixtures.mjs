@@ -367,5 +367,73 @@ try {
   assert.equal(escape.defaultPrevented,true);
   window.confirm=()=>true;button(invalidDialog,"cancel").click();
   assert.equal(await invalidTheme,null);
+
+  const existingImage={...theme,background:{kind:"image",url:"https://example.com/existing.png",fit:"contain",position:"left top"}};
+  const imageEdit=editTheme(existingImage,i18n);
+  const imageDialog=one(document,"dialog[open]");
+  assert.equal(field(imageDialog,"backgroundImageUrl").value,existingImage.background.url);
+  assert.equal(field(imageDialog,"backgroundImageFit").value,"contain");
+  value(field(imageDialog,"themeHeadingScale"),"5");
+  submit(one(imageDialog,"form"));
+  assert.equal(imageDialog.isConnected,true);
+  value(field(imageDialog,"themeHeadingScale"),existingImage.tokens.headingScale);
+  submit(one(imageDialog,"form"));
+  assert.deepEqual((await imageEdit).background,existingImage.background);
+
+  // A free-form layout needs the same editing protections as grid mode.
+  const freeSettings=cloneSettings(settings);
+  freeSettings.layout.mode="free";
+  freeSettings.layout.blocks=[createBlockInstance("note",{id:"free-note"}),createBlockInstance("timer",{id:"free-timer",enabled:false})];
+  const freeRuntime=normalizeRuntimeState(undefined,freeSettings);
+  const freeToolbar=host(),freePalette=host(),freeGrid=host();
+  const freeEditor=new LayoutEditor(freeSettings,{i18n,toolbarHost:freeToolbar,paletteHost:freePalette,getRuntime:()=>freeRuntime,
+    requestRender:()=>{},previewBlock:()=>{},onSaved:()=>{},onError:e=>errors.push(e)});
+  const freeCard=id=>{
+    freeGrid.replaceChildren();
+    const card=document.createElement("article");freeGrid.append(card);
+    freeGrid.getBoundingClientRect=()=>({width:1200});
+    freeEditor.decorateCard(card,freeEditor.settings.layout.blocks.find(b=>b.id===id));
+    return card;
+  };
+  freeEditor.enter();
+  const freeNote=()=>freeEditor.settings.layout.blocks.find(b=>b.id==="free-note");
+  const originalFree={...freeNote().free};
+  key(freeCard("free-note"),"ArrowLeft");key(freeCard("free-note"),"ArrowUp");
+  assert.equal(freeNote().free.x,Math.max(0,originalFree.x-10));
+  assert.equal(freeNote().free.y,Math.max(0,originalFree.y-10));
+  const oldCount=freeEditor.settings.layout.blocks.length;
+  [...freePalette.querySelectorAll("button")].find(b=>b.textContent.includes("blockTitleNote")).click();
+  assert.equal(freeEditor.settings.layout.blocks.length,oldCount+1);
+  button(freeCard("free-note"),"duplicateBlock").click();
+  assert.equal(freeEditor.settings.layout.blocks.length,oldCount+2);
+  button(freeCard("free-timer"),"enableBlock").click();
+  assert.equal(freeEditor.settings.layout.blocks.find(b=>b.id==="free-timer").enabled,true);
+  button(freeCard("free-note"),"editBlock").click();
+  button(one(document,"dialog[open]"),"cancel").click();
+  await Promise.resolve();
+  assert.equal(freeNote().title,freeSettings.layout.blocks[0].title);
+  const preDelete=freeEditor.settings.layout.blocks.length;
+  window.confirm=()=>false;
+  button(freeCard("free-timer"),"deleteBlock").click();
+  assert.equal(freeEditor.settings.layout.blocks.length,preDelete);
+  window.confirm=()=>true;
+  button(freeCard("free-timer"),"deleteBlock").click();
+  assert.equal(freeEditor.settings.layout.blocks.length,preDelete-1);
+  const captured=freeCard("free-note");
+  captured.releasePointerCapture=()=>{throw Error("browser already released pointer")};
+  pointer(one(captured,".card__drag-handle"),"pointerdown",0,0);
+  pointer(captured,"pointerup",20,20);
+  assert.equal(freeEditor.isPointerActive,false);
+  freeEditor.cancel();
+  assert.deepEqual(freeEditor.settings,freeSettings);
+  const limit=(await import("../src/lib/platform-limits.js")).MAX_START_PAGE_BLOCKS;
+  const saturated={...freeSettings,layout:{...freeSettings.layout,blocks:Array.from({length:limit},(_,i)=>createBlockInstance("note",{id:"cap-"+i}))}};
+  const limitToolbar=host(),limitPalette=host(),limitEditor=new LayoutEditor(saturated,{i18n,toolbarHost:limitToolbar,paletteHost:limitPalette,getRuntime:()=>freeRuntime,requestRender:()=>{},previewBlock:()=>{},onSaved:()=>{},onError:e=>errors.push(e)});
+  limitEditor.enter();
+  assert.ok([...limitPalette.querySelectorAll("button")].every(b=>b.disabled));
+  const limitCard=host();limitEditor.decorateCard(limitCard,saturated.layout.blocks[0]);
+  assert.ok([...limitCard.querySelectorAll("button")].some(b=>b.disabled&&b.title.startsWith("blockCapacityReached")));
+  limitEditor.cancel();
+  console.log("Layout editor: free-mode add/duplicate, no-data delete confirmation, pointer release failure and capacity");
   console.log("Theme editor: 4 background kinds, 7 effects, panel preservation, DOM CSS application, cancel");
 } finally { dom.window.close(); }
