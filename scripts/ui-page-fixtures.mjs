@@ -203,6 +203,48 @@ try {
     btn(themeCard, "delete").click();
     await until(() => !control.state.startPageSettings.themes.customThemes.some(t => t.name === "Options theme edited") && busyDone());
     assert.equal(btn(section("backup"), "driveUpload").disabled, true);
+    const backupApi = await import("../src/lib/backup.js");
+    const themeApi = await import("../src/lib/start-page-settings.js");
+    const baseline = await backupApi.exportBackup();
+    const downloads = [];
+    const originalClick = window.HTMLAnchorElement.prototype.click;
+    window.HTMLAnchorElement.prototype.click = function () { downloads.push(this.download); };
+    try {
+      btn(section("backup"), "exportBackup").click();
+      await until(() => downloads.some(n => n.endsWith(".json")), "backup download");
+      const custom = control.state.startPageSettings.themes.customThemes[0];
+      const card = [...section("themes").querySelectorAll(".theme-card")].find(el => el.querySelector(".theme-card__title")?.textContent === custom.name);
+      btn(card, "exportTheme").click();
+      assert.ok(downloads.some(n => n.startsWith("start-tab-theme-")));
+      const themeFile = one(document, 'input[type="file"][accept*="json"]#themeImportInput');
+      const backupFile = one(document, "#backupImportInput");
+      const inject = (input, body) => {
+        Object.defineProperty(input, "files", { configurable: true, value: [{ text: async () => body }] });
+        event(input, "change");
+      };
+      btn(section("themes"), "importTheme").click();
+      const count = control.state.startPageSettings.themes.customThemes.length;
+      inject(themeFile, JSON.stringify(themeApi.exportCustomTheme(custom)));
+      await until(() => control.state.startPageSettings.themes.customThemes.length === count + 1 && busyDone(), "theme import");
+      btn(section("backup"), "importBackup").click();
+      window.confirm = () => false;
+      inject(backupFile, JSON.stringify(baseline));
+      await delay(20);
+      assert.equal(control.state.startPageSettings.themes.customThemes.length, count + 1);
+      window.confirm = () => true;
+      inject(backupFile, "{ invalid json");
+      await until(() => busyDone() && one(document, "#status").textContent.length > 0);
+      inject(backupFile, JSON.stringify(baseline));
+      await until(() => control.state.startPageSettings.themes.customThemes.length === count && busyDone(), "backup import");
+      btn(section("backup"), "restorePreImportBackup").click();
+      await until(() => control.state.startPageSettings.themes.customThemes.length === count + 1 && busyDone(), "pre-import restore");
+      btn(section("backup"), "syncUpload").click();
+      await until(() => busyDone());
+      btn(section("backup"), "syncNow").click();
+      await until(() => busyDone());
+      btn(section("backup"), "syncRestore").click();
+      await until(() => busyDone());
+    } finally { window.HTMLAnchorElement.prototype.click = originalClick; }
     value(one(section("blocker"), "input"), "added.example");
     submit(one(section("blocker"), "form"));
     await until(() => control.state.blockedSites.includes("added.example") && busyDone());
