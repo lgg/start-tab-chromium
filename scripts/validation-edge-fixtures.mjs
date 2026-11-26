@@ -128,4 +128,52 @@ for(const effect of ["animated-gradient","aurora","mesh","spotlight","noise","ma
 }
 same(normalizeThemeBundle(themeBundle(image)).issues.length,0);
 check(normalizeThemeBundle(null).issues.some(x=>x.messageKey==="validationInvalidThemeFile"));
+
+ // Destructive layout changes must protect actual data, not merely block type.
+{
+  const api=await import("../src/lib/start-page-settings.js");
+  const rt=await import("../src/lib/start-page-runtime.js");
+  const clock=api.createBlockInstance("timer",{id:"validation-clock"});
+  const link=api.createBlockInstance("links",{id:"validation-link",config:{...defaultBlockConfig("links"),items:[{id:"link",title:"Example",url:"https://example.com/",icon:"EX"}]}});
+  const emptyLink={...link,config:{...link.config,items:[]}};
+  const pinned=api.createBlockInstance("startPinned",{id:"validation-pinned",config:{...defaultBlockConfig("startPinned"),items:link.config.items}});
+  const blockSettings={...settings,layout:{...settings.layout,blocks:[clock,link,pinned]}};
+  const runtime=rt.normalizeRuntimeState(undefined,blockSettings);
+  same(api.blockDeletionRequiresDataConfirmation(emptyLink,runtime),false);
+  same(api.blockDeletionRequiresDataConfirmation(link,runtime),true);
+  same(api.blockDeletionRequiresDataConfirmation(pinned,runtime),true);
+  same(api.blockDeletionRequiresDataConfirmation(clock,runtime),false);
+  runtime.clocks[clock.id]=rt.startClockState(rt.defaultClockForBlock(clock),100);
+  same(api.blockDeletionRequiresDataConfirmation(clock,runtime),true);
+  same(api.layoutReplacementRemovesUserData(blockSettings,{...blockSettings,layout:{...blockSettings.layout,blocks:[link,pinned]}},runtime),true);
+  runtime.clocks[clock.id]=rt.pauseClockState(runtime.clocks[clock.id],200);
+  same(api.blockDeletionRequiresDataConfirmation(clock,runtime),true);
+  delete runtime.clocks[clock.id];
+  same(api.blockDeletionRequiresDataConfirmation(clock,runtime),false);
+  same(api.layoutReplacementRemovesUserData(blockSettings,blockSettings,runtime),false);
+  const tasks=api.createBlockInstance("localTasks",{id:"validation-tasks",config:{...defaultBlockConfig("localTasks"),confirmDeleteWithContent:false}});
+  runtime.tasks[tasks.id]=[{id:"task",title:"Preserve me",done:false,createdAt:1,updatedAt:1}];
+  same(api.blockDeletionRequiresDataConfirmation(tasks,runtime),false);
+  same(api.layoutReplacementRemovesUserData({...blockSettings,layout:{...blockSettings.layout,blocks:[tasks]}},{...blockSettings,layout:{...blockSettings.layout,blocks:[]}},runtime),true);
+}
+ // Preserve the currently selected valid theme and legacy identifiers.
+{
+  const themeApi=await import("../src/lib/start-page-theme-validation.js");
+  const {normalizeStartPageSettingsWithReport}=await import("../src/lib/start-page-settings-validation.js");
+  const base=BUILT_IN_THEMES[0];
+  const effect=normalizeTheme({background:{kind:"effect",config:{effect:"aurora",speed:2,intensity:0.5,blur:44}}},base);
+  same(normalizeTheme({background:{kind:"effect",config:null}},effect).background,effect.background);
+  same(normalizeTheme({name:"  "},base).name,base.name);
+  const custom=normalizeTheme({...base,id:"validation-custom",builtIn:false,name:"Custom"},base);
+  same(themeApi.normalizeCustomThemes([custom],[])[0].id,custom.id);
+  same(normalizeStartPageSettingsWithReport({...settings,themes:{selectedThemeId:custom.id,customThemes:[custom]}}).settings.themes.selectedThemeId,custom.id);
+  same(normalizeStartPageSettingsWithReport({...settings,themes:{selectedThemeId:"missing-custom",customThemes:[custom]}}).settings.themes.selectedThemeId,settings.themes.selectedThemeId);
+  const legacyId="a".repeat(160)+"-99";
+  same(v.normalizeEntityId(legacyId,"fallback"),legacyId);
+  same(v.normalizeEntityId("a".repeat(170),"fallback"),"a".repeat(160));
+  const used=new Set(["unique","unique-2"]);
+  const reserved=new Set(["unique-3"]);
+  same(v.uniqueEntityId("unique",used,reserved),"unique-4");
+  same(v.uniqueEntityId("available",used,reserved),"available");
+}
 console.log("Validation matrix:",checks,"assertions — message boundaries, all widget configs, URL sanitization, legacy and theme fallback branches");

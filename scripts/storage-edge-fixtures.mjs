@@ -243,6 +243,48 @@ assert.deepEqual(primitives.legacyConfigSource("timer",{timers:{durationSeconds:
 assert.deepEqual(primitives.legacyConfigSource("startPinned",{}),{});
 console.log("Backup: future schemas, invalid input, missing recovery, rollback failure, generated ID and preset defaults");
 
+
+// Only canonical rules owned by this extension's blocker may be removed.
+// Malformed or near-match redirects are foreign even when the action targets
+// blocked.html. Reconcile must preserve them and migrate exact legacy rules.
+{
+  await local.set({blockedSites:["ownership.example"]});
+  await blocklist.syncRulesInCurrentTransaction();
+  const dnr=control.chrome.declarativeNetRequest;
+  const owned=(await blocklist.readDynamicRulesSnapshot())[0];
+  assert.equal(owned.condition.requestDomains[0],"ownership.example");
+  const cloneRule=(id,modify)=>{
+    const rule=structuredClone(owned);
+    rule.id=id;modify(rule);return rule;
+  };
+  const page=control.chrome.runtime.getURL("blocked.html");
+  const foreign=[
+    cloneRule(6001,r=>{r.action.redirect.url="not a URL"}),
+    cloneRule(6002,r=>{r.action.redirect.url=page+"?owner=start-tab-blocklist-v1"}),
+    cloneRule(6003,r=>{r.action.redirect.url=page+"?site=ownership.example&site=other.example&owner=start-tab-blocklist-v1"}),
+    cloneRule(6004,r=>{r.action.redirect.url=page+"?site=OWNERSHIP.example&owner=start-tab-blocklist-v1"}),
+    cloneRule(6005,r=>{r.action.redirect.url=page+"?site=ownership.example&owner=foreign"}),
+    cloneRule(6006,r=>{r.condition.resourceTypes=["sub_frame"]}),
+    cloneRule(6007,r=>{r.condition.requestDomains=["another.example"]}),
+    cloneRule(6008,r=>{r.priority+=1}),
+    cloneRule(6009,r=>{r.action.redirect.url+="&extra=1"}),
+    cloneRule(6010,r=>{r.action.redirect.url+="#fragment"})
+  ];
+  const legacy=cloneRule(4321,r=>{
+    r.action.redirect.url=page+"?site=legacy.example";
+    r.condition.requestDomains=["legacy.example"];
+  });
+  await dnr.updateDynamicRules({addRules:[...foreign,legacy]});
+  const before=await blocklist.readDynamicRulesSnapshot();
+  assert.deepEqual(new Set(before.map(rule=>rule.id)),new Set([owned.id,legacy.id]));
+  await blocklist.syncRulesInCurrentTransaction();
+  const after=await dnr.getDynamicRules();
+  assert.deepEqual(after.filter(rule=>foreign.some(f=>f.id===rule.id)).sort((a,b)=>a.id-b.id),foreign);
+  assert.equal(after.some(rule=>rule.id===legacy.id),false);
+  assert.deepEqual((await blocklist.readDynamicRulesSnapshot()).map(rule=>rule.condition.requestDomains[0]),["ownership.example"]);
+  console.log("DNR ownership: malformed URLs, duplicate sites, noncanonical hosts, foreign owners, resource and domain mismatch, legacy migration");
+}
+
 const dom=await installDom();
 const restoreFetch=installFetch();
 try {
