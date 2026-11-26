@@ -201,6 +201,34 @@ try {
     themeCard = [...section("themes").querySelectorAll(".theme-card")].find(el => el.querySelector(".theme-card__title")?.textContent === "Options theme edited");
     btn(themeCard, "delete").click();
     await until(() => !control.state.startPageSettings.themes.customThemes.some(t => t.name === "Options theme edited") && busyDone());
+
+    // Opening a dialog and cancelling must not publish any write.
+    const preCancel=structuredClone(control.state.startPageSettings);
+    const countBeforeCancel=control.messages.length;
+    btn(section("blocks"),"addBlock").click();
+    btn(one(document,"dialog[open]"),"cancel").click();
+    await delay(20);
+    btn(section("themes"),"createTheme").click();
+    btn(one(document,"dialog[open]"),"cancel").click();
+    await delay(20);
+    const currentCustom=()=>[...section("themes").querySelectorAll(".theme-card")].find(el=>el.querySelector(".theme-card__title")?.textContent===control.state.startPageSettings.themes.customThemes[0].name);
+    btn(currentCustom(),"edit").click();
+    btn(one(document,"dialog[open]"),"cancel").click();
+    await delay(20);
+    window.confirm=()=>false;
+    btn(currentCustom(),"delete").click();
+    const noteRow=[...section("blocks").querySelectorAll(".instance-row")].find(el=>el.querySelector(".instance-row__title")?.textContent?.includes("Options note"));
+    assert.ok(noteRow);
+    btn(noteRow,"clearInstanceData").click();btn(noteRow,"delete").click();
+    btn(section("backup"),"restorePreImportBackup").click();
+    btn(section("backup"),"syncRestore").click();
+    btn(section("blocker"),"clearBlocklist").click();
+    btn(section("statistics"),"resetStatistics").click();
+    submit(one(section("blocker"),"form"));
+    await delay(20);
+    assert.deepEqual(control.state.startPageSettings,preCancel);
+    assert.equal(control.messages.length,countBeforeCancel);
+    window.confirm=()=>true;
     assert.equal(btn(section("backup"), "driveUpload").disabled, true);
     const backupApi = await import("../src/lib/backup.js");
     const themeApi = await import("../src/lib/start-page-settings.js");
@@ -507,8 +535,22 @@ try {
     control.state.startPageSettings.layout.blocks = [];
     control.chrome.storage.onChanged.emit({ startPageSettings: { newValue: control.state.startPageSettings } }, "local");
     await until(() => document.querySelector("#grid .empty-layout"), "empty layout");
+
+    // A clean page should not prevent navigation; stale storage events
+    // after disposal must not recreate cards or perform new storage writes.
+    const cleanUnload=new window.Event("beforeunload",{cancelable:true});
+    window.dispatchEvent(cleanUnload);
+    assert.equal(cleanUnload.defaultPrevented,false);
+    control.chrome.storage.onChanged.emit({startPageSettings:{newValue:small}},"sync");
+    await delay(30);
+    assert.ok(document.querySelector("#grid .empty-layout"));
     window.dispatchEvent(new window.Event("resize"));
     window.dispatchEvent(new window.Event("pagehide"));
+    const emptyMarkup=one(document,"#grid").innerHTML;
+    control.state.startPageSettings=small;
+    control.chrome.storage.onChanged.emit({startPageSettings:{newValue:small}},"local");
+    await delay(30);
+    assert.equal(one(document,"#grid").innerHTML,emptyMarkup);
     console.log("New tab: render enabled/disabled blocks, layout save, note/task dispatch, native gate, storage overlay and cleanup");
   } finally { dom.window.close(); }
 } finally { restoreFetch(); }
