@@ -75,6 +75,83 @@ assert.equal(sync.chunkForChromeSync("😀\\\"\n".repeat(30),50).join(""),"😀\
 assert.throws(()=>sync.completeChromeSyncPayload(meta,[]),/Invalid/);
 await remote.set(original);
 assert.equal(JSON.parse(raw).app,"Start Tab");
+// Verify smart sync's content decisions against real exported frames.
+await sync.uploadChromeSyncBackup();
+const stableFrame=await remote.get(null);
+await remote.set({startTabSyncChunk0:"corrupt matching content"});
+assert.equal(await sync.syncChromeSyncBackup(),"uploaded");
+assert.equal(await sync.syncChromeSyncBackup(),"unchanged");
+const baseState=structuredClone(control.state);
+const baseFrame=await remote.get(null);
+await blocklist.blockHost("local-edit.example");
+assert.equal(await sync.syncChromeSyncBackup(),"uploaded");
+assert.ok(control.state.blockedSites.includes("local-edit.example"));
+const changedFrame=await remote.get(null);
+async function restoreLocal(snapshot){
+  const extra=Object.keys(control.state).filter(k=>!Object.hasOwn(snapshot,k));
+  if(extra.length)await local.remove(extra);
+  await local.set(snapshot);
+}
+await restoreLocal(baseState);
+assert.equal(await sync.syncChromeSyncBackup(),"restored");
+assert.ok(control.state.blockedSites.includes("local-edit.example"));
+await restoreLocal(baseState);
+await blocklist.blockHost("another-local.example");
+const oldLegacy={version:2,updatedAt:"2000-01-01T00:00:00.000Z",deviceId:meta.deviceId,checksum:changedFrame[metaKey].checksum,chunks:changedFrame[metaKey].chunks};
+await remote.set({...changedFrame,[metaKey]:oldLegacy});
+assert.equal(await sync.syncChromeSyncBackup(),"uploaded");
+assert.ok(control.state.blockedSites.includes("another-local.example"));
+assert.ok(!control.state.blockedSites.includes("local-edit.example"));
+await remote.set({...changedFrame,[metaKey]:{...oldLegacy,updatedAt:new Date(Date.now()+60000).toISOString()}});
+assert.equal(await sync.syncChromeSyncBackup(),"restored");
+assert.ok(control.state.blockedSites.includes("local-edit.example"));
+assert.ok(!control.state.blockedSites.includes("another-local.example"));
+assert.equal((await sync.getChromeSyncBackupMeta()).version,3);
+remote.QUOTA_BYTES=NaN;
+remote.QUOTA_BYTES_PER_ITEM=undefined;
+await sync.uploadChromeSyncBackup();
+remote.QUOTA_BYTES=102400;
+remote.QUOTA_BYTES_PER_ITEM=8192;
+
+// Both devices changed since the same baseline: the newer revision wins,
+// while the older remote must not overwrite a newer local edit.
+for (const remoteNewer of [false, true]) {
+  await restoreLocal(baseState);
+  await blocklist.blockHost("two-sided-local.example");
+  await remote.set({...changedFrame,[metaKey]:{...changedFrame[metaKey],contentUpdatedAt:remoteNewer?Date.now()+120000:1}});
+  assert.equal(await sync.syncChromeSyncBackup(),remoteNewer?"restored":"uploaded");
+  assert.ok(control.state.blockedSites.includes(remoteNewer?"local-edit.example":"two-sided-local.example"));
+  assert.ok(!control.state.blockedSites.includes(remoteNewer?"two-sided-local.example":"local-edit.example"));
+}
+// A failed matching-frame read followed by a metadata error must retain
+// both causes and must not write a replacement frame.
+await sync.uploadChromeSyncBackup();
+const verifiedFrame=await remote.get(null);
+const realGet=remote.get;
+let chunkReadFailed=false;
+remote.get=async keys=>{
+  if(Array.isArray(keys)&&keys.some(key=>key.startsWith("startTabSyncChunk"))){
+    chunkReadFailed=true;
+    throw new Error("chunk read failed");
+  }
+  if(chunkReadFailed&&keys===metaKey)throw new Error("metadata refresh failed");
+  return realGet(keys);
+};
+try {
+  await assert.rejects(sync.syncChromeSyncBackup(),error=>error instanceof AggregateError&&error.errors.some(cause=>cause.message==="chunk read failed")&&error.errors.some(cause=>cause.message==="metadata refresh failed"));
+} finally {remote.get=realGet;}
+assert.deepEqual(await remote.get(null),verifiedFrame);
+// A missing remote frame that appears during restore is not an empty backup.
+await remote.remove(metaKey);
+remote.get=async keys=>{
+  if(keys===null)await remote.set(verifiedFrame);
+  return realGet(keys);
+};
+try {await assert.rejects(sync.restoreChromeSyncBackup(),/changed while restore was being prepared/);}
+finally {remote.get=realGet;}
+assert.deepEqual(await remote.get(null),verifiedFrame);
+
+console.log("Browser Sync: verified matching frame repair, local/remote changes and legacy winner decisions");
 console.log("Browser Sync: legacy upgrade, unchanged sync, corruption, future schema, quota, partial frame and recovery");
 
 await stats.resetFocusStats();
