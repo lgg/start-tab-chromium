@@ -319,3 +319,27 @@ assert.equal(await readBlockedDestinationForSender(sender113, page113, "example.
 }), null, "A navigation during the registry read must not leak its result");
 assert.equal(await readBlockedDestinationForSender(sender113, page113, "example.com", async () => { throw new Error("tab gone"); }, lookup113), null);
 console.log("Round 113 blocked destination sender regressions passed");
+
+const sender116 = { ...sender113, documentId: "document-a" };
+tab113 = { id: 113, url: url113 };
+let frame116: { documentId: string; documentLifecycle: string; url: string } | null = {
+  documentId: "document-a", documentLifecycle: "active", url: url113,
+};
+const readFrame116 = async () => frame116;
+assert.equal(await readBlockedDestinationForSender(sender116, page113, "example.com", read113, lookup113, readFrame116), "https://example.com/private");
+const count116 = lookups113;
+frame116 = { documentId: "document-b", documentLifecycle: "active", url: url113 };
+assert.equal(await readBlockedDestinationForSender(sender116, page113, "example.com", read113, lookup113, readFrame116), null, "A new document at the same URL cannot use a previous sender");
+assert.equal(lookups113, count116);
+frame116 = { documentId: "document-a", documentLifecycle: "active", url: url113 };
+assert.equal(await readBlockedDestinationForSender(sender116, page113, "example.com", read113, async () => {
+  frame116 = { documentId: "document-b", documentLifecycle: "active", url: url113 };
+  return "https://example.com/private";
+}, readFrame116), null, "A same-URL navigation during lookup must discard the old request");
+frame116 = { documentId: "document-a", documentLifecycle: "cached", url: url113 };
+assert.equal(await readBlockedDestinationForSender(sender116, page113, "example.com", read113, lookup113, readFrame116), null);
+frame116 = null;
+assert.equal(await readBlockedDestinationForSender(sender116, page113, "example.com", read113, lookup113, readFrame116), null);
+assert.equal(await readBlockedDestinationForSender(sender116, page113, "example.com", read113, lookup113), null);
+assert.equal(await readBlockedDestinationForSender(sender116, page113, "example.com", read113, lookup113, async () => { throw new Error("frame gone"); }), null);
+console.log("Round 116 blocked document identity regressions passed");

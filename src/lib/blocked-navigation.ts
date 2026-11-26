@@ -39,9 +39,11 @@ interface BlockedPageSender {
   url?: string;
   frameId?: number;
   documentLifecycle?: string;
+  documentId?: string;
   tab?: { id?: number };
 }
 interface BlockedPageTab { id?: number; url?: string; pendingUrl?: string }
+interface BlockedPageFrame { documentId?: string; documentLifecycle?: string; url?: string }
 
 function matchesBlockedPageHost(url: string | undefined, page: string, host: string): boolean {
   if (!url || !isBlockedPageNavigation(url, page)) return false;
@@ -58,6 +60,7 @@ export async function readBlockedDestinationForSender(
   host: string,
   getTab: (id: number) => Promise<BlockedPageTab>,
   lookup: (id: number, host: string) => Promise<string | null>,
+  getMainFrame?: (id: number) => Promise<BlockedPageFrame | null | undefined>,
 ): Promise<string | null> {
   const id = sender.tab?.id;
   if (!validTabId(id) || sender.frameId !== 0
@@ -65,8 +68,19 @@ export async function readBlockedDestinationForSender(
     || !matchesBlockedPageHost(sender.url, page, host)) return null;
   const isCurrent = async (): Promise<boolean> => {
     const tab = await getTab(id);
-    return tab.id === id && matchesBlockedPageHost(tab.url, page, host)
-      && (!tab.pendingUrl || matchesBlockedPageHost(tab.pendingUrl, page, host));
+    if (tab.id !== id || !matchesBlockedPageHost(tab.url, page, host)
+      || (tab.pendingUrl && !matchesBlockedPageHost(tab.pendingUrl, page, host))) return false;
+    // Chromium exposes a document identity even when successive pages have
+    // exactly the same URL. Fail closed if that identity cannot be verified.
+    if (sender.documentId !== undefined) {
+      if (!sender.documentId || !getMainFrame) return false;
+      const frame = await getMainFrame(id);
+      return frame?.documentId === sender.documentId
+        && (frame.documentLifecycle === undefined || frame.documentLifecycle === "active")
+        && matchesBlockedPageHost(frame.url, page, host);
+    }
+    // Older Chromium variants without documentId retain the URL checks.
+    return true;
   };
   try {
     if (!await isCurrent()) return null;
