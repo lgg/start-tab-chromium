@@ -151,6 +151,40 @@ await assert.rejects(rt.replaceStartPageSettingsWithRuntime(settings,settings.up
   assert.deepEqual({...filtered},{[hosts.at(-1)]:"https://"+hosts.at(-1)+"/path"});
 }
 
+
+ // Tab disappearance, unavailable URLs, and a changed pending navigation
+ // must never cause a popup to mutate or reload the wrong browser tab.
+{
+  const {readStablePopupTarget,mayReloadPopupTarget}=await import("../src/popup/popup-target.js");
+  const valid={id:7,url:"https://example.com/old"};
+  let lookups=0;
+  const lookup=async()=>{lookups++;return "example.com"};
+  for(const tab of [undefined,{}, {id:7},{id:7,url:""},{id:7,url:"chrome://settings/"}]){
+    assert.equal(await readStablePopupTarget(async()=>tab,lookup),null);
+  }
+  assert.equal(lookups,0);
+  const observations=[valid,{id:7,pendingUrl:"https://example.com/new",url:valid.url}];
+  const target=await readStablePopupTarget(async()=>observations.shift(),lookup);
+  assert.deepEqual(target,{tabId:7,url:"https://example.com/new",host:"example.com",blockedHost:"example.com"});
+  assert.equal(mayReloadPopupTarget(target,undefined),false);
+  assert.equal(mayReloadPopupTarget(target,{id:7}),false);
+  assert.equal(mayReloadPopupTarget(target,{...valid,pendingUrl:"https://elsewhere.example/"}),false);
+  assert.equal(mayReloadPopupTarget(target,{...valid,pendingUrl:valid.url}),true);
+  for(const next of [undefined,{id:8,url:valid.url},{id:7,url:"https://elsewhere.example/"},{id:7,pendingUrl:"chrome://settings/",url:valid.url}]){
+    const states=[valid,next];
+    assert.equal(await readStablePopupTarget(async()=>states.shift(),lookup),null);
+  }
+  const {isBlockedPageNavigation,BlockedNavigationRegistry}=await import("../src/lib/blocked-navigation.js");
+  assert.equal(isBlockedPageNavigation("not a URL","https://extension.example/blocked.html"),false);
+  assert.equal(isBlockedPageNavigation("https://extension.example/blocked.html","not a URL"),false);
+  const registry=new BlockedNavigationRegistry(()=>{throw Error("invalid tab must not access storage")});
+  for(const id of [-1,NaN,1.5,undefined]){
+    assert.equal(await registry.observe(id,"https://example.com/",async()=>{throw Error("invalid tab must not resolve")}),null);
+    assert.equal(await registry.lookup(id,"example.com"),null);
+    await registry.forget(id);
+  }
+}
+
 console.log("Revision, restore, grid bounds, note conflict, cache eviction, native defaults and alarm failure boundary matrix");
 
 const navigation=await import("../src/lib/blocked-navigation.js");
