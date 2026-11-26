@@ -342,6 +342,7 @@ try {
     await until(()=>one(document,"#statusRegion").textContent.includes("link page conflict"));
     assert.equal(control.state.startPageRuntimeState.linkPages["page-link"],0);
     control.handler=normalHandler;
+    await until(()=>!button(linksCard(),t.t("nextPage")).disabled,"link retry enabled");
     button(linksCard(),t.t("nextPage")).click();
     await until(()=>control.state.startPageRuntimeState.linkPages["page-link"]===1);
     await delay(50);
@@ -356,8 +357,8 @@ try {
     const recovery=one(document,".draft-recovery:not([hidden])");
     button(recovery,t.t("hiddenNoteDiscard")).click();
     await until(()=>!document.querySelector(".draft-recovery:not([hidden]) textarea"));
-    remoteSettings.layout.blocks.find(b=>b.id==="page-task").enabled=true;
-    control.chrome.storage.onChanged.emit({startPageSettings:{newValue:remoteSettings}},"local");
+    control.state.startPageSettings.layout.blocks.find(b=>b.id==="page-task").enabled=true;
+    control.chrome.storage.onChanged.emit({startPageSettings:{newValue:control.state.startPageSettings}},"local");
     await until(()=>document.querySelector('[data-block-id="page-task"] input'));
     assert.equal(one(document,'[data-block-id="page-task"] form input').value,"");
     control.state.startPageSettings.startTab.enabled = false;
