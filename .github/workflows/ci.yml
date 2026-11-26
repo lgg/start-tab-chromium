@@ -366,6 +366,9 @@ jobs:
       - name: Run round 54 fixtures
         run: node scripts/run-round54-fixtures.mjs
 
+      - name: Run UI and worker integration fixtures
+        run: npm run test:ui
+
       - name: Validate self-hosted CI contract
         run: node scripts/validate-self-hosted-ci.mjs
 
