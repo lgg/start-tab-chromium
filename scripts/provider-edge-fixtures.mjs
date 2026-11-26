@@ -126,6 +126,43 @@ try {
     assert.deepEqual(await fetchWidgetJson(endpoint),{city:"Москва",temperature:14});
     console.log("Widget provider: empty and HTTP errors, cancellation rejection, bounded streaming, UTF-8 and lock release");
   }
+
+  // Optional locale overlays may be absent without disabling the base
+  // catalog. Invalid navigator metadata falls back to the browser language.
+  {
+    const nav=window.navigator;
+    const languages=Object.getOwnPropertyDescriptor(nav,"languages");
+    const language=Object.getOwnPropertyDescriptor(nav,"language");
+    try{
+      Object.defineProperty(nav,"languages",{configurable:true,value:null});
+      Object.defineProperty(nav,"language",{configurable:true,value:"ru-RU"});
+      globalThis.fetch=async url=>String(url).includes("roadmap-messages")||String(url).includes("round7-messages")?new Response(null,{status:404}):catalogFetch(url);
+      const translated=await i18n.loadI18nForPreference("auto");
+      assert.equal(translated.locale,"ru");
+      assert.equal(document.documentElement.lang,"ru");
+      assert.equal(translated.t("unrecognized_key"),"unrecognized_key");
+      await i18n.setLocalePreference("en");
+      assert.equal(control.state.localeOverride,"en");
+      await i18n.setLocalePreference("auto");
+      assert.equal(control.state.localeOverride,undefined);
+    }finally{
+      if(languages)Object.defineProperty(nav,"languages",languages);else delete nav.languages;
+      if(language)Object.defineProperty(nav,"language",language);else delete nav.language;
+    }
+  }
+  // Read failures must release the reader and preserve the original error,
+  // even if cancellation itself rejects.
+  {
+    const failure=Error("Google stream interrupted");
+    let cancelled=0,released=0;
+    globalThis.fetch=async()=>({ok:true,body:{getReader:()=>({
+      read:async()=>{throw failure},
+      cancel:async()=>{cancelled++;throw Error("cancel denied")},
+      releaseLock:()=>{released++}
+    })}});
+    await assert.rejects(google.listCalendarEvents(),error=>error===failure);
+    assert.equal(cancelled,1);assert.equal(released,1);
+  }
   console.log("Google: absent items, timed event precedence, bounded pagination and successful media restore");
   console.log("Locale and Google failure matrix: auto detection, fallback, CAS, malformed responses, invalid tokens, retry, size limit, calendar dates and Drive listing");
 } finally {restoreFetch();dom.window.close();}
