@@ -51,22 +51,19 @@ function matchesBlockedPageHost(url: string | undefined, page: string, host: str
   return sites.length === 1 && sites[0] === host;
 }
 
-/** A previous document's asynchronous request must not retrieve the
- * destination of a later navigation. Check the live tab on both sides of
- * the queued registry lookup; deny subframes and inactive documents. */
-export async function readBlockedDestinationForSender(
+/** Verify that a blocked page still owns the live main-frame document. */
+export async function isCurrentBlockedPageSender(
   sender: BlockedPageSender,
   page: string,
   host: string,
   getTab: (id: number) => Promise<BlockedPageTab>,
-  lookup: (id: number, host: string) => Promise<string | null>,
   getMainFrame?: (id: number) => Promise<BlockedPageFrame | null | undefined>,
-): Promise<string | null> {
+): Promise<boolean> {
   const id = sender.tab?.id;
   if (!validTabId(id) || sender.frameId !== 0
     || (sender.documentLifecycle !== undefined && sender.documentLifecycle !== "active")
-    || !matchesBlockedPageHost(sender.url, page, host)) return null;
-  const isCurrent = async (): Promise<boolean> => {
+    || !matchesBlockedPageHost(sender.url, page, host)) return false;
+  try {
     const tab = await getTab(id);
     if (tab.id !== id || !matchesBlockedPageHost(tab.url, page, host)
       || (tab.pendingUrl && !matchesBlockedPageHost(tab.pendingUrl, page, host))) return false;
@@ -81,7 +78,25 @@ export async function readBlockedDestinationForSender(
     }
     // Older Chromium variants without documentId retain the URL checks.
     return true;
-  };
+  } catch {
+    return false;
+  }
+}
+
+/** A previous document's asynchronous request must not retrieve the
+ * destination of a later navigation. Check the live tab on both sides of
+ * the queued registry lookup; deny subframes and inactive documents. */
+export async function readBlockedDestinationForSender(
+  sender: BlockedPageSender,
+  page: string,
+  host: string,
+  getTab: (id: number) => Promise<BlockedPageTab>,
+  lookup: (id: number, host: string) => Promise<string | null>,
+  getMainFrame?: (id: number) => Promise<BlockedPageFrame | null | undefined>,
+): Promise<string | null> {
+  const id = sender.tab?.id;
+  if (!validTabId(id)) return null;
+  const isCurrent = () => isCurrentBlockedPageSender(sender, page, host, getTab, getMainFrame);
   try {
     if (!await isCurrent()) return null;
     const destination = await lookup(id, host);
