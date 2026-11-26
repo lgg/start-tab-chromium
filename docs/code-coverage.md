@@ -21,3 +21,9 @@ a complete static inventory of their functions/branches; treat these
 percentages as a baseline, not a proof of behavioral completeness.
 Real browser E2E, browser-specific APIs, CSS and HTML are not measured.
 No arbitrary minimum is imposed until the first baseline is verified.
+
+The round 55 suite exercises rendered UI with pinned jsdom 26.1.0 and
+Chrome API doubles: editors, widgets, page entrypoints and worker dispatch.
+It runs in separate Node processes and participates in the same coverage
+measurement. Run independently with `npm run test:ui`. The browser DOM
+emulator is not a replacement for real Chromium E2E acceptance.
