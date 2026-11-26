@@ -134,6 +134,23 @@ await assert.rejects(rt.replaceStartPageSettingsWithRuntime(settings,settings.up
 control.state.startPageRuntimeState=oldRuntime;
 await local.set({startPageOnboarding:{onboarded:true}});
 await assert.rejects(rt.replaceStartPageSettingsWithRuntime(settings,settings.updatedAt,runtime.updatedAt,undefined,true),/already completed/);
+
+ // Recovery of a damaged oversized URL collection is deterministic and
+ // never keeps a URL for a site that is not actually blocked.
+{
+  const {MAX_BLOCKED_SITES}=await import("../src/lib/platform-limits.js");
+  const {normalizeBackupLastBlockedUrls}=await import("../src/lib/backup-blocked-urls.js");
+  const hosts=Array.from({length:MAX_BLOCKED_SITES+1},(_,i)=>"h"+String(i).padStart(5,"0")+".example");
+  const raw=Object.fromEntries([...hosts].reverse().map(host=>[host,"https://"+host+"/path"]));
+  assert.throws(()=>normalizeBackupLastBlockedUrls(raw,hosts,"strict-import"),/more than/);
+  const recovered=normalizeBackupLastBlockedUrls(raw,hosts,"local-recovery");
+  assert.equal(Object.keys(recovered).length,MAX_BLOCKED_SITES);
+  assert.equal(recovered[hosts[0]],"https://"+hosts[0]+"/path");
+  assert.equal(recovered[hosts.at(-1)],undefined);
+  const filtered=normalizeBackupLastBlockedUrls(raw,[hosts.at(-1)],"local-recovery");
+  assert.deepEqual({...filtered},{[hosts.at(-1)]:"https://"+hosts.at(-1)+"/path"});
+}
+
 console.log("Revision, restore, grid bounds, note conflict, cache eviction, native defaults and alarm failure boundary matrix");
 
 const navigation=await import("../src/lib/blocked-navigation.js");
