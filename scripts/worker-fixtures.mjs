@@ -381,6 +381,89 @@ try {
   assert.equal(api.layoutReplacementRemovesUserData(reduced(noteSample),empty,sampleRuntime),true);
   assert.equal(api.layoutReplacementRemovesUserData(reduced(taskSample),empty,sampleRuntime),true);
   assert.equal(api.layoutReplacementRemovesUserData(reduced(noteSample),reduced(noteSample),sampleRuntime),false);
+
+  // Drive the actual runtime transactions through partial failure and rollback.
+  const rollbackBaseline=structuredClone(control.state);
+  const previousAlarms=await rt.readClockAlarmSnapshot();
+  const aName=rt.clockAlarmName("test","token");
+  const originalAlarmGet=chrome.alarms.getAll;
+  const originalAlarmCreate=chrome.alarms.create;
+  const originalAlarmClear=chrome.alarms.clear;
+  const originalLocalSet=chrome.storage.local.set;
+  const originalLocalRemove=chrome.storage.local.remove;
+  const currentView=await rt.getStartPageViewSnapshot();
+  const runtimeBefore=structuredClone(control.state);
+  try {
+    await assert.rejects(rt.mutateStartPageRuntimeStateWithAlarmsAndStorageEffect(
+      r=>{r.notes[noteBlock.id]="tentative";return {state:r,result:7}},
+      ["effectTest"],async result=>{assert.equal(result,7);await chrome.storage.local.set({effectTest:true});throw Error("effect failed")}
+    ),/effect failed/);
+    assert.deepEqual(control.state,runtimeBefore);
+    chrome.storage.local.remove=async keys=>{
+      if(Array.isArray(keys)&&keys.includes("effectTest"))throw Error("effect rollback failed");
+      return originalLocalRemove(keys);
+    };
+    await assert.rejects(rt.mutateStartPageRuntimeStateWithAlarmsAndStorageEffect(
+      r=>{r.notes[noteBlock.id]="tentative";return {state:r,result:7}},
+      ["effectTest"],async()=>{await chrome.storage.local.set({effectTest:true});throw Error("effect failed")}
+    ),e=>e instanceof AggregateError&&/rollback was incomplete/.test(e.message));
+    chrome.storage.local.remove=originalLocalRemove;
+    await originalLocalRemove("effectTest");
+    assert.deepEqual(control.state,runtimeBefore);
+    control.alarms.set(aName,{name:aName,scheduledTime:123});
+    let failClear=true;
+    chrome.alarms.clear=async name=>{if(failClear){failClear=false;throw Error("clear failed")}return originalAlarmClear(name)};
+    await assert.rejects(rt.resetStartPageRuntimeState(),/clear failed/);
+    assert.deepEqual(control.state,runtimeBefore);
+    assert.ok(control.alarms.has(aName));
+    chrome.alarms.clear=async()=>{throw Error("clear always failed")};
+    await assert.rejects(rt.resetStartPageRuntimeState(),e=>e instanceof AggregateError&&/restore the previous state/.test(e.message));
+    chrome.alarms.clear=originalAlarmClear;
+    chrome.alarms.getAll=originalAlarmGet;
+    await rt.clearClockAlarm("test");
+    assert.equal(control.alarms.has(aName),false);
+
+    // Reset future schemas explicitly; the new revision must exceed all
+    // previous valid revisions even when the clock is behind.
+    const future=Date.now()+100000;
+    control.state.startPageSettings={schemaVersion:999,updatedAt:future};
+    control.state.startPageRuntimeState={version:999,updatedAt:future+1};
+    control.state.startTabDataRevision={version:999,updatedAt:future+2};
+    const reset=await rt.resetStartPageData();
+    assert.ok(reset.updatedAt>future+2);
+    assert.equal(control.state.startTabDataRevision.version,1);
+    assert.equal(control.state.startPageRuntimeState,undefined);
+    const fresh=await rt.getStartPageRuntimeState();
+    assert.ok(fresh.updatedAt>=reset.updatedAt);
+    const rawBefore=structuredClone(control.state);
+    control.state.startPageRuntimeState={...fresh,updatedAt:Number.MAX_SAFE_INTEGER};
+    await assert.rejects(rt.setStartPageRuntimeState({...fresh,updatedAt:Number.MAX_SAFE_INTEGER}),/safe integer range/);
+    control.state.startPageRuntimeState=rawBefore.startPageRuntimeState;
+    const testSettings=await api.getStartPageSettings();
+    const testRuntime=await rt.getStartPageRuntimeState();
+    await assert.rejects(rt.setStartPageRuntimeState({...testRuntime,updatedAt:testRuntime.updatedAt-1}),/runtime changed/);
+    const absentBlock=await rt.completeClockInstance("absent",null);
+    assert.equal(absentBlock.completed,false);
+    assert.equal(absentBlock.block,null);
+    const watch=api.createBlockInstance("stopwatch");
+    const idle=rt.defaultClockForBlock(watch);
+    assert.equal(rt.remainingClockMs(idle),0);
+    assert.equal(rt.pauseClockState(idle),idle);
+    const running=rt.startClockState(idle,100);
+    assert.equal(rt.startClockState(running,200),running);
+    assert.equal(rt.elapsedClockMs(running,50),0);
+    assert.equal(rt.elapsedClockMs(running,1000000000),7*24*60*60*1000);
+    const p=api.createBlockInstance("pomodoro");
+    const br=rt.resetClockState(p,"break");
+    assert.equal(br.durationMs,p.config.breakSeconds*1000);
+    assert.equal(rt.pomodoroFocusElapsedMs({...rt.startClockState(rt.defaultClockForBlock(p),100),targetAt:null},500),400);
+    assert.equal(rt.parseClockAlarmName(rt.clockAlarmName("x","")),null);
+    assert.equal(rt.parseClockAlarmName(rt.clockAlarmName("x","token").replace("token","%ZZ")),null);
+  } finally {
+    chrome.alarms.getAll=originalAlarmGet;chrome.alarms.create=originalAlarmCreate;chrome.alarms.clear=originalAlarmClear;
+    chrome.storage.local.set=originalLocalSet;chrome.storage.local.remove=originalLocalRemove;
+  }
+  console.log("Runtime transactions: partial effect rollback, alarm failure, explicit future reset, revision exhaustion, clocks");
   console.log("Settings boundaries: rejected stale/invalid edits, singleton and capacity checks, migrations, data-loss confirmation");
 
   console.log("Theme normalization and storage: effects, legacy migration, invalid image, duplicate IDs, CRUD, import/export and layout APIs");
