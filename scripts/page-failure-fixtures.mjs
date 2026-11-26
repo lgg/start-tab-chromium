@@ -321,5 +321,42 @@ try{
       assert.equal(failControl.messages.length,0);
     }finally{failDom.window.close()}
   }
+
+  // A clean page must reload for a committed locale change and a restored
+  // BFCache page must reload instead of keeping disposed listeners.
+  {
+    const cleanDom=await installDom("newtab/newtab.html","https://extension.example/newtab.html");
+    const cleanSettings=createDefaultStartPageSettings(100);
+    cleanSettings.layout.blocks=[];
+    const clean=installChrome({...seed(),startPageSettings:cleanSettings,startPageOnboarding:{onboarded:true}});
+    const actualLocation=globalThis.location;
+    let reloads=0;
+    try{
+      await import("../src/newtab/newtab.ts?case="+(++serial));
+      await until(()=>document.querySelector("#grid .empty-layout"));
+      globalThis.location={reload:()=>{reloads++}};
+      clean.state.localeOverride="ru";
+      clean.chrome.storage.onChanged.emit({localeOverride:{newValue:"ru"}},"local");
+      await until(()=>reloads===1);
+      assert.equal(document.querySelector(".draft-recovery:not([hidden])"),null);
+      window.dispatchEvent(new window.Event("pagehide"));
+      const show=new window.Event("pageshow");
+      Object.defineProperty(show,"persisted",{value:true});
+      window.dispatchEvent(show);
+      assert.equal(reloads,2);
+      clean.state.localeOverride="en";
+      clean.chrome.storage.onChanged.emit({localeOverride:{newValue:"en"}},"local");
+      await delay(30);
+      assert.equal(reloads,2);
+    }finally{globalThis.location=actualLocation;cleanDom.window.close()}
+  }
+  for(const [page,required] of [["newtab","background"],["options","title"]]){
+    const malformedDom=await installDom(page+"/"+page+".html");
+    installChrome(seed());
+    try{
+      one(document,"#"+required).remove();
+      await assert.rejects(import("../src/"+page+"/"+page+".ts?case="+(++serial)),new RegExp("Missing required element: "+required));
+    }finally{malformedDom.window.close()}
+  }
   console.log("Page initialization: blocked subframe and fatal startup reads");
 }finally{restoreFetch()}
