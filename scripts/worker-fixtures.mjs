@@ -59,7 +59,7 @@ try {
   await ok({ type: "runtime-note", instanceId: "worker-note", value: "Hello", expectedValue: "" });
   assert.equal((await view()).runtime.notes["worker-note"], "Hello");
   await reject({ type: "runtime-note", instanceId: "worker-note", value: "Stale", expectedValue: "" }, /changed/);
-  await reject({ type: "runtime-note", instanceId: "worker-task", value: "Wrong", expectedValue: "" }, /note|target|instance/i);
+  await reject({ type: "runtime-note", instanceId: "worker-task", value: "Wrong", expectedValue: "" }, /block changed or was removed/i);
   const task = { id: "test-task", title: "Task", done: false, createdAt: 100, updatedAt: 100 };
   assert.deepEqual((await ok({ type: "runtime-tasks", instanceId: "worker-task", tasks: [task], expectedTasks: [] })).savedTasks.map(t => t.title), ["Task"]);
   await reject({ type: "runtime-tasks", instanceId: "worker-task", tasks: [], expectedTasks: [] }, /changed/);
