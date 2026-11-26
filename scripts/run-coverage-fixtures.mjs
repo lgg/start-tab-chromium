@@ -1,6 +1,6 @@
 import { readFile, access } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -15,7 +15,7 @@ for (const [, suite] of commands) {
     hasSource = false;
   }
   const args = hasSource
-    ? ["--import", path.join(root, "scripts", "coverage-loader.mjs"), source]
+    ? ["--import", pathToFileURL(path.join(root, "scripts", "coverage-loader.mjs")).href, source]
     : [path.join(root, "scripts", "run-" + suite + "-fixtures.mjs")];
   console.log("Coverage fixture: " + suite);
   const child = spawnSync(process.execPath, args, { cwd: root, stdio: "inherit" });
