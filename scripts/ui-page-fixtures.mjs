@@ -443,7 +443,7 @@ try {
     await until(()=>control.state.startPageRuntimeState.linkPages["page-link"]===1);
     await delay(50);
     assert.ok(linksCard().querySelector("a"));
-    const taskDraft=one(document,'[data-block-id="page-task"] input[type="text"], [data-block-id="page-task"] form input');
+    const taskDraft=one(document,'[data-block-id="page-task"] form.task-form input');
     value(taskDraft,"hidden task text");
     const remoteSettings=control.state.startPageSettings;
     remoteSettings.layout.blocks.find(b=>b.id==="page-task").enabled=false;
@@ -455,7 +455,7 @@ try {
     await until(()=>!document.querySelector(".draft-recovery:not([hidden]) textarea"));
     control.state.startPageSettings.layout.blocks.find(b=>b.id==="page-task").enabled=true;
     control.chrome.storage.onChanged.emit({startPageSettings:{newValue:control.state.startPageSettings}},"local");
-    await until(()=>document.querySelector('[data-block-id="page-task"] input'));
+    await until(()=>document.querySelector('[data-block-id="page-task"] form.task-form input'));
     assert.equal(one(document,'[data-block-id="page-task"] form input').value,"");
     control.state.startPageSettings.startTab.enabled = false;
     control.chrome.storage.onChanged.emit({ startPageSettings: { newValue: control.state.startPageSettings } }, "local");
