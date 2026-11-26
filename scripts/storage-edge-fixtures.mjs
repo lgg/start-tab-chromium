@@ -200,6 +200,49 @@ assert.equal(hasBlockUserData(createBlockInstance("note"),{}),false);
 assert.equal(hasBlockUserData(createBlockInstance("localTasks"),{}),false);
 assert.equal(containsSplitViewMarker(""),false);
 
+
+const backup=await import("../src/lib/backup.js");
+const defaults=await import("../src/lib/start-page-defaults.js");
+const primitives=await import("../src/lib/start-page-validation-primitives.js");
+const beforeBackup=await backup.exportBackup();
+for(const [key,future] of [["startPageSettings",{schemaVersion:999}],["startPageRuntimeState",{version:999}],["focusStats",{version:999}]]){
+  assert.throws(()=>backup.migrateBackup({...beforeBackup,storage:{...beforeBackup.storage,[key]:future}}),/newer extension version/);
+}
+assert.throws(()=>backup.migrateBackup(null),/Invalid Start Tab backup/);
+await assert.rejects(backup.importBackup(null),/Invalid Start Tab backup/);
+assert.equal(backup.backupModifiedAt({...beforeBackup,storage:{}}),0);
+assert.equal(backup.backupModifiedAt({...beforeBackup,storage:{startPageSettings:{updatedAt:123}}}),123);
+assert.equal(backup.backupModifiedAt({...beforeBackup,storage:{startPageRuntimeState:{updatedAt:456}}}),456);
+const previousRecovery=control.state[backup.PRE_IMPORT_BACKUP_KEY];
+await local.remove(backup.PRE_IMPORT_BACKUP_KEY);
+await assert.rejects(backup.restorePreImportBackup(),/No pre-import recovery/);
+if(previousRecovery!==undefined)await local.set({[backup.PRE_IMPORT_BACKUP_KEY]:previousRecovery});
+const originalStorageSet=local.set;
+const backupBaseline=await local.get(null);
+local.set=async()=>{throw Error("storage write refused")};
+try{
+  await assert.rejects(backup.importBackup(beforeBackup),e=>e instanceof AggregateError&&/rollback was incomplete/.test(e.message));
+}finally{local.set=originalStorageSet}
+assert.deepEqual(await local.get(null),backupBaseline);
+const cryptoDescriptor=Object.getOwnPropertyDescriptor(globalThis,"crypto");
+try{
+  Object.defineProperty(globalThis,"crypto",{configurable:true,value:undefined});
+  const generated=backup.migrateBackup({...beforeBackup,snapshotId:undefined});
+  assert.match(generated.snapshotId,/^[a-z0-9]+-[a-z0-9]+$/);
+}finally{Object.defineProperty(globalThis,"crypto",cryptoDescriptor)}
+for(const preset of defaults.LAYOUT_PRESETS){
+  const blocks=defaults.blocksFromPreset(preset,"full");
+  assert.equal(blocks.length,preset.blocks.length);
+  assert.ok(blocks.every((block,index)=>block.zone==="full"&&block.order===index&&block.type===preset.blocks[index].type&&block.enabled===(preset.blocks[index].enabled??true)));
+  assert.equal(new Set(blocks.map(b=>b.id)).size,blocks.length);
+}
+assert.equal(primitives.normalizeEntityId("","fallback"),"fallback");
+assert.equal(primitives.safeCssToken("<script>","safe"),"safe");
+assert.equal(primitives.normalizeSearchProviders([{title:"title",urlTemplate:"https://example.com/?q={query}"}],[],"providers",[]).length,1);
+assert.deepEqual(primitives.legacyConfigSource("timer",{timers:{durationSeconds:7}}),{durationSeconds:7});
+assert.deepEqual(primitives.legacyConfigSource("startPinned",{}),{});
+console.log("Backup: future schemas, invalid input, missing recovery, rollback failure, generated ID and preset defaults");
+
 const dom=await installDom();
 const restoreFetch=installFetch();
 try {
