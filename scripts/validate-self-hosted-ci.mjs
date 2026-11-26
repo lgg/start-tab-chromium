@@ -158,6 +158,7 @@ for (const command of [
   "npm ci --include=dev --bin-links=true --no-audit --no-fund --loglevel=error",
   "node scripts/report-locale-parity.mjs",
   ...regressionCommands,
+  "npm run test:ui",
   "npm run test:coverage",
   "npm run typecheck",
   "npm run build",
@@ -169,7 +170,7 @@ for (const command of [
 for (const toolPath of ["node_modules/typescript/bin/tsc", "node_modules/esbuild/bin/esbuild"]) {
   assert.ok(workflow.includes(toolPath), `CI must verify installed tool: ${toolPath}`);
 }
-for (const scriptName of ["test", "test:coverage", "typecheck", "build", "build:blocker-only", "build:google", "clean"]) {
+for (const scriptName of ["test", "test:ui", "test:coverage", "typecheck", "build", "build:blocker-only", "build:google", "clean"]) {
   assert.equal(typeof packageJson.scripts?.[scriptName], "string", `package.json is missing script: ${scriptName}`);
 }
 assert.ok(packageJson.scripts.test.includes("node scripts/validate-release-docs.mjs"),
@@ -253,4 +254,7 @@ assert.match(runnerGuide, /project-specific npm cache directory inside `RUNNER_T
 assert.match(runnerGuide, /checkout's built-in recursive clean is disabled/,
   "Runner documentation must explain why checkout delegates deletion to bounded cleanup");
 
+assert.ok(packageJson.scripts.test.includes("node scripts/run-round55-fixtures.mjs"));
+assert.equal(packageJson.scripts["test:ui"], "node scripts/run-round55-fixtures.mjs");
+await access("scripts/run-round55-fixtures.mjs");
 console.log("Self-hosted Windows CI validation passed");

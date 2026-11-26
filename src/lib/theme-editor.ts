@@ -219,7 +219,9 @@ const hover = textInput(tokens.hover);
 const active = textInput(tokens.active);
 const fontFamily = textInput(tokens.fontFamily);
 const baseFontSize = numberInput(tokens.baseFontSize, 10, 32, 1);
-const headingScale = numberInput(tokens.headingScale, 0.8, 2, 0.05);
+// Built-in themes use 1.08 and imported themes may use other fractional
+// values. Match the normalizer instead of rejecting a valid existing value.
+const headingScale = numberInput(tokens.headingScale, 0.8, 2, "any");
 const radius = numberInput(tokens.borderRadius, 0, 48, 1);
 const spacing = numberInput(tokens.spacing, 4, 40, 1);
 grid.append(
