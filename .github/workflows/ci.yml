@@ -369,6 +369,9 @@ jobs:
       - name: Validate self-hosted CI contract
         run: node scripts/validate-self-hosted-ci.mjs
 
+      - name: Measure production source coverage
+        run: npm run test:coverage
+
       - name: Typecheck
         run: npm run typecheck
 

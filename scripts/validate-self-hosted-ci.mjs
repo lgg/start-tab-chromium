@@ -158,6 +158,7 @@ for (const command of [
   "npm ci --include=dev --bin-links=true --no-audit --no-fund --loglevel=error",
   "node scripts/report-locale-parity.mjs",
   ...regressionCommands,
+  "npm run test:coverage",
   "npm run typecheck",
   "npm run build",
   "npm run build:blocker-only",
@@ -168,7 +169,7 @@ for (const command of [
 for (const toolPath of ["node_modules/typescript/bin/tsc", "node_modules/esbuild/bin/esbuild"]) {
   assert.ok(workflow.includes(toolPath), `CI must verify installed tool: ${toolPath}`);
 }
-for (const scriptName of ["test", "typecheck", "build", "build:blocker-only", "build:google", "clean"]) {
+for (const scriptName of ["test", "test:coverage", "typecheck", "build", "build:blocker-only", "build:google", "clean"]) {
   assert.equal(typeof packageJson.scripts?.[scriptName], "string", `package.json is missing script: ${scriptName}`);
 }
 assert.ok(packageJson.scripts.test.includes("node scripts/validate-release-docs.mjs"),
