@@ -129,6 +129,19 @@ async function googleFetch<T>(url: string, init: RequestInit = {}, interactive =
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
+// URL parsers normalize literal "." and ".." even after encodeURIComponent.
+// Reject these and invalid identifiers before building an authenticated URL.
+function googleResourcePathSegment(id: string): string {
+  if (!id || id !== id.trim() || id === "." || id === ".." || /[\u0000-\u001f\u007f]/.test(id)) {
+    throw new Error("Invalid Google resource identifier");
+  }
+  try {
+    return encodeURIComponent(id);
+  } catch {
+    throw new Error("Invalid Google resource identifier");
+  }
+}
+
 function normalizedCalendarId(calendarId: string): string {
   const trimmed = calendarId.trim();
   return trimmed || DEFAULT_CALENDAR_ID;
@@ -166,6 +179,7 @@ export async function listCalendarEvents(
   maxResults = 8,
   query = "",
 ): Promise<GoogleCalendarEvent[]> {
+  const calendarSegment = googleResourcePathSegment(normalizedCalendarId(calendarId));
   const limit = normalizedCalendarMaxResults(maxResults);
   const normalizedQuery = query.trim();
   const titleQuery = normalizedQuery.toLocaleLowerCase();
@@ -177,7 +191,7 @@ export async function listCalendarEvents(
   let pagesRead = 0;
 
   while (events.length < limit && pagesRead < MAX_CALENDAR_QUERY_PAGES) {
-    const url = new URL(GOOGLE_CALENDAR_EVENTS_URL.replace("{calendarId}", encodeURIComponent(normalizedCalendarId(calendarId))));
+    const url = new URL(GOOGLE_CALENDAR_EVENTS_URL.replace("{calendarId}", calendarSegment));
     url.searchParams.set("fields", "nextPageToken,items(id,summary,status,start(date,dateTime),end(date,dateTime))");
     url.searchParams.set("singleEvents", "true");
     url.searchParams.set("orderBy", "startTime");
@@ -250,6 +264,7 @@ async function findDriveBackupFile(interactive = false): Promise<DriveFile | nul
         || file.name !== DRIVE_BACKUP_FILE_NAME) {
         throw new Error("Google Drive returned an invalid backup file");
       }
+      googleResourcePathSegment(file.id);
       return file;
     }
     const token = payload.nextPageToken;
@@ -286,7 +301,7 @@ async function uploadDriveBackupInTransaction(): Promise<void> {
   await assertCurrent("Start Tab data changed before the Google Drive backup could be uploaded");
 
   if (existing) {
-    await googleFetch<unknown>(`${GOOGLE_DRIVE_UPLOAD_URL}/${encodeURIComponent(existing.id)}?uploadType=media`, {
+    await googleFetch<unknown>(`${GOOGLE_DRIVE_UPLOAD_URL}/${googleResourcePathSegment(existing.id)}?uploadType=media`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body,
@@ -324,7 +339,7 @@ export async function restoreDriveBackup(): Promise<void> {
   await withStorageLock("google-drive", async () => {
     const existing = await findDriveBackupFile(true);
     if (!existing) throw new Error("No Start Tab backup found in Google Drive app data");
-    const bundle = await googleFetch<BackupBundle>(`${GOOGLE_DRIVE_FILES_URL}/${encodeURIComponent(existing.id)}?alt=media`, {}, true, true);
+    const bundle = await googleFetch<BackupBundle>(`${GOOGLE_DRIVE_FILES_URL}/${googleResourcePathSegment(existing.id)}?alt=media`, {}, true, true);
     await importBackup(bundle, {
       expectedCurrentDataRevision: localBeforeNetwork.dataRevision,
       expectedCurrentDataRevisionFallback: localBeforeNetwork.dataRevisionFallback,

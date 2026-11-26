@@ -141,3 +141,7 @@ assert.match(backup, /assertSupportedSchemas\(value\.storage\);\s*assertBackupPa
 assert.match(backup, /requireShape\(record\(settings\.layout\), "blocks"/);
 assert.match(backup, /requireShape\(runtime, "tasks", START_PAGE_RUNTIME_KEY, \(value\) => recordValues\(value, recordArray\)\)/);
 assert.match(backup, /requireShape\(stats, "byDomain"/);
+
+assert.match(google, /const calendarSegment = googleResourcePathSegment\(normalizedCalendarId\(calendarId\)\)/);
+assert.match(google, /googleResourcePathSegment\(file\.id\);\s*return file;/);
+assert.equal((google.match(/googleResourcePathSegment\(existing\.id\)/g) ?? []).length, 2);

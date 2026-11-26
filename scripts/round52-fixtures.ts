@@ -750,3 +750,35 @@ assert.doesNotThrow(() => backup.migrateBackup({ ...header104, storage: {
 const actual114 = await backup.exportBackup();
 assert.doesNotThrow(() => backup.migrateBackup(actual114));
 console.log("Round 114 nested backup collection regressions passed");
+
+resetState();
+localStorage = localData("google-resource-path.example", REVISION_BASE + 14000);
+const before119 = clone(localStorage);
+let requests119 = 0;
+try {
+  globalThis.fetch = async () => { requests119++; throw new Error("Unexpected request"); };
+  for (const id of [".", "..", " .. ", "bad\u0000id", "\ud800"]) {
+    await assert.rejects(() => google.listCalendarEvents(id), /Invalid Google resource identifier/);
+  }
+  assert.equal(requests119, 0, "Invalid calendar IDs must not initiate an authenticated request");
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    assert.equal(url.pathname, "/calendar/v3/calendars/team%40example.com/events");
+    return Response.json({ items: [] });
+  };
+  assert.deepEqual(await google.listCalendarEvents(" team@example.com "), []);
+  for (const id of [".", "..", " id ", "bad\u0000id", "\ud800"]) {
+    requests119 = 0;
+    globalThis.fetch = async (input, init) => {
+      requests119++;
+      assert.equal(new URL(String(input)).searchParams.get("spaces"), "appDataFolder");
+      assert.equal(init?.method, undefined);
+      return Response.json({ files: [{ id, name: "start-tab-backup.json" }] });
+    };
+    await assert.rejects(() => google.uploadDriveBackup(), /Invalid Google resource identifier/);
+    await assert.rejects(() => google.restoreDriveBackup(), /Invalid Google resource identifier/);
+    assert.equal(requests119, 2, "An invalid Drive file ID must stop at the listing");
+    assert.deepEqual(localStorage, before119);
+  }
+} finally { globalThis.fetch = originalFetch; }
+console.log("Round 119 Google resource identifier regressions passed");
