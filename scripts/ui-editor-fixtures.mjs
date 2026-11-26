@@ -211,11 +211,13 @@ try {
         value(field(d, "backgroundEffect"), effect, "change");
         assert.equal(field(d, "effectIntensity").value, "0.42", "Effect draft must survive panel switches");
       }
+      assert.equal(field(d, "themeHeadingScale").checkValidity(), true, "Built-in heading scale must remain valid");
       submit(one(d, "form"));
-      assert.equal(d.isConnected, false, "Theme validation: " + one(d, ".form-error").textContent);
+      assert.equal(d.isConnected, false, "Theme validation (" + kind + "/" + effect + "): " + one(d, ".form-error").textContent + " " + [...d.querySelectorAll(":invalid")].map(e => e.value + ": " + e.validationMessage).join("; "));
       const edited = await promise;
       assert.equal(edited.background.kind, kind);
       assert.equal(edited.builtIn, false);
+      assert.equal(edited.tokens.headingScale, theme.tokens.headingScale);
       applyTheme(edited, background);
       assert.equal(background.dataset.effect, effect ?? undefined);
       assert.equal(document.documentElement.style.getPropertyValue("--accent"), edited.tokens.accent);
