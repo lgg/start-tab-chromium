@@ -54,6 +54,11 @@ try {
   }
   console.log("COVERAGE_TOTAL " + JSON.stringify({ ...summary.total, sourceFiles: expected.length, zeroLineFiles: entries.filter(([, item]) => item.lines.covered === 0).length }));
   if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, report + "\n", "utf8");
+  // Enforce verified floors without pretending the 90% branch target is met.
+  const minimum = { lines: 95, statements: 95, functions: 95, branches: 85 };
+  const below = Object.entries(minimum).filter(([key, floor]) => summary.total[key].pct < floor);
+  if (below.length) throw new Error("Coverage regression: " + below.map(([key, floor]) => key + " " + summary.total[key].pct + "% < " + floor + "%").join("; "));
+  console.log("Coverage floors passed (95% lines/statements/functions, 85% branches; branch goal 90%).");
 } finally {
   await rm(temporary, { recursive: true, force: true });
 }
