@@ -148,6 +148,7 @@ try {
   chrome.runtime.getManifest=oldManifest;
   console.log("Worker residual: translation fallbacks, interrupted pomodoro, rejected browser redirect and blocker-only manifest");
 
+  {
   // Browser event listeners must ignore unrelated events and recover from
   // failures without poisoning the serialized runtime job.
   const beforeIgnored=structuredClone(control.state);
@@ -162,7 +163,7 @@ try {
   const alarmId="worker-timer";
   await ok({type:"clock-action",instanceId:alarmId,action:"start"});
   let alarmClock=control.state.startPageRuntimeState.clocks[alarmId];
-  let alarmName=rtApi.clockAlarmName(alarmId,alarmClock.completionToken);
+  const alarmName=rtApi.clockAlarmName(alarmId,alarmClock.completionToken);
   alarmClock.startedAt=Date.now();alarmClock.targetAt=Date.now()+10000;
   control.alarms.delete(alarmName);
   chrome.alarms.onAlarm.emit({name:alarmName});
@@ -208,6 +209,7 @@ try {
     }
   }
   console.log("Worker: ignored events, early alarm and failed alarm retry, queue recovery and browser URL matrix");
+  }
   await ok({ type: "reset-clocks" });
   await ok({ type: "reset-stats" });
   assert.equal((await getFocusStats()).totals.unblocksAfterCountdown, 0);
