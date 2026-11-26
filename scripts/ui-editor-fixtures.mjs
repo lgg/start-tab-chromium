@@ -240,5 +240,47 @@ try {
   applyTheme({ ...theme, background: { kind: "solid", color: "#112233" } }, background);
   assert.equal(background.dataset.effect, undefined);
   assert.equal(document.documentElement.style.getPropertyValue("--effect-intensity"), "");
+  // Round-trip every built-in and fractional values permitted by the schema.
+  const { BUILT_IN_THEMES } = await import("../src/lib/start-page-defaults.js");
+  for (const source of BUILT_IN_THEMES) {
+    const pending=editTheme(source,i18n);
+    const d=one(document,"dialog[open]");
+    assert.equal(one(d,"form").checkValidity(),true,source.name);
+    submit(one(d,"form"));
+    const saved=await pending;
+    assert.equal(saved.name,source.name);
+    assert.deepEqual(saved.background,source.background);
+    assert.deepEqual(saved.tokens,source.tokens);
+  }
+  for(const config of [
+    {effect:"animated-gradient",speed:1.037,intensity:0.423,angle:125.4,colors:["#111827","#312e81"]},
+    {effect:"aurora",speed:1.037,intensity:0.423,blur:72.4},
+    {effect:"mesh",speed:1.037,intensity:0.423,scale:1.234},
+    {effect:"spotlight",speed:1.037,intensity:0.423,size:62.4},
+    {effect:"noise",speed:1.037,intensity:0.423,animated:true},
+    {effect:"matrix",speed:1.037,intensity:0.423,density:0.554},
+    {effect:"cyberpunk",speed:1.037,intensity:0.423,scanlines:false},
+  ]){
+    const source={...theme,background:{kind:"effect",baseColor:"#08111f",config},tokens:{...theme.tokens,cardOpacity:0.823,baseFontSize:16.4,borderRadius:18.4,spacing:16.4}};
+    const pending=editTheme(source,i18n);
+    const d=one(document,"dialog[open]");
+    assert.equal(one(d,"form").checkValidity(),true,config.effect);
+    submit(one(d,"form"));
+    const saved=await pending;
+    assert.deepEqual(saved.background,source.background);
+    assert.deepEqual(saved.tokens,source.tokens);
+  }
+  const invalidTheme=editTheme(theme,i18n);
+  const invalidDialog=one(document,"dialog[open]");
+  value(field(invalidDialog,"backgroundTile"),"image","change");
+  value(field(invalidDialog,"backgroundImageUrl"),"ftp://example.com/image.png");
+  submit(one(invalidDialog,"form"));
+  assert.equal(one(invalidDialog,".form-error").hidden,false);
+  assert.match(one(invalidDialog,".form-error").textContent,/validationInvalidUrl/);
+  const escape=new window.Event("cancel",{cancelable:true});
+  window.confirm=()=>false;invalidDialog.dispatchEvent(escape);
+  assert.equal(escape.defaultPrevented,true);
+  window.confirm=()=>true;button(invalidDialog,"cancel").click();
+  assert.equal(await invalidTheme,null);
   console.log("Theme editor: 4 background kinds, 7 effects, panel preservation, DOM CSS application, cancel");
 } finally { dom.window.close(); }
