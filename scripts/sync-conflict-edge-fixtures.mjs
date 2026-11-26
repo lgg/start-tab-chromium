@@ -74,3 +74,33 @@ const remoteWins=remoteFrame[metaKey].contentChecksum>localFrame[metaKey].conten
 assert.equal(await sync.syncChromeSyncBackup(),remoteWins?"restored":"uploaded");
 assert.deepEqual(control.state.blockedSites,[remoteWins?"remote-edit.example":"local-edit.example"]);
 console.log("Browser Sync: failed remote confirmation, bounded retries, post-commit legacy failure and equal-revision conflict");
+
+await sync.uploadChromeSyncBackup();
+const verified=await remote.get(null);
+const beforeVerify=await local.get(null);
+let readChunks=false;
+remote.get=async keys=>{
+  const result=await realGet(keys);
+  if(Array.isArray(keys)&&keys.some(k=>k.startsWith("startTabSyncChunk"))){
+    readChunks=true;
+    await realSet({[metaKey]:{...verified[metaKey],snapshotId:"new-remote-snapshot"}});
+  }
+  return result;
+};
+try{
+  await assert.rejects(sync.restoreChromeSyncBackup(),/changed concurrently while it was being verified/);
+  assert.equal(readChunks,true);
+  assert.deepEqual(await local.get(null),beforeVerify);
+}finally{remote.get=realGet;await realSet(verified)}
+// An unknown legacy metadata version must never overwrite a newer frame
+// that arrives between the initial read and the late commit guard.
+let metaReads=0;
+remote.get=async keys=>{
+  if(keys===metaKey&&++metaReads>=2)return {[metaKey]:{version:999}};
+  return realGet(keys);
+};
+try{
+  await assert.rejects(sync.uploadChromeSyncBackup(),/newer extension version/);
+}finally{remote.get=realGet}
+assert.deepEqual(await realGet(null),verified);
+console.log("Browser Sync: remote metadata changes during content verification and late future-version refusal");
