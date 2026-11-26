@@ -38,6 +38,7 @@ try {
   let control = handlers(installChrome(seed()));
   try {
     const t = await loadI18n();
+    const closeWindow = window.close.bind(window);
     window.close = () => control.calls.push("close");
     await import("../src/popup/popup.js");
     await until(() => !one(document, "#primary").disabled && !one(document, "#primary").hidden, "popup startup");
@@ -68,6 +69,7 @@ try {
     await until(() => document.documentElement.lang === "ru" && !one(document, "#language").disabled);
     assert.equal(control.state.localeOverride, "ru");
     assert.ok(t.t("popupTitle"));
+    window.close = closeWindow;
     console.log("Popup: real DOM startup, changed tab, rejection, block, reload, clear, language");
   } finally { dom.window.close(); }
 
@@ -165,6 +167,7 @@ try {
     btn(section("themes"), "createTheme").click();
     dialog = one(document, "dialog[open]");
     value(one(dialog, 'input[type="text"]'), "Options theme");
+    assert.equal(one(dialog, "form").checkValidity(), true, "Default theme must be editable");
     submit(one(dialog, "form"));
     await until(() => control.state.startPageSettings.themes.customThemes.some(t => t.name === "Options theme") && busyDone());
     let themeCard = [...section("themes").querySelectorAll(".theme-card")].find(el => el.querySelector(".theme-card__title")?.textContent === "Options theme");
