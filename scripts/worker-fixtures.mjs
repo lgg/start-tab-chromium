@@ -129,13 +129,13 @@ try {
   assert.ok((await getFocusStats()).totals.focusSessionsInterrupted>=1);
   // Failure of a native browser redirect must be contained by the event
   // listener, then a later observation must be able to redirect normally.
-  const originalUpdate=chrome.tabs.update;
+  const redirectUpdateBefore=chrome.tabs.update;
   let rejectedRedirect=0;
   control.tab={id:1,url:"chrome://newtab/"};
   chrome.tabs.update=async()=>{rejectedRedirect++;throw Error("internal tab denied")};
   chrome.tabs.onUpdated.emit(1,{url:"chrome://newtab/"},control.tab);
   await until(()=>rejectedRedirect===1,"rejected internal redirect");
-  chrome.tabs.update=originalUpdate;
+  chrome.tabs.update=redirectUpdateBefore;
   chrome.tabs.onUpdated.emit(1,{url:"chrome://newtab/"},control.tab);
   await until(()=>control.calls.some(c=>c[0]==="update"&&c[2]?.url==="https://extension.example/newtab.html"),"redirect after refusal");
   const previousCount=control.calls.length;
