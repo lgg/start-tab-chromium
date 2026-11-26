@@ -140,6 +140,65 @@ try {
   assert.equal(editor.settings.layout.zone, "full");
   assert.ok(renders > 10);
   assert.equal(errors.length, 0);
+  // Fresh clean editor: no-op gestures, deferred external baseline,
+  // capture failures, stale dialogs, and acknowledgement without payload.
+  const stableSettings=cloneSettings(settings);
+  const stableToolbar=host(),stablePalette=host(),stableGrid=host();
+  let stableSaved,stableErrors=[];
+  const stable=new LayoutEditor(stableSettings,{i18n,toolbarHost:stableToolbar,paletteHost:stablePalette,getRuntime:()=>runtime,
+    requestRender:()=>{},previewBlock:()=>{},onSaved:s=>stableSaved=s,onError:e=>stableErrors.push(e)});
+  const stableCard=()=>{
+    stableGrid.replaceChildren();
+    const el=document.createElement("article");stableGrid.append(el);
+    stableGrid.getBoundingClientRect=()=>({width:1200});
+    stable.decorateCard(el,stable.settings.layout.blocks.find(b=>b.id===note.id));
+    return el;
+  };
+  await stable.save();
+  stable.cancel();
+  stable.enter();
+  let target=stableCard();
+  const untouched=cloneSettings(stable.settings);
+  key(one(target,".card__drag-handle"),"ArrowRight");
+  key(target,"Enter");
+  assert.deepEqual(stable.settings,untouched);
+  target.setPointerCapture=()=>{throw Error("no capture")};
+  pointer(one(target,".card__drag-handle"),"pointerdown",0,0);
+  assert.equal(stable.isPointerActive,false);
+  target=stableCard();
+  pointer(one(target,".card__drag-handle"),"pointerdown",0,0);
+  pointer(target,"pointerup",0,0);
+  assert.equal(stable.hasUnsavedChanges,false);
+  assert.deepEqual(stable.settings,untouched);
+  target=stableCard();
+  pointer(one(target,".card__drag-handle"),"pointerdown",0,0);
+  const external=cloneSettings(stableSettings);external.updatedAt=500;external.layout.gap=19;
+  stable.replaceSavedSettings(external);
+  assert.notEqual(stable.settings.updatedAt,500);
+  pointer(target,"lostpointercapture",0,0);
+  assert.equal(stable.settings.updatedAt,500);
+  assert.equal(stable.settings.layout.gap,19);
+  assert.equal(stable.hasUnsavedChanges,false);
+  target=stableCard();button(target,"editBlock").click();
+  const staleDialog=one(document,"dialog[open]");
+  value(field(staleDialog,"instanceName"),"Stale dialog");
+  key(stableCard(),"ArrowDown");
+  submit(one(staleDialog,"form"));
+  await until(()=>stableErrors.some(e=>/settings changed/.test(e.message)));
+  assert.notEqual(stable.settings.layout.blocks.find(b=>b.id===note.id).title,"Stale dialog");
+  stable.cancel();
+  stable.enter();
+  value(one(stableToolbar,'[aria-label="layoutZone"]'),"full","change");
+  value(one(stableToolbar,'[aria-label="layoutMode"]'),"grid","change");
+  const previous=control.chrome.storage.local.get;
+  control.handler=async()=>({ok:true});
+  control.chrome.storage.local.get=async()=>{throw Error("refresh unavailable")};
+  await stable.save();
+  control.chrome.storage.local.get=previous;
+  assert.equal(stable.isActive,false);
+  assert.ok(stableSaved);
+  assert.ok(stableErrors.some(e=>e.message==="layoutSavedRefreshFailed"));
+  console.log("Layout edge cases: clean gesture, capture failure, external revision, stale dialog and committed refresh failure");
   console.log("Layout editor: palette, geometry, keyboard, pointer, cancellation, save, stale state");
 
   // Every widget's real settings dialog, including each config reader.

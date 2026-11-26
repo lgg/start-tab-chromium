@@ -356,7 +356,7 @@ try {
   // New tab and the native gate share actual markup and storage events.
   dom = await installDom("newtab/newtab.html", "https://extension.example/newtab.html");
   const small = createDefaultStartPageSettings(100);
-  small.layout.blocks = [createBlockInstance("note", { id: "page-note" }), createBlockInstance("localTasks", { id: "page-task" }), createBlockInstance("links", { id: "page-link" }), createBlockInstance("dateTime", { id: "page-date", enabled: false })];
+  small.layout.blocks = [createBlockInstance("note", { id: "page-note" }), createBlockInstance("localTasks", { id: "page-task" }), createBlockInstance("links", { id: "page-link", config: { ...createBlockInstance("links").config, columns: 1, rows: 1 } }), createBlockInstance("dateTime", { id: "page-date", enabled: false })];
   control = handlers(installChrome(seed({ startPageSettings: small, startPageRuntimeState: normalizeRuntimeState(undefined, small), startPageOnboarding: { onboarded: false } })));
   try {
     await import("../src/newtab/newtab-gate.js");
@@ -395,6 +395,11 @@ try {
     control.state.localeOverride = "en";
     control.chrome.storage.onChanged.emit({ localeOverride: { newValue: "en" } }, "local");
     await until(() => !document.querySelector(".draft-recovery:not([hidden]) button"), "locale change reverted");
+    const focusedCard=one(document,'[data-block-id="page-note"]');
+    focusedCard.focus();
+    window.dispatchEvent(new window.Event("resize"));
+    await until(()=>!focusedCard.isConnected,"focused card rerender");
+    assert.equal(document.activeElement,one(document,'[data-block-id="page-note"]'));
     const ev = new window.Event("beforeunload", { cancelable: true });
     window.dispatchEvent(ev);
     assert.equal(ev.defaultPrevented, true);
@@ -425,6 +430,33 @@ try {
     assert.equal(replacement.selectionEnd, 4);
     submit(one(document, '[data-block-id="page-task"] form'));
     await until(() => control.state.startPageRuntimeState.tasks["page-task"]?.length === 1);
+    const normalHandler=control.handler;
+    const linksCard=()=>one(document,'[data-block-id="page-link"]');
+    await until(()=>linksCard().querySelector(".pager"));
+    control.handler=async m=>m.type==="runtime-link-page"?{ok:false,error:"link page conflict"}:normalHandler(m);
+    button(linksCard(),t.t("nextPage")).click();
+    await until(()=>one(document,"#statusRegion").textContent.includes("link page conflict"));
+    assert.equal(control.state.startPageRuntimeState.linkPages["page-link"],0);
+    control.handler=normalHandler;
+    await until(()=>!button(linksCard(),t.t("nextPage")).disabled,"link retry enabled");
+    button(linksCard(),t.t("nextPage")).click();
+    await until(()=>control.state.startPageRuntimeState.linkPages["page-link"]===1);
+    await delay(50);
+    assert.ok(linksCard().querySelector("a"));
+    const taskDraft=one(document,'[data-block-id="page-task"] form.task-form input');
+    value(taskDraft,"hidden task text");
+    const remoteSettings=control.state.startPageSettings;
+    remoteSettings.layout.blocks.find(b=>b.id==="page-task").enabled=false;
+    control.chrome.storage.onChanged.emit({startPageSettings:{newValue:remoteSettings}},"local");
+    await until(()=>document.querySelector(".draft-recovery:not([hidden]) textarea")?.value==="hidden task text");
+    assert.equal(document.querySelector('[data-block-id="page-task"]'),null);
+    const recovery=one(document,".draft-recovery:not([hidden])");
+    button(recovery,t.t("hiddenNoteDiscard")).click();
+    await until(()=>!document.querySelector(".draft-recovery:not([hidden]) textarea"));
+    control.state.startPageSettings.layout.blocks.find(b=>b.id==="page-task").enabled=true;
+    control.chrome.storage.onChanged.emit({startPageSettings:{newValue:control.state.startPageSettings}},"local");
+    await until(()=>document.querySelector('[data-block-id="page-task"] form.task-form input'));
+    assert.equal(one(document,'[data-block-id="page-task"] form input').value,"");
     control.state.startPageSettings.startTab.enabled = false;
     control.chrome.storage.onChanged.emit({ startPageSettings: { newValue: control.state.startPageSettings } }, "local");
     await until(() => document.getElementById("startTabGateOverlay"), "disabled overlay");
