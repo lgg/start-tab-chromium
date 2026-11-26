@@ -69,6 +69,9 @@ try {
     await until(() => document.documentElement.lang === "ru" && !one(document, "#language").disabled);
     assert.equal(control.state.localeOverride, "ru");
     assert.ok(t.t("popupTitle"));
+    control.tab = { id: 3, url: "chrome://settings/" };
+    primary.click();
+    await until(() => primary.hidden, "unsupported popup tab");
     window.close = closeWindow;
     console.log("Popup: real DOM startup, changed tab, rejection, block, reload, clear, language");
   } finally { dom.window.close(); }
@@ -100,6 +103,16 @@ try {
     one(document, "#unblock").click();
     window.dispatchEvent(new window.Event("pagehide"));
     assert.equal(tick, undefined);
+    control.handler = async m => {
+      if (m.type === "blocked-original-url") return { ok: true, blockedUrl: "https://blocked.example/path" };
+      if (m.type === "unblock") { control.state.blockedSites = []; return { ok: true, changed: true }; }
+      return { ok: true };
+    };
+    one(document, "#cancel").click();
+    one(document, "#unblock").click();
+    now += 10001; tick();
+    await until(() => control.messages.some(m => m.type === "record-unblock"), "countdown success");
+    assert.deepEqual(control.state.blockedSites, []);
     console.log("Blocked page: countdown, Russian plural forms, cancel, worker failure, pagehide cleanup");
   } finally {
     Object.defineProperty(globalThis, "performance", { value: realPerformance, configurable: true, writable: true });
@@ -178,8 +191,17 @@ try {
       await until(() => control.state.startPageSettings.themes.selectedThemeId === control.state.startPageSettings.themes.customThemes.find(t => t.name === "Options theme").id && busyDone());
     }
     themeCard = [...section("themes").querySelectorAll(".theme-card")].find(el => el.querySelector(".theme-card__title")?.textContent === "Options theme");
+    btn(themeCard, "duplicate").click();
+    await until(() => control.state.startPageSettings.themes.customThemes.length === 2 && busyDone(), "duplicate theme");
+    themeCard = [...section("themes").querySelectorAll(".theme-card")].find(el => el.querySelector(".theme-card__title")?.textContent === "Options theme");
+    btn(themeCard, "edit").click();
+    dialog = one(document, "dialog[open]");
+    value(one(dialog, 'input[type="text"]'), "Options theme edited");
+    submit(one(dialog, "form"));
+    await until(() => control.state.startPageSettings.themes.customThemes.some(t => t.name === "Options theme edited") && busyDone());
+    themeCard = [...section("themes").querySelectorAll(".theme-card")].find(el => el.querySelector(".theme-card__title")?.textContent === "Options theme edited");
     btn(themeCard, "delete").click();
-    await until(() => !control.state.startPageSettings.themes.customThemes.some(t => t.name === "Options theme") && busyDone());
+    await until(() => !control.state.startPageSettings.themes.customThemes.some(t => t.name === "Options theme edited") && busyDone());
     assert.equal(btn(section("backup"), "driveUpload").disabled, true);
     value(one(section("blocker"), "input"), "added.example");
     submit(one(section("blocker"), "form"));
@@ -198,13 +220,23 @@ try {
   dom = await installDom("newtab/newtab.html", "https://extension.example/newtab.html");
   const small = createDefaultStartPageSettings(100);
   small.layout.blocks = [createBlockInstance("note", { id: "page-note" }), createBlockInstance("localTasks", { id: "page-task" }), createBlockInstance("links", { id: "page-link" }), createBlockInstance("dateTime", { id: "page-date", enabled: false })];
-  control = handlers(installChrome(seed({ startPageSettings: small, startPageRuntimeState: normalizeRuntimeState(undefined, small), startPageOnboarding: { onboarded: true } })));
+  control = handlers(installChrome(seed({ startPageSettings: small, startPageRuntimeState: normalizeRuntimeState(undefined, small), startPageOnboarding: { onboarded: false } })));
   try {
     await import("../src/newtab/newtab-gate.js");
     await window.startTabGateReady;
     assert.equal(document.getElementById("startTabGateOverlay"), null);
     await import("../src/newtab/newtab.js");
     await until(() => document.querySelectorAll("#grid .card").length === 3, "new tab cards");
+    await until(() => document.getElementById("onboarding"), "onboarding modal");
+    const onboarding = one(document, "#onboarding");
+    const onboardingButtons = [...onboarding.querySelectorAll("button")];
+    onboardingButtons[0].focus();
+    key(onboardingButtons[0], "Tab", { shiftKey: true });
+    assert.equal(document.activeElement, onboardingButtons.at(-1));
+    key(onboardingButtons.at(-1), "Tab");
+    assert.equal(document.activeElement, onboardingButtons[0]);
+    onboardingButtons.at(-1).click();
+    await until(() => control.state.startPageOnboarding?.onboarded && !document.getElementById("onboarding"), "onboarding skip");
     one(document, "#settings").click();
     await until(() => control.calls.includes("options"));
     one(document, "#nativeNewTab").click();
@@ -236,6 +268,38 @@ try {
     control.state.startPageSettings.startTab.enabled = true;
     control.chrome.storage.onChanged.emit({ startPageSettings: { newValue: control.state.startPageSettings } }, "local");
     await until(() => !document.getElementById("startTabGateOverlay"));
+    window.name = "split-view";
+    control.chrome.tabs.query = async () => [control.tab, { id: 2, url: "https://target.example/", title: "Target tab" }, { id: 3, url: "chrome://settings/" }, { id: 4, url: "invalid" }, { id: 5, url: "" }];
+    control.chrome.storage.onChanged.emit({ startPageSettings: { newValue: control.state.startPageSettings } }, "local");
+    await until(() => document.getElementById("startTabGateOverlay")?.textContent.includes("Target tab"), "split picker");
+    const overlay = one(document, "#startTabGateOverlay");
+    assert.ok(control.state.startTabLastNativeNewTabContext);
+    const actions = [...overlay.querySelectorAll("button")];
+    assert.equal(actions.length, 3);
+    actions[0].focus(); key(actions[0], "Tab", { shiftKey: true });
+    assert.equal(document.activeElement, actions.at(-1));
+    key(actions.at(-1), "Tab"); assert.equal(document.activeElement, actions[0]);
+    actions[0].click();
+    await until(() => control.calls.some(c => c[0] === "update" && c[2]?.url === "https://target.example/"));
+    const oldHandler = control.handler;
+    let release;
+    control.handler = m => m.type === "open-native-new-tab" ? new Promise(resolve => { release = resolve; }) : oldHandler(m);
+    const native = one(overlay, "[data-native-new-tab]");
+    const prior = control.messages.length;
+    native.click(); native.click();
+    assert.equal(native.getAttribute("aria-busy"), "true");
+    assert.equal(control.messages.length, prior + 1);
+    release({ ok: false, error: "Rejected" });
+    await until(() => overlay.querySelector('[role="alert"]:not([hidden])'), "native error");
+    control.handler = oldHandler;
+    native.click();
+    await until(() => !native.hasAttribute("aria-busy"));
+    assert.equal(one(overlay, '[role="alert"]').hidden, true);
+    actions.at(-1).click();
+    await until(() => control.calls.filter(c => c === "options").length >= 2);
+    window.name = "";
+    control.chrome.storage.onChanged.emit({ startPageSettings: { newValue: control.state.startPageSettings } }, "local");
+    await until(() => !document.getElementById("startTabGateOverlay"), "split picker closed");
     window.dispatchEvent(new window.Event("resize"));
     window.dispatchEvent(new window.Event("pagehide"));
     console.log("New tab: render enabled/disabled blocks, layout save, note/task dispatch, native gate, storage overlay and cleanup");
