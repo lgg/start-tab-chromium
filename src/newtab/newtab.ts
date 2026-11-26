@@ -551,7 +551,7 @@ function handleStorageChange(changes: Record<string, chrome.storage.StorageChang
       if (onboardingAction === "dismiss") {
         dismissOnboarding();
       } else if (onboardingAction === "show") {
-        await refreshState();
+        if (await refreshState()) queueRender();
         await showOnboarding();
       }
     });
@@ -575,7 +575,12 @@ function dismissOnboardingFromGate(): void {
 
 function handleGateChange(): void {
   runUiTask(async () => {
-    if (!document.getElementById("startTabGateOverlay") && !editor.hasUnsavedChanges) await refreshState();
+    if (!document.getElementById("startTabGateOverlay") && !editor.hasUnsavedChanges) {
+      // A gate refresh can finish before the queued storage-event refresh.
+      // Render its changes too, otherwise the latter sees the new baseline
+      // and incorrectly skips updating the mounted widgets.
+      if (await refreshState()) queueRender();
+    }
     await showOnboarding();
   });
 }
