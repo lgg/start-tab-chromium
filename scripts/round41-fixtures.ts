@@ -343,3 +343,17 @@ assert.equal(await readBlockedDestinationForSender(sender116, page113, "example.
 assert.equal(await readBlockedDestinationForSender(sender116, page113, "example.com", read113, lookup113), null);
 assert.equal(await readBlockedDestinationForSender(sender116, page113, "example.com", read113, lookup113, async () => { throw new Error("frame gone"); }), null);
 console.log("Round 116 blocked document identity regressions passed");
+
+const { isCurrentBlockedPageSender } = await import("../src/lib/blocked-navigation.js");
+tab113 = { id: 113, url: url113 };
+frame116 = { documentId: "document-a", documentLifecycle: "active", url: url113 };
+assert.equal(await isCurrentBlockedPageSender(sender116, page113, "example.com", read113, readFrame116), true);
+frame116 = { documentId: "document-b", documentLifecycle: "active", url: url113 };
+assert.equal(await isCurrentBlockedPageSender(sender116, page113, "example.com", read113, readFrame116), false);
+frame116 = { documentId: "document-a", documentLifecycle: "active", url: url113 };
+tab113 = { id: 113, url: url113, pendingUrl: "https://elsewhere.example/" };
+assert.equal(await isCurrentBlockedPageSender(sender116, page113, "example.com", read113, readFrame116), false);
+tab113 = { id: 113, url: url113 };
+assert.equal(await isCurrentBlockedPageSender(sender116, page113, "example.com", async () => { throw new Error("tab gone"); }, readFrame116), false);
+assert.equal(await isCurrentBlockedPageSender(sender113, page113, "example.com", read113), true);
+console.log("Round 118 live unblock guard regressions passed");

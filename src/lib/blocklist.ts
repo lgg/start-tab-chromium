@@ -583,11 +583,15 @@ async function restoreBlocklistTransaction(
 
 async function applyBlocklistMutation(
   transform: (current: { sites: string[]; lastBlockedUrls: Record<string, string> }) => BlocklistMutationState,
+  assertCurrent?: () => Promise<void>,
 ): Promise<string[]> {
   const original = await chrome.storage.local.get([STORAGE_KEY, LAST_BLOCKED_URLS_KEY, DATA_REVISION_KEY]);
   const originalRules = await readDynamicRulesSnapshot();
   const previousSites = normalizeBlockedSites(original[STORAGE_KEY]);
   const current = { sites: previousSites, lastBlockedUrls: normalizeLastBlockedUrls(original[LAST_BLOCKED_URLS_KEY]) };
+  // Run navigation-sensitive preconditions inside the mutation lock and
+  // after reading storage/rules, before any change or rollback is needed.
+  if (assertCurrent) await assertCurrent();
   const requested = transform({
     sites: structuredClone(current.sites),
     lastBlockedUrls: cloneDictionary(current.lastBlockedUrls),
@@ -646,7 +650,7 @@ export async function blockHost(host: string): Promise<void> {
   })));
 }
 
-export async function unblockHost(host: string): Promise<boolean> {
+export async function unblockHost(host: string, assertCurrent?: () => Promise<void>): Promise<boolean> {
   const normalized = requireHost(host);
   if (isPageContext()) {
     const ack = await sendMessage({ type: "unblock", host: normalized });
@@ -662,7 +666,7 @@ export async function unblockHost(host: string): Promise<boolean> {
         sites: changed ? current.sites.filter((site) => site !== normalized) : current.sites,
         lastBlockedUrls: current.lastBlockedUrls,
       };
-    });
+    }, assertCurrent);
     return changed;
   });
 }

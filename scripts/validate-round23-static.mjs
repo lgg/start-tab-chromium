@@ -45,13 +45,13 @@ assert.match(outputValidator, /isValidGoogleOAuthClientId\(configuredGoogleClien
 
 assert.match(messages, /changed\?: boolean/,
   "Worker acknowledgements must expose whether a mutation actually changed state");
-assert.match(blocklist, /export async function unblockHost\(host: string\): Promise<boolean>/,
+assert.match(blocklist, /export async function unblockHost\(host: string, assertCurrent\?: \(\) => Promise<void>\): Promise<boolean>/,
   "Unblock operations must return an atomic mutation result");
 assert.match(blocklist, /let changed = false;[\s\S]*await applyBlocklistMutation[\s\S]*return changed;/,
   "A stale unblock must remain a durable no-op while still allowing derived DNR repair inside the serialized mutation queue");
 assert.doesNotMatch(blocklist, /if \(!sites\.includes\(normalized\)\) return false;/,
   "Unblock must not bypass DNR reconciliation through an early storage-only return");
-assert.match(worker, /case "unblock": return \{ changed: await unblockHost\(message\.host\) \};/,
+assert.match(worker, /case "unblock": \{[\s\S]*?return \{ changed: await unblockHost\(message\.host, assertCurrent\) \};/,
   "The service worker must return the actual serialized unblock result");
 assert.match(worker, /sendResponse\(\{ ok: true, \.\.\.\(result \?\? \{\}\) \}\)/,
   "Worker message results must reach the calling extension page");
