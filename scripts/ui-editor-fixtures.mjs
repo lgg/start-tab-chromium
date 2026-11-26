@@ -251,6 +251,32 @@ try {
   window.confirm = () => true;
   button(d, "close").click();
   assert.equal(await pending, null);
+
+  // Preserve the default localization key on an unedited localized title;
+  // a blank custom title intentionally returns to the default.
+  for(const original of [createBlockInstance("note"),createBlockInstance("note",{title:""}),createBlockInstance("note",{title:"Custom title"})]){
+    const pending=editBlockInstance(original,i18n);
+    const d=one(document,"dialog[open]");
+    if(original.title==="Custom title")value(field(d,"instanceName"),"   ");
+    submit(one(d,"form"));
+    assert.equal((await pending).title,"blockTitleNote");
+  }
+  const linkDialogPromise=editBlockInstance(createBlockInstance("links"),i18n);
+  const linkDialog=one(document,"dialog[open]");
+  const linkRow=one(linkDialog,".collection-row");
+  value(one(linkRow,'[aria-label="linkUrl"]'),"ftp://example.com/");
+  submit(one(linkDialog,"form"));
+  assert.equal(linkDialog.isConnected,true);
+  assert.match(one(linkDialog,".form-error").textContent,/validationInvalidLink/);
+  window.confirm=()=>false;
+  const cancelLink=new window.Event("cancel",{cancelable:true});
+  linkDialog.dispatchEvent(cancelLink);
+  assert.equal(cancelLink.defaultPrevented,true);
+  value(one(linkRow,'[aria-label="linkUrl"]'),"https://example.com/");
+  submit(one(linkDialog,"form"));
+  assert.ok((await linkDialogPromise).config.items.some(i=>i.url==="https://example.com/"));
+  window.confirm=()=>true;
+  console.log("Block dialog: default title preservation, invalid link rejection and repair");
   console.log("Block settings: all 16 types, collections, provider removal, modal exclusivity, validation and discard");
 
   const theme = getTheme(settings);
