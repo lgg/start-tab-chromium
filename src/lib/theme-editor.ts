@@ -127,27 +127,27 @@ let readEffect: () => EffectConfig;
 const effectPanels = new FormPanelCache<EffectConfig>();
 const createEffectPanel = (): (() => EffectConfig) => {
 const current = existing.config.effect === effect.value ? existing.config : null;
-const speed = numberInput("speed" in existing.config ? existing.config.speed : 1, 0.05, 4, 0.05);
-const intensity = numberInput(existing.config.intensity, 0, 1, 0.01);
+const speed = numberInput("speed" in existing.config ? existing.config.speed : 1, 0.05, 4, "any");
+const intensity = numberInput(existing.config.intensity, 0, 1, "any");
 switch (effect.value) {
 case "animated-gradient": {
-const angle = numberInput(current?.effect === "animated-gradient" ? current.angle : 135, 0, 360, 1);
+const angle = numberInput(current?.effect === "animated-gradient" ? current.angle : 135, 0, 360, "any");
 const colors = textInput(current?.effect === "animated-gradient" ? current.colors.join(", ") : "#111827, #312e81, #0f766e, #111827");
 effectFields.append(field(i18n.t("effectSpeed"), speed), field(i18n.t("effectIntensity"), intensity), field(i18n.t("effectAngle"), angle), field(i18n.t("effectColors"), colors, true));
 return () => ({ effect: "animated-gradient", speed: readNumber(speed, 1), intensity: readNumber(intensity, 0.8), angle: readNumber(angle, 135), colors: colors.value.split(",").map((item) => item.trim()).filter(Boolean) });
 }
 case "aurora": {
-const blur = numberInput(current?.effect === "aurora" ? current.blur : 72, 0, 160, 1);
+const blur = numberInput(current?.effect === "aurora" ? current.blur : 72, 0, 160, "any");
 effectFields.append(field(i18n.t("effectSpeed"), speed), field(i18n.t("effectIntensity"), intensity), field(i18n.t("effectBlur"), blur));
 return () => ({ effect: "aurora", speed: readNumber(speed, 1), intensity: readNumber(intensity, 0.65), blur: readNumber(blur, 72) });
 }
 case "mesh": {
-const scale = numberInput(current?.effect === "mesh" ? current.scale : 1, 0.25, 4, 0.05);
+const scale = numberInput(current?.effect === "mesh" ? current.scale : 1, 0.25, 4, "any");
 effectFields.append(field(i18n.t("effectSpeed"), speed), field(i18n.t("effectIntensity"), intensity), field(i18n.t("effectScale"), scale));
 return () => ({ effect: "mesh", speed: readNumber(speed, 0.7), intensity: readNumber(intensity, 0.75), scale: readNumber(scale, 1) });
 }
 case "spotlight": {
-const size = numberInput(current?.effect === "spotlight" ? current.size : 62, 10, 180, 1);
+const size = numberInput(current?.effect === "spotlight" ? current.size : 62, 10, 180, "any");
 effectFields.append(field(i18n.t("effectSpeed"), speed), field(i18n.t("effectIntensity"), intensity), field(i18n.t("effectSize"), size));
 return () => ({ effect: "spotlight", speed: readNumber(speed, 0.65), intensity: readNumber(intensity, 0.72), size: readNumber(size, 62) });
 }
@@ -157,7 +157,7 @@ effectFields.append(field(i18n.t("effectIntensity"), intensity), field(i18n.t("e
 return () => ({ effect: "noise", intensity: readNumber(intensity, 0.22), animated: animated.checked, speed: readNumber(speed, 0.5) });
 }
 case "matrix": {
-const density = numberInput(current?.effect === "matrix" ? current.density : 0.55, 0.1, 1, 0.01);
+const density = numberInput(current?.effect === "matrix" ? current.density : 0.55, 0.1, 1, "any");
 effectFields.append(field(i18n.t("effectSpeed"), speed), field(i18n.t("effectIntensity"), intensity), field(i18n.t("effectDensity"), density));
 return () => ({ effect: "matrix", speed: readNumber(speed, 1), intensity: readNumber(intensity, 0.7), density: readNumber(density, 0.55) });
 }
@@ -212,18 +212,18 @@ const textPrimary = textInput(tokens.textPrimary, "color");
 const textSecondary = textInput(tokens.textSecondary, "color");
 const cardSurface = textInput(tokens.cardSurface, "color");
 const cardBorder = textInput(tokens.cardBorder);
-const cardOpacity = numberInput(tokens.cardOpacity, 0, 1, 0.01);
+const cardOpacity = numberInput(tokens.cardOpacity, 0, 1, "any");
 const shadow = textInput(tokens.shadow);
 const accent = textInput(tokens.accent, "color");
 const hover = textInput(tokens.hover);
 const active = textInput(tokens.active);
 const fontFamily = textInput(tokens.fontFamily);
-const baseFontSize = numberInput(tokens.baseFontSize, 10, 32, 1);
+const baseFontSize = numberInput(tokens.baseFontSize, 10, 32, "any");
 // Built-in themes use 1.08 and imported themes may use other fractional
 // values. Match the normalizer instead of rejecting a valid existing value.
 const headingScale = numberInput(tokens.headingScale, 0.8, 2, "any");
-const radius = numberInput(tokens.borderRadius, 0, 48, 1);
-const spacing = numberInput(tokens.spacing, 4, 40, 1);
+const radius = numberInput(tokens.borderRadius, 0, 48, "any");
+const spacing = numberInput(tokens.spacing, 4, 40, "any");
 grid.append(
 field(i18n.t("themeName"), name, true),
 background.root,
