@@ -75,6 +75,44 @@ assert.equal(sync.chunkForChromeSync("😀\\\"\n".repeat(30),50).join(""),"😀\
 assert.throws(()=>sync.completeChromeSyncPayload(meta,[]),/Invalid/);
 await remote.set(original);
 assert.equal(JSON.parse(raw).app,"Start Tab");
+// Verify smart sync's content decisions against real exported frames.
+await sync.uploadChromeSyncBackup();
+const stableFrame=await remote.get(null);
+await remote.set({startTabSyncChunk0:"corrupt matching content"});
+assert.equal(await sync.syncChromeSyncBackup(),"uploaded");
+assert.equal(await sync.syncChromeSyncBackup(),"unchanged");
+const baseState=structuredClone(control.state);
+const baseFrame=await remote.get(null);
+await blocklist.blockHost("local-edit.example");
+assert.equal(await sync.syncChromeSyncBackup(),"uploaded");
+assert.ok(control.state.blockedSites.includes("local-edit.example"));
+const changedFrame=await remote.get(null);
+async function restoreLocal(snapshot){
+  const extra=Object.keys(control.state).filter(k=>!Object.hasOwn(snapshot,k));
+  if(extra.length)await local.remove(extra);
+  await local.set(snapshot);
+}
+await restoreLocal(baseState);
+assert.equal(await sync.syncChromeSyncBackup(),"restored");
+assert.ok(control.state.blockedSites.includes("local-edit.example"));
+await restoreLocal(baseState);
+await blocklist.blockHost("another-local.example");
+const oldLegacy={version:2,updatedAt:"2000-01-01T00:00:00.000Z",deviceId:meta.deviceId,checksum:changedFrame[metaKey].checksum,chunks:changedFrame[metaKey].chunks};
+await remote.set({...changedFrame,[metaKey]:oldLegacy});
+assert.equal(await sync.syncChromeSyncBackup(),"uploaded");
+assert.ok(control.state.blockedSites.includes("another-local.example"));
+assert.ok(!control.state.blockedSites.includes("local-edit.example"));
+await remote.set({...changedFrame,[metaKey]:{...oldLegacy,updatedAt:new Date(Date.now()+60000).toISOString()}});
+assert.equal(await sync.syncChromeSyncBackup(),"restored");
+assert.ok(control.state.blockedSites.includes("local-edit.example"));
+assert.ok(!control.state.blockedSites.includes("another-local.example"));
+assert.equal((await sync.getChromeSyncBackupMeta()).version,3);
+remote.QUOTA_BYTES=NaN;
+remote.QUOTA_BYTES_PER_ITEM=undefined;
+await sync.uploadChromeSyncBackup();
+remote.QUOTA_BYTES=102400;
+remote.QUOTA_BYTES_PER_ITEM=8192;
+console.log("Browser Sync: verified matching frame repair, local/remote changes and legacy winner decisions");
 console.log("Browser Sync: legacy upgrade, unchanged sync, corruption, future schema, quota, partial frame and recovery");
 
 await stats.resetFocusStats();
