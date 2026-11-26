@@ -43,7 +43,7 @@ assert.match(blocked, /async function blockedHostIsActive\(\)/,
   "Blocked-page state must be verified against the current blocklist");
 assert.match(blocked, /if \(host && !await blockedHostIsActive\(\)\)[\s\S]*location\.replace/,
   "Stale or manually opened blocked pages must leave without presenting an unblock action");
-assert.match(blocked, /if \(!await blockedHostIsActive\(\)\) return "unchanged"/,
+assert.match(blocked, /if \(!await blockedHostIsActive\(\) \|\| !pageActive\) return "unchanged"/,
   "Countdown completion must recheck the current blocklist");
 assert.match(blocked, /if \(result === "removed"\)[\s\S]*record-unblock/,
   "Countdown statistics must only be recorded for an actually active block");
