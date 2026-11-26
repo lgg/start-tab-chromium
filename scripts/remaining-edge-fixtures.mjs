@@ -135,3 +135,53 @@ control.state.startPageRuntimeState=oldRuntime;
 await local.set({startPageOnboarding:{onboarded:true}});
 await assert.rejects(rt.replaceStartPageSettingsWithRuntime(settings,settings.updatedAt,runtime.updatedAt,undefined,true),/already completed/);
 console.log("Revision, restore, grid bounds, note conflict, cache eviction, native defaults and alarm failure boundary matrix");
+
+const navigation=await import("../src/lib/blocked-navigation.js");
+const page="https://extension.example/blocked.html";
+const blockedUrl=page+"?site=example.com";
+const sender={tab:{id:1},frameId:0,url:blockedUrl};
+assert.equal(await navigation.readBlockedDestinationForSender(sender,page,"example.com",async()=>({id:1,url:blockedUrl}),async()=>{throw Error("session storage unavailable")}),null);
+const bl=await import("../src/lib/blocklist.js");
+await bl.replaceBlockedSites(["example.com"]);
+await bl.rememberBlockedNavigation("https://example.com/path");
+await bl.blockHost("new.example");
+assert.equal(await bl.getLastBlockedUrl("example.com"),"https://example.com/path");
+const dnr=control.chrome.declarativeNetRequest;
+const beforeRules=await bl.readDynamicRulesSnapshot();
+await dnr.updateDynamicRules({removeRuleIds:beforeRules.map(rule=>rule.id)});
+const originalUpdate=dnr.updateDynamicRules;
+let failOnce=true;
+dnr.updateDynamicRules=async options=>{if(failOnce){failOnce=false;throw Error("repair unavailable")}return originalUpdate(options)};
+try{
+  await assert.rejects(bl.blockHost("new.example"),/repair unavailable/);
+  assert.deepEqual(await bl.readDynamicRulesSnapshot(),[]);
+  assert.deepEqual(control.state.blockedSites,["example.com","new.example"]);
+}finally{dnr.updateDynamicRules=originalUpdate}
+await bl.blockHost("new.example");
+assert.deepEqual(await bl.readDynamicRulesSnapshot(),beforeRules);
+const native=await import("../src/lib/native-new-tab.js");
+const tabs=control.chrome.tabs;
+const originalCreateTab=tabs.create,originalGetTab=tabs.get,originalUpdateTab=tabs.update,originalRemoveTab=tabs.remove,originalRemoveStorage=local.remove;
+const removedTabs=[];
+tabs.create=async options=>{control.tab={id:9,...options};return {...control.tab}};
+tabs.get=async()=>({...control.tab});
+tabs.update=async(id,options)=>{control.tab={id,...options};throw Error("navigation unavailable")};
+tabs.remove=async id=>removedTabs.push(id);
+local.remove=async keys=>{if(keys===native.NATIVE_NEW_TAB_BYPASS_KEY)throw Error("grant cleanup unavailable");return originalRemoveStorage(keys)};
+try{
+  await assert.rejects(native.openNativeNewTab({consumptionTimeoutMs:1,pollIntervalMs:1}),e=>e instanceof AggregateError&&e.errors.some(cause=>cause.message==="grant cleanup unavailable"));
+  assert.deepEqual(removedTabs,[9]);
+}finally{tabs.create=originalCreateTab;tabs.get=originalGetTab;tabs.update=originalUpdateTab;tabs.remove=originalRemoveTab;local.remove=originalRemoveStorage}
+await local.remove(native.NATIVE_NEW_TAB_BYPASS_KEY);
+const {installDom}=await import("./ui-fixture-dom.mjs");
+const dom=await installDom();
+try{
+  control.handler=async m=>({ok:true,changed:m.host==="example.com"});
+  assert.equal(await bl.unblockHost("example.com"),true);
+  assert.equal(await bl.unblockHost("missing.example"),false);
+  assert.deepEqual(control.messages.slice(-2),[{type:"unblock",host:"example.com"},{type:"unblock",host:"missing.example"}]);
+  await assert.rejects(rt.deleteInstanceRuntime("example"),/requires the current block and runtime revisions/);
+  await rt.deleteInstanceRuntime("example",1,2);
+  assert.deepEqual(control.messages.at(-1),{type:"delete-instance-runtime",instanceId:"example",expectedBlockUpdatedAt:1,expectedRuntimeUpdatedAt:2});
+}finally{dom.window.close()}
+console.log("Navigation: failed session lookup, DNR repair, native grant cleanup and UI-to-worker mutation boundaries");
