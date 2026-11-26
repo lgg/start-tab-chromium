@@ -255,8 +255,97 @@ try {
     await until(() => control.messages.at(-1)?.type === "reset-stats" && busyDone());
     btn(document, "resetStartPage").click();
     await until(() => control.messages.at(-1)?.type === "reset-start-page" && busyDone());
+    // General form invalid input, failed commit, committed-but-unreadable,
+    // and explicit retry refresh without replaying a destructive mutation.
+    const originalHandler=control.handler;
+    const local=control.chrome.storage.local;
+    const originalGet=local.get;
+    const status=()=>one(document,"#status");
+    const generalSubmit=()=>submit(one(section("general"),"form"));
+    value(option("layoutGap"),61);
+    const invalidBefore=control.messages.length;
+    generalSubmit();await delay(20);
+    assert.equal(control.messages.length,invalidBefore);
+    assert.equal(one(section("general"),"form").checkValidity(),false);
+    value(option("layoutGap"),23);
+    control.handler=async m=>m.type==="replace-start-page-settings"?{ok:false,error:"conflicting settings"}:originalHandler(m);
+    generalSubmit();
+    await until(()=>status().textContent.includes("conflicting settings")&&busyDone());
+    assert.equal(option("layoutGap").value,"23");
+    assert.notEqual(control.state.startPageSettings.layout.gap,23);
+    control.handler=async m=>{
+      const response=await originalHandler(m);
+      if(m.type==="replace-start-page-settings")local.get=async()=>{throw Error("refresh failed after commit")};
+      return response;
+    };
+    generalSubmit();
+    await until(()=>status().textContent.includes("refresh failed after commit")&&busyDone());
+    assert.equal(control.state.startPageSettings.layout.gap,23);
+    local.get=originalGet;control.handler=originalHandler;
+    const committedCount=control.messages.length;
+    generalSubmit();
+    await until(()=>status().textContent===t.t("optionsRefreshedRetry")&&busyDone());
+    assert.equal(control.messages.length,committedCount,"Refresh must not replay a committed action");
+    assert.equal(option("layoutGap").value,"23");
+    value(option("layoutGap"),24);
+    control.handler=async m=>{
+      if(m.type==="replace-start-page-settings"){local.get=async()=>{throw Error("refresh unavailable")};return {ok:false,error:"write refused"}}
+      return originalHandler(m);
+    };
+    generalSubmit();
+    await until(()=>status().textContent.includes("write refused")&&status().textContent.includes("refresh unavailable")&&busyDone());
+    generalSubmit();
+    await until(()=>status().textContent.includes("refresh unavailable")&&busyDone());
+    local.get=originalGet;control.handler=originalHandler;
+    generalSubmit();
+    await until(()=>status().textContent===t.t("optionsRefreshedRetry")&&busyDone());
+    assert.equal(option("layoutGap").value,"24");
+    window.confirm=()=>true;
+    btn(section("general"),"cancel").click();
+    await until(()=>option("layoutGap").value==="23"&&busyDone());
+    value(option("layoutPreset"),"minimal","change");
+    assert.equal(option("layoutMode").value,"grid");
+    value(option("layoutColumns"),13);
+    assert.equal(option("layoutPreset").value,"custom");
+    value(option("layoutPreset"),"focus","change");
+    value(option("layoutZone"),"full","change");
+    generalSubmit();
+    await until(()=>control.state.startPageSettings.layout.profile==="focus"&&busyDone());
+    assert.ok(control.state.startPageSettings.layout.blocks.every(b=>b.zone==="full"));
+    value(option("locale"),"auto","change");
+    generalSubmit();
+    await until(()=>control.state.localeOverride===undefined&&busyDone());
+    value(option("locale"),"en","change");
+    value(option("layoutGap"),25);
+    generalSubmit();
+    await until(()=>control.state.localeOverride==="en"&&control.state.startPageSettings.layout.gap===25&&busyDone());
+    assert.equal(control.messages.at(-1).localeChange.preference,"en");
+    const previousMessages=control.messages.length;
+    window.confirm=()=>false;
+    btn(document,"resetStartPage").click();
+    await delay(20);
+    assert.equal(control.messages.length,previousMessages);
+    window.confirm=()=>true;
+    console.log("Options: invalid form, failed save, committed refresh failure, recovery, preset and locale paths");
     console.log("Options: general draft, save, add/edit/duplicate/disable/clear/delete blocks, create/select/delete theme, blocker and reset");
   } finally { dom.window.close(); }
+
+  // A blocker-only build must not overwrite the latent full-build setting.
+  dom=await installDom("options/options.html");
+  control=handlers(installChrome(seed()));
+  try {
+    const t=await loadI18n();
+    await import("../src/options/options.ts?case=blocker-only");
+    await until(()=>document.querySelector("#statistics .stats-grid"));
+    assert.ok(![...document.querySelectorAll("#headerActions button")].some(b=>b.textContent===t.t("openStartTab")));
+    const option=k=>one([...one(document,"#general").querySelectorAll("label")].find(l=>l.querySelector(".option-field__label")?.textContent===t.t(k)),"input,select");
+    assert.equal(option("startTabEnabled").disabled,true);
+    option("startTabEnabled").checked=false;
+    value(option("layoutGap"),19);
+    submit(one(document,"#general form"));
+    await until(()=>control.state.startPageSettings.layout.gap===19&&document.body.getAttribute("aria-busy")!=="true");
+    assert.equal(control.state.startPageSettings.startTab.enabled,true);
+  } finally {dom.window.close()}
 
   // New tab and the native gate share actual markup and storage events.
   dom = await installDom("newtab/newtab.html", "https://extension.example/newtab.html");
