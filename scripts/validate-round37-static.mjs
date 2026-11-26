@@ -117,3 +117,6 @@ assert.match(worker, /blockedNavigations\.forget\(tabId\)/);
 assert.match(blockedPage92, /sendMessage\(\{ type: "blocked-original-url", host \}\)/);
 assert.doesNotMatch(blockedPage92, /getLastBlockedUrl/, "The blocked page cannot redirect to a different tab's last URL");
 assert.match(navigation92, /return this\.enqueue\(tabId, async \(\) =>/);
+
+assert.match(blockedPage92, /async function init\(\): Promise<void> \{\s*[\s\S]*?if \(window\.top !== window\.self\) \{[\s\S]*?actionsEl\.hidden = true;[\s\S]*?return;\s*\}\s*i18n = await loadI18n\(\)/);
+assert.match(worker, /\(message\.type === "unblock" \|\| message\.type === "record-unblock"\)\s*&& !mayMutateFromBlockedPage/);

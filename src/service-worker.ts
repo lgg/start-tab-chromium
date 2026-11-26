@@ -30,7 +30,7 @@ import { changedTabNavigationUrl, currentTabNavigationUrl, NewTabRedirectGuard }
 import { assertRuntimeMutationTarget } from "./lib/runtime-mutation-target.js";
 import { isMessage, type Ack, type ClockAction, type Message } from "./lib/messages.js";
 import { consumeNativeNewTabBypass, openNativeNewTab } from "./lib/native-new-tab.js";
-import { BlockedNavigationRegistry, isBlockedPageNavigation, readBlockedDestinationForSender } from "./lib/blocked-navigation.js";
+import { BlockedNavigationRegistry, isBlockedPageNavigation, readBlockedDestinationForSender, mayMutateFromBlockedPage } from "./lib/blocked-navigation.js";
 import {
   completeClockInstance,
   defaultClockForBlock,
@@ -182,6 +182,10 @@ function runNativeTabJob(operation: () => Promise<void>): Promise<void> {
 }
 
 async function handle(message: Message, sender: chrome.runtime.MessageSender): Promise<HandlerResult | void> {
+  if ((message.type === "unblock" || message.type === "record-unblock")
+    && !mayMutateFromBlockedPage(sender, blockedPageUrl(), message.host)) {
+    throw new Error("Blocked page mutation requires an active top-level document for the requested site");
+  }
   switch (message.type) {
     case "block": await blockHost(message.host); break;
     case "unblock": return { changed: await unblockHost(message.host) };

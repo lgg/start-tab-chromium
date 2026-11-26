@@ -82,3 +82,16 @@ runtime.clocks[timer.id] = { ...runtime.clocks[timer.id]!, accumulatedMs: 0, run
 assert.equal(blockDeletionRequiresDataConfirmation(timer, runtime), false, "A pristine clock needs only the generic block confirmation");
 
 console.log("Round 37 fixtures passed");
+
+const { mayMutateFromBlockedPage } = await import("../src/lib/blocked-navigation.js");
+const page117 = "chrome-extension://starttab/blocked.html";
+const sender117 = { url: page117 + "?site=example.com", frameId: 0, documentLifecycle: "active", tab: { id: 1 } };
+assert.equal(mayMutateFromBlockedPage(sender117, page117, "example.com"), true);
+assert.equal(mayMutateFromBlockedPage({ ...sender117, frameId: 2 }, page117, "example.com"), false);
+assert.equal(mayMutateFromBlockedPage({ ...sender117, frameId: undefined }, page117, "example.com"), false);
+assert.equal(mayMutateFromBlockedPage({ ...sender117, documentLifecycle: "cached" }, page117, "example.com"), false);
+assert.equal(mayMutateFromBlockedPage({ ...sender117, tab: {} }, page117, "example.com"), false);
+assert.equal(mayMutateFromBlockedPage(sender117, page117, "other.example"), false);
+assert.equal(mayMutateFromBlockedPage({ ...sender117, url: sender117.url + "&site=example.com" }, page117, "example.com"), false);
+assert.equal(mayMutateFromBlockedPage({ url: "chrome-extension://starttab/popup.html" }, page117, "example.com"), true);
+console.log("Round 117 blocked frame mutation regressions passed");
