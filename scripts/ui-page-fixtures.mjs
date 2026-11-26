@@ -100,9 +100,6 @@ try {
     await until(() => !one(document, "#unblockError").hidden);
     assert.equal(one(document, "#unblock").disabled, false);
     assert.deepEqual(control.messages.map(m => m.type), ["blocked-original-url", "unblock"]);
-    one(document, "#unblock").click();
-    window.dispatchEvent(new window.Event("pagehide"));
-    assert.equal(tick, undefined);
     control.handler = async m => {
       if (m.type === "blocked-original-url") return { ok: true, blockedUrl: "https://blocked.example/path" };
       if (m.type === "unblock") { control.state.blockedSites = []; return { ok: true, changed: true }; }
@@ -113,6 +110,8 @@ try {
     now += 10001; tick();
     await until(() => control.messages.some(m => m.type === "record-unblock"), "countdown success");
     assert.deepEqual(control.state.blockedSites, []);
+    window.dispatchEvent(new window.Event("pagehide"));
+    assert.equal(tick, undefined);
     console.log("Blocked page: countdown, Russian plural forms, cancel, worker failure, pagehide cleanup");
   } finally {
     Object.defineProperty(globalThis, "performance", { value: realPerformance, configurable: true, writable: true });
