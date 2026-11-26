@@ -103,6 +103,49 @@ try{
     await delay(20);
     assert.equal(control.messages.some(m=>m.type==="record-unblock"),false);
   });
+
+  // Verify actual navigation destinations without relying on jsdom's
+  // unsupported cross-origin navigation implementation.
+  for(const destination of ["https://sub.blocked.example/exact?q=1","https://unrelated.example/path",undefined]){
+    await blocked("?site=blocked.example",async(control,advance,getTick)=>{
+      const originalLocation=globalThis.location;
+      const redirects=[];let reloads=0;
+      globalThis.location={search:originalLocation.search,replace:url=>redirects.push(url),reload:()=>reloads++};
+      try{
+        control.handler=async m=>m.type==="blocked-original-url"?{ok:true,blockedUrl:destination}:{ok:true,changed:true};
+        one(document,"#unblock").click();
+        const staleTick=getTick();
+        one(document,"#unblock").dispatchEvent(new window.MouseEvent("click",{bubbles:true}));
+        assert.equal(getTick(),staleTick);
+        one(document,"#cancel").click();
+        staleTick();
+        assert.equal(control.messages.length,0);
+        one(document,"#unblock").click();
+        advance(10001);
+        await until(()=>redirects.length===1);
+        assert.equal(redirects[0],destination?.startsWith("https://sub.blocked.example/")?destination:"https://blocked.example/");
+        assert.deepEqual(control.messages.map(m=>m.type),["blocked-original-url","unblock","record-unblock"]);
+        window.dispatchEvent(new window.Event("pagehide"));
+        const show=new window.Event("pageshow");Object.defineProperty(show,"persisted",{value:true});
+        window.dispatchEvent(show);
+        assert.equal(reloads,1);
+      }finally{globalThis.location=originalLocation}
+    });
+  }
+  // A site removed concurrently during the countdown must not be counted
+  // as another unblock or re-added, but the page may still leave the interstitial.
+  await blocked("?site=blocked.example",async(control,advance)=>{
+    const actual=globalThis.location,redirects=[];
+    globalThis.location={search:actual.search,replace:url=>redirects.push(url)};
+    try{
+      control.state.blockedSites=[];
+      control.handler=async()=>({ok:true});
+      one(document,"#unblock").click();advance(10001);
+      await until(()=>redirects.length===1);
+      assert.deepEqual(control.messages.map(m=>m.type),["blocked-original-url"]);
+      assert.equal(redirects[0],"https://blocked.example/");
+    }finally{globalThis.location=actual}
+  });
   console.log("Blocked page: malformed URL, stale asynchronous pagehide, already removed, fallback and startup failure");
 
   async function popup(run,prepare=()=>{}){
