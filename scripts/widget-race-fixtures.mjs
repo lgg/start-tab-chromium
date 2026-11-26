@@ -129,5 +129,50 @@ try{
   const phase=mount(pomodoro);
   assert.equal(one(phase.root,".clock__phase").textContent,"pomodoroBreak");
   clock.dispose();phase.dispose();
+
+  const searchModule=await import("../src/newtab/block-renderers-static.js");
+  const defaultSearch=createBlockInstance("search");
+  const search=createBlockInstance("search",{id:"search-boundaries",title:"My search",config:{...defaultSearch.config,provider:"missing",providers:[{id:"fallback",title:"Fallback",urlTemplate:"https://extension.example/#q={query}"}]}});
+  const searchView=mount(search);
+  const searchInput=one(searchView.root,"input");
+  value(searchInput,"  ");submit(one(searchView.root,"form"));
+  assert.equal(location.hash,"");
+  value(searchInput,"hello world");submit(one(searchView.root,"form"));
+  assert.equal(location.hash,"#q=hello%20world");
+  assert.equal(searchModule.hasSearchDrafts(),true);
+  searchView.dispose();
+  value(searchInput,"stale detached");
+  submit(one(searchView.root,"form"));
+  assert.equal(location.hash,"#q=hello%20world");
+  const hiddenSearch=searchModule.hiddenSearchDrafts(new Set()).find(d=>d.title==="My search");
+  assert.equal(hiddenSearch.value,"hello world");
+  assert.equal(hiddenSearch.discard(),true);
+  const emptySearch=mount({...search,id:"empty-search",config:{...search.config,providers:[]}});
+  value(one(emptySearch.root,"input"),"never sent");submit(one(emptySearch.root,"form"));
+  assert.equal(location.hash,"#q=hello%20world");
+  emptySearch.dispose();
+
+  const oldFetch=globalThis.fetch;
+  const oldQuery=control.chrome.tabs.query;
+  try{
+    globalThis.fetch=async()=>Response.json({ip:"192.0.2.1"});
+    const ip=mount(createBlockInstance("ip",{id:"bare-ip"}));
+    await until(()=>ip.root.textContent.includes("ipUnknownCountry"));
+    assert.match(ip.root.textContent,/192\.0\.2\.1/);
+    ip.dispose();
+    control.chrome.tabs.query=async()=>{throw Error("pinned tabs unavailable")};
+    const pinned=mount(createBlockInstance("browserPinned"));
+    await until(()=>pinned.root.textContent==="browserPinnedUnavailable");
+    pinned.dispose();
+    let finishIp;
+    globalThis.fetch=async()=>new Promise(resolve=>finishIp=resolve);
+    const staleIp=mount(createBlockInstance("ip",{id:"stale-ip",config:{type:"ip",endpoint:"https://new-ip.example/"}}));
+    await until(()=>finishIp);
+    const staleDetail=one(staleIp.root,".ip__detail");staleIp.dispose();
+    finishIp(Response.json({ip:"192.0.2.99",country:"Test"}));
+    await delay(20);
+    assert.equal(staleDetail.textContent,"ipLoading");
+  }finally{globalThis.fetch=oldFetch;control.chrome.tabs.query=oldQuery}
+  console.log("Widgets: fallback search, disconnected controls, hidden search drafts, absent IP country and pinned failure");
   console.log("Widget races: pending notes, explicit overwrite, hidden drafts, legacy ACKs, failed refresh and timer completion");
 }finally{dom.window.close()}
