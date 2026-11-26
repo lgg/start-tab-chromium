@@ -155,3 +155,13 @@ export class BlockedNavigationRegistry {
     return this.enqueue(tabId, () => this.persist(tabId, null));
   }
 }
+
+/** The web-accessible interstitial may be embedded by arbitrary sites, but
+ * only its top-level active document may issue its unblock/stat mutations.
+ * Other trusted extension pages keep their normal mutation paths. */
+export function mayMutateFromBlockedPage(sender: BlockedPageSender, page: string, host: string): boolean {
+  if (!sender.url || !isBlockedPageNavigation(sender.url, page)) return true;
+  return sender.frameId === 0 && validTabId(sender.tab?.id)
+    && (sender.documentLifecycle === undefined || sender.documentLifecycle === "active")
+    && matchesBlockedPageHost(sender.url, page, host);
+}
