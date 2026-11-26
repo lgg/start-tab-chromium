@@ -354,11 +354,11 @@ function renderGeneral(): HTMLElement {
   const mode = select<LayoutMode>(settings.layout.mode, [["grid", i18n.t("layoutModeGrid")], ["free", i18n.t("layoutModeFree")]]);
   const zone = select<LayoutZone>(settings.layout.zone, [["contained", i18n.t("layoutZoneContained")], ["full", i18n.t("layoutZoneFull")]]);
   const columns = numberInput(settings.layout.columns, 1, 80, 1);
-  const rowHeight = numberInput(settings.layout.rowHeight, 40, 240, 1);
-  const gap = numberInput(settings.layout.gap, 0, 60, 1);
-  const containedMaxWidth = numberInput(settings.layout.containedMaxWidth, 640, 3840, 10);
+  const rowHeight = numberInput(settings.layout.rowHeight, 40, 240, "any");
+  const gap = numberInput(settings.layout.gap, 0, 60, "any");
+  const containedMaxWidth = numberInput(settings.layout.containedMaxWidth, 640, 3840, "any");
   const showTitles = checkbox(settings.layout.showBlockTitles);
-  const defaultMinutes = numberInput(settings.focusStats.defaultMinutesPerAvoidedVisit, 0, 1440, 1);
+  const defaultMinutes = numberInput(settings.focusStats.defaultMinutesPerAvoidedVisit, 0, 1440, "any");
   const dedupeSeconds = numberInput(settings.focusStats.avoidedVisitDedupeSeconds, 1, 604800, 1);
   const activePreset = LAYOUT_PRESETS.find((candidate) =>
     candidate.id === settings.layout.profile && layoutMatchesPreset(settings, candidate.id));
