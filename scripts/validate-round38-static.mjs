@@ -36,7 +36,8 @@ assert.match(gate, /const locale = resolvedGateLocale\(items\[LOCALE_OVERRIDE_KE
 assert.match(gate, /changes\[LOCALE_OVERRIDE_KEY\]/);
 assert.match(gate, /loadGateCatalog\(\)\.then\(\(current\) => current \? apply\(\) : undefined\)/,
   "An open gate must refresh only after the latest locale catalog load commits");
-assert.match(gate, /text\("gateUntitledTab", "Untitled tab"\)/);
+assert.match(gate, /return \{ url: value, title: title \|\| value \};/);
+assert.match(gate, /button\.textContent = tab\.title;/);
 for (const catalog of [en, ru]) {
   for (const key of ["splitViewTitle", "splitViewText", "startTabDisabledTitle", "startTabDisabledText", "gateUntitledTab"]) {
     assert.equal(typeof catalog[key]?.message, "string", `Missing localized early-gate key: ${key}`);
