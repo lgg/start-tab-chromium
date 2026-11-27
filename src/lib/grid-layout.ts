@@ -13,9 +13,9 @@ function verticalOverlap(left: BlockInstance, right: BlockInstance): boolean {
 }
 
 export function gridBlocksOverlap(left: BlockInstance, right: BlockInstance): boolean {
-  return left.zone === right.zone
-    && horizontalOverlap(left, right)
-    && verticalOverlap(left, right);
+  // The renderer mounts every card in one grid. A legacy per-card zone
+  // is metadata, not a separate CSS grid or an independent coordinate space.
+  return horizontalOverlap(left, right) && verticalOverlap(left, right);
 }
 
 export function clampGridBlock(block: BlockInstance, columns: number): BlockInstance {
@@ -70,7 +70,7 @@ export function placeGridBlock(
   const candidate = clampGridBlock(block, columns);
   if (!candidate.enabled) return candidate;
   const blockers = blocks
-    .filter((other) => other.id !== candidate.id && other.enabled && other.zone === candidate.zone)
+    .filter((other) => other.id !== candidate.id && other.enabled)
     .map((other) => clampGridBlock(other, columns));
   const row = firstAvailableRow(candidate, blockers, candidate.row)
     ?? firstAvailableRow(candidate, blockers, 1);

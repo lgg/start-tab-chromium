@@ -64,6 +64,23 @@ const candidate=api.createBlockInstance("note",{id:"candidate",row:MAX_GRID_ROW,
 const fallback=placeGridBlock(candidate,[high],2);
 assert.equal(fallback.row,1);
 assert.equal(gridBlocksOverlap(fallback,high),false);
+
+ // One rendered grid shares coordinates across legacy per-card zones.
+{
+  const a=api.createBlockInstance("note",{id:"mixed-a",zone:"contained",column:1,row:1,width:4,height:3});
+  const b=api.createBlockInstance("note",{id:"mixed-b",zone:"full",column:1,row:1,width:4,height:3});
+  assert.equal(gridBlocksOverlap(a,b),true);
+  const placed=placeGridBlock(b,[a],12);
+  assert.equal(placed.row,a.row+a.height);
+  assert.equal(placed.zone,"full");
+  assert.equal(gridBlocksOverlap(a,placed),false);
+  const imported=api.normalizeStartPageSettings({...settings,layout:{...settings.layout,mode:"grid",columns:12,blocks:[a,b]}});
+  assert.equal(imported.layout.blocks[1].row,placed.row);
+  assert.equal(gridBlocksOverlap(...imported.layout.blocks),false);
+  assert.deepEqual(api.normalizeStartPageSettings(imported),imported);
+  assert.equal(placeGridBlock(b,[{...a,enabled:false}],12).row,1);
+}
+
 const packed=Array.from({length:MAX_START_PAGE_BLOCKS+1},(_,i)=>api.createBlockInstance("note",{id:"filled-"+i,row:1+i*MAX_GRID_BLOCK_HEIGHT,height:MAX_GRID_BLOCK_HEIGHT,width:2}));
 assert.throws(()=>placeGridBlock(candidate,packed,2),/Unable to place/);
 assert.throws(()=>defaults.blockDescriptor("invalid"),/Unknown block type/);
