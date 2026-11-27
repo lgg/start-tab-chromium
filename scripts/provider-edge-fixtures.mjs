@@ -163,6 +163,24 @@ try {
     await assert.rejects(google.listCalendarEvents(),error=>error===failure);
     assert.equal(cancelled,1);assert.equal(released,1);
   }
+
+  // Cancellation is best effort. A reader can reject immediately or while
+  // cancellation is pending; it must release the lock exactly once even
+  // when cancellation succeeds. A subsequent request must still work.
+  {
+    const failure=Error("metadata reader disconnected");
+    let releases=0,cancellations=0;
+    globalThis.fetch=async()=>({ok:true,body:{getReader:()=>({
+      read:async()=>{throw failure},
+      cancel:async()=>{cancellations++},
+      releaseLock:()=>{releases++}
+    })}});
+    await assert.rejects(google.listCalendarEvents(),e=>e===failure);
+    assert.equal(cancellations,1);
+    assert.equal(releases,1);
+    globalThis.fetch=async()=>Response.json({items:[]});
+    assert.deepEqual(await google.listCalendarEvents(),[]);
+  }
   console.log("Google: absent items, timed event precedence, bounded pagination and successful media restore");
   console.log("Locale and Google failure matrix: auto detection, fallback, CAS, malformed responses, invalid tokens, retry, size limit, calendar dates and Drive listing");
 } finally {restoreFetch();dom.window.close();}
