@@ -98,7 +98,7 @@
 
   function syncNativeButton(button) {
     // aria-disabled keeps keyboard focus stable; runNative enforces the lease.
-    if (nativeActionPending) {
+    if (nativeActionPending || pickerActionPending) {
       button.setAttribute("aria-busy", "true");
       button.setAttribute("aria-disabled", "true");
     } else {
@@ -107,12 +107,22 @@
     }
   }
 
+  function syncPickerChoice(choice) {
+    const pending = nativeActionPending || pickerActionPending;
+    choice.setAttribute("aria-disabled", String(pending));
+    choice.setAttribute("aria-busy", String(pending));
+  }
+
+  // Both controls navigate away from the current page. A page-wide lease
+  // must disable both sets, including controls in a replacement overlay.
   function syncNativeButtons() {
     for (const button of document.querySelectorAll("[data-native-new-tab]")) syncNativeButton(button);
+    for (const choice of document.querySelectorAll("#" + OVERLAY_ID + " [data-split-choice]")) syncPickerChoice(choice);
   }
 
   async function runNative(button) {
     if (!pageActive || nativeActionPending || !button.isConnected) return;
+    if (pickerActionPending) return;
     nativeActionPending = true;
     syncNativeButtons();
     try {
@@ -223,21 +233,17 @@
     const choiceStatus = document.createElement("p");
     choiceStatus.hidden = true;
     choiceStatus.setAttribute("role", "alert");
-    const syncChoices = () => {
-      for (const choice of choices) {
-        choice.setAttribute("aria-disabled", String(pickerActionPending));
-        choice.setAttribute("aria-busy", String(pickerActionPending));
-      }
-    };
+    choiceStatus.setAttribute("data-split-choice-status", "");
+    const syncChoices = () => { for (const choice of choices) syncPickerChoice(choice); };
     for (const tab of tabs) {
       const button = document.createElement("button");
       button.type = "button";
       button.textContent = tab.title; // webTab already supplies a nonempty title or URL.
       button.style.cssText = "display:block;width:100%;margin:8px 0;padding:10px;text-align:left";
       button.addEventListener("click", () => run(async () => {
-        if (!isCurrent(button) || pickerActionPending) return;
+        if (!isCurrent(button) || pickerActionPending || nativeActionPending) return;
         pickerActionPending = true;
-        syncChoices();
+        syncNativeButtons();
         choiceStatus.hidden = true;
         try {
           const current = await chrome.tabs.getCurrent();
@@ -245,19 +251,18 @@
           if (typeof current?.id !== "number") throw new Error("Split picker has no current tab");
           await chrome.tabs.update(current.id, { url: tab.url });
         } catch {
-          if (isCurrent(button)) {
-            choiceStatus.textContent = text("gateChoiceFailed", "Could not open the selected tab. Try again.");
-            choiceStatus.hidden = false;
+          if (pageActive) {
+            // A storage/locale refresh may have replaced the picker while
+            // tabs.update was pending. Report the failure in the live picker.
+            const status = document.querySelector("#" + OVERLAY_ID + " [data-split-choice-status]");
+            if (status) {
+              status.textContent = text("gateChoiceFailed", "Could not open the selected tab. Try again.");
+              status.hidden = false;
+            }
           }
         } finally {
           pickerActionPending = false;
-          // A new generation might have mounted while the request was pending.
-          if (pageActive) {
-            for (const choice of document.querySelectorAll("#" + OVERLAY_ID + " [data-split-choice]")) {
-              choice.setAttribute("aria-disabled", "false");
-              choice.setAttribute("aria-busy", "false");
-            }
-          }
+          if (pageActive) syncNativeButtons();
         }
       }));
       button.setAttribute("data-split-choice", "");
