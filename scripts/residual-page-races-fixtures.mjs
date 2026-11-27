@@ -147,7 +147,13 @@ try{
   // page or schedule new commands after pagehide disposes its listeners.
   for(const stage of ["settings","locale","onboarding"]){
     const dom=await installDom("newtab/newtab.html","https://extension.example/newtab.html");
-    const control=installChrome({...seed(),startPageOnboarding:{onboarded:true}});
+    // Use a synchronous card so this race measures the late page snapshot,
+    // not independent network requests completing on the still-connected DOM.
+    const initial=seed();
+    initial.startPageSettings=structuredClone(initial.startPageSettings);
+    initial.startPageSettings.layout.blocks=initial.startPageSettings.layout.blocks.filter(block=>block.type==="note");
+    initial.startPageRuntimeState=normalizeRuntimeState(undefined,initial.startPageSettings);
+    const control=installChrome({...initial,startPageOnboarding:{onboarded:true}});
     const get=control.chrome.storage.local.get;
     try{
       await import("../src/newtab/newtab.ts?dispose="+(++serial));
