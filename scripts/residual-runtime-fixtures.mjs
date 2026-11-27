@@ -648,3 +648,38 @@ console.log("Task import: stable titles and IDs after truncating at whitespace")
   }
 }
 console.log("Legacy runtime: shared dictionary aliases and fractional paused clock progress are stable");
+
+
+ // A pause is an interrupted focus segment, not elapsed focus time.
+ // Legacy imported markers must not add the paused interval a second time.
+{
+  const original=rt.startClockState(rt.defaultClockForBlock(pomodoro),1000);
+  const paused=rt.pauseClockState(original,11000);
+  assert.equal(paused.accumulatedMs,10000);
+  assert.equal(paused.focusSessionStartedAt,null);
+  const imported=rt.normalizeRuntimeState({...initial,clocks:{[pomodoro.id]:{...paused,focusSessionStartedAt:1000}}},settings);
+  assert.equal(imported.clocks[pomodoro.id].focusSessionStartedAt,null);
+  const resumed=rt.startClockState({...paused,focusSessionStartedAt:1000},101000);
+  assert.equal(resumed.focusSessionStartedAt,101000);
+  assert.equal(rt.pomodoroFocusElapsedMs(resumed,106000),5000);
+  assert.equal(rt.pomodoroFocusElapsedMs({...resumed,focusSessionStartedAt:1000},106000),5000);
+  assert.equal(rt.pomodoroFocusElapsedMs({...resumed,targetAt:999999},999999),50000);
+  assert.equal(rt.pomodoroFocusElapsedMs({...resumed,startedAt:null},106000),0);
+  assert.equal(rt.pomodoroFocusElapsedMs(resumed,100000),0);
+  const breakClock={...rt.startClockState(rt.resetClockState(pomodoro,"break"),1000),focusSessionStartedAt:1000};
+  const breakState=rt.normalizeRuntimeState({...initial,clocks:{[pomodoro.id]:breakClock}},settings);
+  assert.equal(breakState.clocks[pomodoro.id].focusSessionStartedAt,null);
+  assert.deepEqual(rt.normalizeRuntimeState(breakState,settings),breakState);
+  // Complete an imported resumed countdown and verify the persisted stats,
+  // rather than only checking the pure time helper.
+  const previous=globalThis.chrome;
+  try {
+    installChrome({startPageSettings:settings,startPageRuntimeState:{...initial,clocks:{...initial.clocks,[pomodoro.id]:{...resumed,focusSessionStartedAt:1000}}}});
+    const result=await rt.completeClockInstance(pomodoro.id,resumed.completionToken,resumed.targetAt+5000);
+    assert.equal(result.completed,true);
+    assert.equal(result.focusTimeMs,50000);
+    const {getFocusStats}=await import("../src/lib/focus-stats.js");
+    assert.equal((await getFocusStats()).totals.focusTimeMs,50000);
+  } finally {globalThis.chrome=previous}
+}
+console.log("Pomodoro: imported stale markers and paused intervals cannot inflate persisted focus statistics");
