@@ -390,3 +390,35 @@ console.log("Round 160: complete runtime mutation target matrix",checks);
   same(room.themes.selectedThemeId,"migrated-legacy-theme");
   same(normalizeStartPageSettingsWithReport(room).settings,room);
 }
+
+
+ // Missing IDs must not displace explicitly named blocks or themes that
+ // appear later in a damaged or legacy snapshot.
+{
+  const api=await import("../src/lib/start-page-settings.js");
+  const rt=await import("../src/lib/start-page-runtime.js");
+  const explicit=api.createBlockInstance("note",{id:"note",title:"Original note"});
+  const reserved=api.createBlockInstance("note",{id:"note-2",title:"Second note"});
+  const base=BUILT_IN_THEMES[0];
+  const explicitTheme={...base,id:"custom-theme-1",name:"Original theme",builtIn:false};
+  const suffixTheme={...base,id:"custom-theme-1-2",name:"Second theme",builtIn:false};
+  const raw={...settings,layout:{...settings.layout,mode:"free",blocks:[
+    {type:"note",title:"Unnamed note"},explicit,reserved
+  ]},themes:{selectedThemeId:explicitTheme.id,customThemes:[{},explicitTheme,suffixTheme]}};
+  const normalized=api.normalizeStartPageSettings(raw);
+  same(normalized.layout.blocks.map(b=>b.id),["note-3","note","note-2"]);
+  same(normalized.themes.customThemes.map(t=>t.id),["custom-theme-1-3","custom-theme-1","custom-theme-1-2"]);
+  same(api.getTheme(normalized).name,"Original theme");
+  const state=rt.normalizeRuntimeState({version:2,notes:{note:"Keep original","note-2":"Keep second"}},normalized);
+  same(state.notes.note,"Keep original");
+  same(state.notes["note-2"],"Keep second");
+  same(state.notes["note-3"],undefined);
+  same(api.normalizeStartPageSettings(normalized),normalized);
+  const singleton=api.createBlockInstance("commands",{id:"commands-kept"});
+  const dropped=api.normalizeStartPageSettings({...raw,layout:{...raw.layout,blocks:[
+    {type:"note",title:"Legacy note"},singleton,{...singleton,id:"note"}
+  ]}});
+  same(dropped.layout.blocks.map(b=>b.id),["note","commands-kept"]);
+  same(rt.normalizeRuntimeState({version:2,notes:{note:"Legacy content"}},dropped).notes.note,"Legacy content");
+}
+console.log("Migration: explicit block and theme identities survive earlier generated defaults");
