@@ -183,6 +183,35 @@ try {
       if(priorLocale===undefined)delete control.state.localeOverride;else control.state.localeOverride=priorLocale;
     }
   }
+
+  // A renamed timer uses its own title, whereas a silent timer commits
+  // the completed state without creating a notification at all.
+  {
+    const previousSettings=structuredClone(control.state.startPageSettings);
+    const previousRuntime=structuredClone(control.state.startPageRuntimeState);
+    try{
+      for(const notify of [true,false]){
+        const saved=structuredClone(control.state.startPageSettings);
+        const b=saved.layout.blocks.find(block=>block.id==="worker-timer");
+        b.title="Custom kitchen timer";
+        b.config.notifyOnComplete=notify;
+        control.state.startPageSettings=saved;
+        await ok({type:"clock-action",instanceId:b.id,action:"reset"});
+        await ok({type:"clock-action",instanceId:b.id,action:"start"});
+        const clock=control.state.startPageRuntimeState.clocks[b.id];
+        clock.startedAt=Date.now()-3000;clock.targetAt=clock.startedAt+clock.durationMs;
+        const before=control.calls.filter(c=>c[0]==="notification").length;
+        await ok({type:"complete-clock",instanceId:b.id,token:clock.completionToken});
+        const after=control.calls.filter(c=>c[0]==="notification");
+        assert.equal(after.length,before+(notify?1:0));
+        if(notify)assert.equal(after.at(-1)[2].title,"Custom kitchen timer");
+        assert.equal((await view()).runtime.clocks[b.id].running,false);
+      }
+    }finally{
+      control.state.startPageSettings=previousSettings;
+      control.state.startPageRuntimeState=previousRuntime;
+    }
+  }
   console.log("Worker residual: translation fallbacks, interrupted pomodoro, rejected browser redirect and blocker-only manifest");
 
   {
