@@ -42,7 +42,7 @@ export function normalizeBlockConfig(
     }
     case "ip": {
       const fallback = defaultBlockConfig("ip");
-      const endpoint = safeWebUrl(stringValue(source.endpoint, fallback.endpoint));
+      const endpoint = safeWebUrl(source.endpoint, fallback.endpoint);
       if (!endpoint) issues.push({ path: `${path}.endpoint`, messageKey: "validationInvalidUrl" });
       return { type, endpoint: endpoint ?? fallback.endpoint };
     }
@@ -79,8 +79,8 @@ export function normalizeBlockConfig(
     }
     case "weather": {
       const fallback = defaultBlockConfig("weather");
-      const forecastEndpoint = safeWebUrl(stringValue(source.forecastEndpoint, fallback.forecastEndpoint));
-      const geocodingEndpoint = safeWebUrl(stringValue(source.geocodingEndpoint, fallback.geocodingEndpoint));
+      const forecastEndpoint = safeWebUrl(source.forecastEndpoint, fallback.forecastEndpoint);
+      const geocodingEndpoint = safeWebUrl(source.geocodingEndpoint, fallback.geocodingEndpoint);
       if (!forecastEndpoint) issues.push({ path: `${path}.forecastEndpoint`, messageKey: "validationInvalidUrl" });
       if (!geocodingEndpoint) issues.push({ path: `${path}.geocodingEndpoint`, messageKey: "validationInvalidUrl" });
       return { type, provider: "open-meteo", city: stringValue(source.city, fallback.city, 160), latitude: finiteNumber(source.latitude, fallback.latitude, -90, 90), longitude: finiteNumber(source.longitude, fallback.longitude, -180, 180), displayMode: oneOf(source.displayMode, WEATHER_MODES, fallback.displayMode), forecastEndpoint: forecastEndpoint ?? fallback.forecastEndpoint, geocodingEndpoint: geocodingEndpoint ?? fallback.geocodingEndpoint };
