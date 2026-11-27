@@ -93,9 +93,8 @@ async function geocodeCity(endpoint: string, city: string): Promise<{ latitude: 
 }
 
 async function weatherCoordinates(block: Extract<BlockInstance, { type: "weather" }>): Promise<{ latitude: number; longitude: number }> {
-  const city = block.config.city.trim();
-  if (!city) return { latitude: block.config.latitude, longitude: block.config.longitude };
-  const geocoded = await geocodeCity(block.config.geocodingEndpoint, city);
+  if (!block.config.city.trim()) return { latitude: block.config.latitude, longitude: block.config.longitude };
+  const geocoded = await geocodeCity(block.config.geocodingEndpoint, block.config.city.trim());
   if (!geocoded) throw new Error("The configured weather city could not be geocoded");
   return geocoded;
 }
