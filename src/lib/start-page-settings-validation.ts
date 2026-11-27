@@ -45,11 +45,16 @@ const LAYOUT_ZONES: readonly LayoutZone[] = ["contained", "full"];
 const SETTINGS_VISIBILITY = ["always", "hover"] as const;
 const SETTINGS_HOVER_AREAS = ["top", "top-right", "right"] as const;
 
-function normalizeBlockId(value: unknown, type: BlockType, seen: Set<string>, reserved: ReadonlySet<string>): string {
-  return uniqueEntityId(normalizeEntityId(value, type), seen, reserved);
+function normalizeBlockId(value: unknown, type: BlockType, seen: Set<string>, reserved: ReadonlySet<string>, explicitIds: ReadonlySet<string>): string {
+  const base = normalizeEntityId(value, type);
+  const explicit = typeof value === "string" && value.trim().length > 0;
+  // A missing ID must not take the identity (and runtime data) of a later
+  // block with an explicitly supplied ID.
+  const occupied = !explicit && explicitIds.has(base) ? new Set([...seen, base]) : seen;
+  return uniqueEntityId(base, occupied, reserved);
 }
 
-function normalizeBlock(value: unknown, index: number, root: Record<string, unknown>, columns: number, zone: LayoutZone, seenIds: Set<string>, reservedIds: ReadonlySet<string>, seenSingletons: Set<BlockType>, issues: ValidationIssue[], migrationIssues: MigrationIssue[]): BlockInstance | null {
+function normalizeBlock(value: unknown, index: number, root: Record<string, unknown>, columns: number, zone: LayoutZone, seenIds: Set<string>, reservedIds: ReadonlySet<string>, explicitIds: ReadonlySet<string>, seenSingletons: Set<BlockType>, issues: ValidationIssue[], migrationIssues: MigrationIssue[]): BlockInstance | null {
   if (!isRecord(value) || !isBlockType(value.type)) {
     migrationIssues.push({ path: `layout.blocks[${index}]`, reason: "Unknown or missing block type" });
     issues.push({ path: `layout.blocks[${index}]`, messageKey: "validationUnknownBlock" });
@@ -62,7 +67,7 @@ function normalizeBlock(value: unknown, index: number, root: Record<string, unkn
     return null;
   }
   const descriptor = blockDescriptor(type);
-  const id = normalizeBlockId(value.id, type, seenIds, reservedIds);
+  const id = normalizeBlockId(value.id, type, seenIds, reservedIds, explicitIds);
   const minimumWidth = Math.min(descriptor.minGridWidth, columns);
   const width = finiteInteger(value.width, Math.min(descriptor.defaultGridWidth, columns), minimumWidth, columns);
   const height = finiteInteger(value.height, descriptor.defaultGridHeight, descriptor.minGridHeight, MAX_GRID_BLOCK_HEIGHT);
@@ -102,9 +107,12 @@ function normalizeBlocks(value: unknown, root: Record<string, unknown>, columns:
   const seenIds = new Set<string>();
   const reservedIds = new Set(source.flatMap((candidate) => isRecord(candidate) && isBlockType(candidate.type)
     ? [normalizeEntityId(candidate.id, candidate.type)] : []));
+  const explicitIds = new Set(source.flatMap((candidate) => isRecord(candidate) && isBlockType(candidate.type)
+    && typeof candidate.id === "string" && candidate.id.trim().length > 0
+    ? [normalizeEntityId(candidate.id, candidate.type)] : []));
   const seenSingletons = new Set<BlockType>();
   const blocks = source.flatMap((candidate, index) => {
-    const block = normalizeBlock(candidate, index, root, columns, zone, seenIds, reservedIds, seenSingletons, issues, migrationIssues);
+    const block = normalizeBlock(candidate, index, root, columns, zone, seenIds, reservedIds, explicitIds, seenSingletons, issues, migrationIssues);
     return block ? [block] : [];
   }).map((block, order) => ({ ...block, order }));
   return mode === "grid" ? placeGridBlocks(blocks, columns) : blocks;
