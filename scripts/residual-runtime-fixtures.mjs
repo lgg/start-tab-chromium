@@ -596,3 +596,20 @@ console.log("Deep audit: exact deadlines, non-replayed completed tokens and stab
   assert.deepEqual(rt.normalizeRuntimeState(normalized,settings),normalized);
 }
 console.log("Clock normalization: reject sub-millisecond zero timestamps and bound derived deadlines");
+
+
+ // Truncation can expose whitespace that was internal before the limit.
+ // A second normalization must not rename the task or change its title.
+{
+  const raw={...initial,tasks:{[tasks.id]:[
+    {id:"a".repeat(159)+" "+"tail",title:"x".repeat(499)+" "+"tail",done:false,createdAt:1,updatedAt:1},
+    {id:"a".repeat(159),title:"Other task",done:true,createdAt:2,updatedAt:2},
+  ]}};
+  const normalized=rt.normalizeRuntimeState(raw,settings);
+  const result=normalized.tasks[tasks.id];
+  assert.equal(result[0].title,"x".repeat(499));
+  assert.equal(result[0].id,"a".repeat(159));
+  assert.notEqual(result[1].id,result[0].id);
+  assert.deepEqual(rt.normalizeRuntimeState(normalized,settings),normalized);
+}
+console.log("Task import: stable titles and IDs after truncating at whitespace");

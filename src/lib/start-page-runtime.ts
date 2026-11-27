@@ -6,7 +6,7 @@ import { isStartPageOnboardingComplete, START_PAGE_ONBOARDING_KEY } from "../new
 import { assertLocalePreference, localePreferenceFromStored, LOCALE_OVERRIDE_KEY, writeLocalePreferenceInExistingTransaction, type LocaleChange, type LocalePreference } from "./i18n.js";
 import { withStorageLock } from "./storage-lock.js";
 import { uniqueEntityId } from "./start-page-validation-primitives.js";
-import { MAX_LOCAL_TASKS_PER_INSTANCE, MAX_NOTE_LENGTH } from "./platform-limits.js";
+import { MAX_LOCAL_TASKS_PER_INSTANCE, MAX_LOCAL_TASK_TITLE_LENGTH, MAX_NOTE_LENGTH } from "./platform-limits.js";
 import { sendMessage } from "./messages.js";
 import {
   FOCUS_STATS_KEY,
@@ -164,9 +164,9 @@ function stableTaskHash(value: string): string {
 
 function normalizeTask(value: unknown, index: number): LocalTask | null {
   if (!isRecord(value)) return null;
-  const title = stringValue(value.title, "").trim().slice(0, 500);
+  const title = stringValue(value.title, "").trim().slice(0, MAX_LOCAL_TASK_TITLE_LENGTH).trimEnd();
   if (!title) return null;
-  const requestedId = typeof value.id === "string" ? value.id.trim().slice(0, 160) : "";
+  const requestedId = typeof value.id === "string" ? value.id.trim().slice(0, 160).trimEnd() : "";
   return {
     id: requestedId || `task-${index + 1}-${stableTaskHash(title)}`,
     title,
