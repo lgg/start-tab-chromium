@@ -240,6 +240,86 @@ try{
     c.dispose();oldButton.click();await delay();
     assert.equal(control.messages.length,before);
   }
+
+  // A clock acknowledgement is committed even if the following canonical
+  // read fails. A renderer replaced during the request must not redraw.
+  {
+    const b={...timer,id:"clock-refresh-race"};
+    settings.layout.blocks.push(b);
+    control.state.startPageSettings=structuredClone(settings);
+    const initial=mount(b),reset=button(initial.root,"clockReset");
+    const previousGet=control.chrome.storage.local.get;
+    const originalHandler=control.handler;
+    let release;
+    control.handler=m=>new Promise(resolve=>{release=()=>resolve({ok:true})});
+    try{
+      reset.click();await until(()=>release);
+      const count=control.messages.length;
+      const replacement=mount(b);
+      assert.equal(button(replacement.root,"clockReset").disabled,true);
+      reset.dispatchEvent(new window.MouseEvent("click",{bubbles:true}));
+      assert.equal(control.messages.length,count);
+      initial.dispose();
+      const previousErrors=errors.length;
+      control.chrome.storage.local.get=async()=>{throw Error("clock canonical read unavailable")};
+      release();
+      await until(()=>errors.length>previousErrors);
+      assert.equal(errors.at(-1).message,"runtimeSavedRefreshFailed");
+      assert.equal(errors.at(-1).cause.message,"clock canonical read unavailable");
+      control.chrome.storage.local.get=previousGet;
+      await until(()=>!button(replacement.root,"clockReset").disabled);
+      replacement.dispose();
+    }finally{control.chrome.storage.local.get=previousGet;control.handler=originalHandler}
+  }
+  // Failed refresh after completion must not silently report success or
+  // immediately repeat the same completion token.
+  {
+    const b={...timer,id:"clock-completion-refresh"};
+    settings.layout.blocks.push(b);
+    context.runtime.clocks[b.id]=startClockState(defaultClockForBlock(b),Date.now()-3000);
+    control.state.startPageSettings=structuredClone(settings);
+    control.state.startPageRuntimeState=structuredClone(context.runtime);
+    const previousGet=control.chrome.storage.local.get;
+    const originalHandler=control.handler;
+    const previousErrors=errors.length;
+    control.handler=async m=>{
+      if(m.type==="complete-clock"){
+        context.runtime.clocks[b.id]={...defaultClockForBlock(b),lastCompletedToken:m.token};
+        control.state.startPageRuntimeState=structuredClone(context.runtime);
+        control.chrome.storage.local.get=async()=>{throw Error("completion refresh unavailable")};
+      }
+      return {ok:true};
+    };
+    try{
+      const view=mount(b);
+      await until(()=>errors.length>previousErrors);
+      assert.equal(errors.at(-1).cause.message,"completion refresh unavailable");
+      await until(()=>!button(view.root,"clockStart").disabled);
+      assert.equal(control.messages.filter(m=>m.type==="complete-clock"&&m.instanceId===b.id).length,1);
+      view.dispose();
+    }finally{control.chrome.storage.local.get=previousGet;control.handler=originalHandler}
+  }
+  // Legacy task acknowledgements without savedTasks still commit; an
+  // unavailable subsequent read does not destroy a newly typed draft.
+  {
+    const b={...tasks,id:"tasks-legacy-refresh-failure"};
+    settings.layout.blocks.push(b);
+    const view=mount(b),input=one(view.root,"input");
+    const previousGet=control.chrome.storage.local.get;
+    const previousErrors=errors.length;
+    let finish;
+    write=m=>new Promise(resolve=>{finish=()=>{commit(m);control.chrome.storage.local.get=async()=>{throw Error("task refresh unavailable")};resolve({ok:true})}});
+    try{
+      value(input,"committed task");submit(one(view.root,"form"));
+      await until(()=>finish);
+      value(input,"next unsaved task");finish();
+      await until(()=>errors.length>previousErrors&&!one(view.root,"form button").disabled);
+      assert.equal(errors.at(-1).cause.message,"task refresh unavailable");
+      assert.equal(input.value,"next unsaved task");
+      assert.equal(context.runtime.tasks[b.id][0].title,"committed task");
+      view.dispose();
+    }finally{control.chrome.storage.local.get=previousGet;write=async m=>{commit(m);return {ok:true}}}
+  }
   console.log("Widgets: fallback search, disconnected controls, hidden search drafts, absent IP country and pinned failure");
   console.log("Widget races: pending notes, explicit overwrite, hidden drafts, legacy ACKs, failed refresh and timer completion");
 }finally{dom.window.close()}

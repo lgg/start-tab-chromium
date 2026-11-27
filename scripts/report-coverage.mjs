@@ -44,6 +44,21 @@ try {
   // report stays local to the runner and is removed in finally.
   const detail = JSON.parse(await readFile(path.join(temporary, "coverage-final.json"), "utf8"));
   for (const [name, file] of Object.entries(detail).sort(([a], [b]) => a.localeCompare(b))) {
+    const relative = path.relative(root, name).replaceAll("\\", "/");
+    const missedFunctions = Object.entries(file.f ?? {}).flatMap(([id, count]) => {
+      if (count !== 0) return [];
+      const fn = file.fnMap?.[id];
+      return fn?.loc ? [`${fn.name ?? "(anonymous)"}@${fn.loc.start.line}:${fn.loc.start.column}-${fn.loc.end.line}:${fn.loc.end.column}`] : [];
+    });
+    if (missedFunctions.length) console.log("UNCOVERED_FUNCTIONS " + relative + " " + missedFunctions.join(", "));
+    // c8's source-derived statement ranges can span more than one line.
+    // Report exact missed ranges, preserving the original measurement.
+    const missedStatements = Object.entries(file.s ?? {}).flatMap(([id, count]) => {
+      if (count !== 0) return [];
+      const loc = file.statementMap?.[id];
+      return loc ? [`${loc.start.line}:${loc.start.column}-${loc.end.line}:${loc.end.column}`] : [];
+    });
+    if (missedStatements.length) console.log("UNCOVERED_STATEMENTS " + relative + " " + missedStatements.join(", "));
     const missed = Object.entries(file.b ?? {}).flatMap(([id, counts]) =>
       counts.flatMap((count, index) => {
         if (count !== 0) return [];
