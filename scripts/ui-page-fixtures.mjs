@@ -451,6 +451,20 @@ try {
       await until(()=>busyDone());
     }
 
+    // An unsupported select value (for example after a browser restores stale
+    // form state) cannot silently apply a different standard preset.
+    {
+      const preset=option("layoutPreset");
+      const before=control.messages.length;
+      const oldMode=option("layoutMode").value,oldColumns=option("layoutColumns").value;
+      value(preset,"unsupported-preset","change");
+      assert.equal(preset.value,"");
+      assert.equal(option("layoutMode").value,oldMode);
+      assert.equal(option("layoutColumns").value,oldColumns);
+      event(option("layoutColumns"),"input");
+      assert.equal(preset.value,"custom");
+      assert.equal(control.messages.length,before);
+    }
     // Saving a custom layout after selecting a standard preset must not
     // falsely retain the preset badge when its geometry has been changed.
     {
