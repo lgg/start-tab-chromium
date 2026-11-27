@@ -502,5 +502,52 @@ try {
       assert.equal(item.url,"https://fallback.example/");
     }finally{Object.defineProperty(globalThis,"crypto",descriptor)}
   }
+
+  // Switch from a non-effect theme to an effect, then round-trip a custom
+  // aurora with non-default values; an empty name cannot be saved.
+  {
+    const solid={...theme,background:{kind:"solid",color:"#123456"}};
+    let promise=editTheme(solid,i18n);
+    let dialog=one(document,"dialog[open]");
+    value(field(dialog,"backgroundTile"),"effect","change");
+    assert.equal(field(dialog,"backgroundEffect").value,"aurora");
+    assert.equal(field(dialog,"effectBlur").value,"72");
+    value(field(dialog,"effectBlur"),43);
+    value(field(dialog,"effectSpeed"),2.25);
+    submit(one(dialog,"form"));
+    const custom=await promise;
+    assert.deepEqual(custom.background.config,{effect:"aurora",speed:2.25,intensity:0.65,blur:43});
+    promise=editTheme(custom,i18n);dialog=one(document,"dialog[open]");
+    assert.equal(field(dialog,"effectBlur").value,"43");
+    assert.equal(field(dialog,"effectSpeed").value,"2.25");
+    value(field(dialog,"themeName")," ");
+    submit(one(dialog,"form"));
+    assert.equal((await promise).name,custom.name);
+    // A malformed draft with no valid fallback name requires repair.
+    promise=editTheme({...custom,name:""},i18n);dialog=one(document,"dialog[open]");
+    submit(one(dialog,"form"));
+    assert.equal(dialog.isConnected,true);
+    assert.equal(one(dialog,".form-error").hidden,false);
+    value(field(dialog,"themeName"),"Restored aurora");
+    submit(one(dialog,"form"));
+    assert.equal((await promise).name,"Restored aurora");
+  }
+  // Configuring a free-mode block must retain free geometry rather than
+  // attempting grid placement or silently dropping its custom title.
+  {
+    const s=cloneSettings(settings);s.layout.mode="free";
+    const t=host(),p=host(),g=host();
+    const ed=new LayoutEditor(s,{i18n,toolbarHost:t,paletteHost:p,getRuntime:()=>runtime,requestRender:()=>{},previewBlock:()=>{},onSaved:()=>{},onError:e=>errors.push(e)});
+    ed.enter();
+    const card=document.createElement("article");g.append(card);ed.decorateCard(card,s.layout.blocks[0]);
+    const original=structuredClone(s.layout.blocks[0].free);
+    button(card,"editBlock").click();
+    const dialog=one(document,"dialog[open]");
+    value(field(dialog,"instanceName"),"Free configured note");submit(one(dialog,"form"));
+    await until(()=>ed.settings.layout.blocks[0].title==="Free configured note");
+    assert.deepEqual(ed.settings.layout.blocks[0].free,original);
+    assert.equal(ed.settings.layout.mode,"free");
+    ed.cancel();
+  }
   console.log("Theme editor: 4 background kinds, 7 effects, panel preservation, DOM CSS application, cancel");
 } finally { dom.window.close(); }

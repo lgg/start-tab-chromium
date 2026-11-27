@@ -176,4 +176,32 @@ check(normalizeThemeBundle(null).issues.some(x=>x.messageKey==="validationInvali
   same(v.uniqueEntityId("unique",used,reserved),"unique-4");
   same(v.uniqueEntityId("available",used,reserved),"available");
 }
+
+ // Effect switches from an unrelated fallback must use the target effect's
+ // defaults and preserve valid supplied colors; a malformed palette must
+ // not inherit colors from another effect.
+{
+  const base=normalizeTheme({background:{kind:"effect",config:{effect:"aurora",speed:3,intensity:0.4,blur:45}}},BUILT_IN_THEMES[0]);
+  const gradient=normalizeTheme({background:{kind:"effect",config:{effect:"animated-gradient",colors:["#abc","<bad>","#def",null],angle:180}}},base);
+  same(gradient.background.config,{effect:"animated-gradient",speed:1,intensity:0.8,angle:180,colors:["#abc","#111827","#def"]});
+  const noPalette=normalizeTheme({background:{kind:"effect",config:{effect:"animated-gradient",colors:[]}}},base);
+  same(noPalette.background.config.colors,["#111827","#312e81","#0f766e","#111827"]);
+  const kept=normalizeTheme({background:{kind:"effect",config:{effect:"animated-gradient",colors:[]}}},gradient);
+  same(kept.background.config.colors,gradient.background.config.colors);
+  const image=normalizeTheme({background:{kind:"image",url:"https://example.com/a.png"}},base);
+  const invalid=[];
+  same(normalizeTheme({background:{kind:"image",url:"javascript:bad()"}},image,"theme",invalid).background.url,image.background.url);
+  same(invalid[0].messageKey,"validationInvalidUrl");
+  const api=await import("../src/lib/start-page-settings.js");
+  const rt=await import("../src/lib/start-page-runtime.js");
+  const task=api.createBlockInstance("localTasks",{id:"missing-runtime-task"});
+  const initial={...settings,layout:{...settings.layout,blocks:[task]}};
+  const empty={...initial,layout:{...initial.layout,blocks:[]}};
+  const runtime=rt.normalizeRuntimeState(undefined,initial);
+  delete runtime.tasks[task.id];
+  same(api.blockDeletionRequiresDataConfirmation(task,runtime),false);
+  // No runtime entry does not exempt a customized block from the preset
+  // replacement confirmation.
+  same(api.layoutReplacementRemovesUserData({...initial,layout:{...initial.layout,blocks:[{...task,title:"My tasks"}]}},empty,runtime),true);
+}
 console.log("Validation matrix:",checks,"assertions — message boundaries, all widget configs, URL sanitization, legacy and theme fallback branches");
