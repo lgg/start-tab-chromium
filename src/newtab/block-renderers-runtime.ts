@@ -20,12 +20,8 @@ import { refreshAfterAcknowledgedRuntimeWrite, settleClockMutation } from "./run
 
 const clockRequests = new ClockRequestGate();
 
-async function refreshClock(
-  block: Extract<BlockInstance, { type: "timer" | "stopwatch" | "pomodoro" }>,
-  context: BlockRenderContext,
-): Promise<void> {
+async function refreshClock(context: BlockRenderContext): Promise<void> {
   context.runtime = await getStartPageRuntimeState(context.settings);
-  if (!ownValue(context.runtime.clocks, block.id)) context.runtime.clocks[block.id] = defaultClockForBlock(block);
 }
 
 export function renderClock(
@@ -48,7 +44,7 @@ export function renderClock(
     try {
       await settleClockMutation(
         async () => { await sendMessage({ type: "clock-action", instanceId: block.id, action }); },
-        async () => { await refreshClock(block, context); },
+        async () => { await refreshClock(context); },
         (error) => context.reportError(new Error(context.i18n.t("runtimeSavedRefreshFailed"), { cause: error })),
       );
     } finally {
@@ -75,7 +71,7 @@ export function renderClock(
           const ack = await sendMessage({ type: "complete-clock", instanceId: block.id, token });
           if (ack.notificationFailed) context.reportError(new Error(context.i18n.t("clockCompletedNotificationFailed")));
         },
-        async () => { await refreshClock(block, context); },
+        async () => { await refreshClock(context); },
         (error) => context.reportError(new Error(context.i18n.t("runtimeSavedRefreshFailed"), { cause: error })),
       );
     } finally {
@@ -201,7 +197,7 @@ export function renderNote(
   const controls = element("div", "note-save-status__controls");
 
   const resolveDraft = async (discard: boolean): Promise<void> => {
-    if (session.resolving || session.draft.saving || !session.draft.failed) return;
+    if (session.view !== update || session.resolving || session.draft.saving || !session.draft.failed) return;
     session.resolving = true;
     session.view?.();
     try {
@@ -278,9 +274,9 @@ export function renderHiddenNoteDrafts(
   if (hidden.length === 0) { host.replaceChildren(); return; }
   const heading = element("h2", "", context.i18n.t("hiddenNoteDrafts"));
   const description = element("p", "", context.i18n.t("hiddenNoteDraftsDescription"));
-  const entries = hidden.flatMap((id) => {
-    const session = noteSessions.get(id);
-    if (!session) return [];
+  const entries = hidden.map((id) => {
+    // The IDs were selected synchronously from this same map.
+    const session = noteSessions.get(id)!;
     const row = element("div", "hidden-note-draft");
     const title = element("strong", "", session.title);
     const text = element("textarea", "note");
@@ -288,11 +284,12 @@ export function renderHiddenNoteDrafts(
     text.value = session.draft.value;
     text.setAttribute("aria-label", session.title);
     const select = actionButton(context.i18n.t("hiddenNoteSelect"), () => {
+      if (!row.isConnected) return;
       text.focus();
       text.select();
     }, "button button--secondary", context.reportError);
     const discard = actionButton(context.i18n.t("hiddenNoteDiscard"), () => {
-      if (noteSessions.get(id) !== session || session.draft.saving || session.resolving) return;
+      if (!row.isConnected || noteSessions.get(id) !== session || session.draft.saving || session.resolving) return;
       if (!window.confirm(context.i18n.t("noteDraftDiscardConfirm"))) return;
       clearNoteTimer(session);
       noteSessions.delete(id);
@@ -302,7 +299,7 @@ export function renderHiddenNoteDrafts(
     const actions = element("div", "note-save-status__controls");
     actions.append(select, discard);
     row.append(title, text, actions);
-    return [row];
+    return row;
   });
   host.replaceChildren(heading, description, ...entries);
 }
