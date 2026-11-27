@@ -270,17 +270,16 @@ function nextRuntimeRevision(floor: number, now = Date.now()): number {
 async function persistRuntimeInTransaction(
   state: StartPageRuntimeState,
   settings: StartPageSettings,
-  allowFutureOverwrite = false,
   expectedUpdatedAt: number | null = null,
   removeLegacy = false,
 ): Promise<StartPageRuntimeState> {
   const items = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, DATA_REVISION_KEY]);
   const raw = items[START_PAGE_RUNTIME_KEY];
-  if (!allowFutureOverwrite && isFutureRuntimeSchema(raw)) {
+  if (isFutureRuntimeSchema(raw)) {
     throw new Error("Start Tab runtime data was created by a newer extension version and cannot be modified safely");
   }
-  const currentUpdatedAt = isFutureRuntimeSchema(raw) ? 0 : normalizeRuntimeState(raw, settings).updatedAt;
-  if (!allowFutureOverwrite && expectedUpdatedAt !== null
+  const currentUpdatedAt = normalizeRuntimeState(raw, settings).updatedAt;
+  if (expectedUpdatedAt !== null
     && currentUpdatedAt !== expectedUpdatedAt) {
     throw new Error("Start Tab runtime changed in another extension context; reload before saving");
   }
@@ -319,7 +318,7 @@ export async function getStartPageViewSnapshot(): Promise<{ settings: StartPageS
     const runtime = isFutureStartPageSchema(rawSettings) || isFutureRuntimeSchema(rawRuntime)
       || jsonContentEqual(rawRuntime, normalized)
       ? normalized
-      : await persistRuntimeInTransaction(normalized, settings, true, null, stored[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined);
+      : await persistRuntimeInTransaction(normalized, settings, null, stored[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined);
     return { settings, runtime, localePreference: localePreferenceFromStored(stored[LOCALE_OVERRIDE_KEY]) };
   });
 }
@@ -335,7 +334,7 @@ export async function getStartPageRuntimeState(inputSettings?: StartPageSettings
     const normalized = normalizeRuntimeState(raw, settings, items[LEGACY_INSTANCE_RUNTIME_KEY]);
     const canonical = isFutureStartPageSchema(rawSettings) || isFutureRuntimeSchema(raw) || jsonContentEqual(raw, normalized)
       ? normalized
-      : await persistRuntimeInTransaction(normalized, settings, true, null, items[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined);
+      : await persistRuntimeInTransaction(normalized, settings, null, items[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined);
     // An editor layout is a projection, not authority to prune stored data.
     return inputSettings ? normalizeRuntimeState(canonical, inputSettings) : canonical;
   });
@@ -344,7 +343,7 @@ export async function getStartPageRuntimeState(inputSettings?: StartPageSettings
 export async function setStartPageRuntimeState(state: StartPageRuntimeState): Promise<void> {
   await withStorageLock("data-write", async () => {
     const { settings } = await readRuntimeSettingsSnapshot(true);
-    await persistRuntimeInTransaction(normalizeRuntimeState(state, settings), settings, false, state.updatedAt);
+    await persistRuntimeInTransaction(normalizeRuntimeState(state, settings), settings, state.updatedAt);
   });
 }
 
@@ -400,7 +399,6 @@ async function runRuntimeMutation<T>(
     const saved = await persistRuntimeInTransaction(
       next,
       settings,
-      false,
       current.updatedAt,
       items[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined,
     );
@@ -1045,7 +1043,7 @@ export async function deleteInstanceRuntime(
 
     try {
       if (normalizedHasInstance || storedHasInstance) {
-        await persistRuntimeInTransaction(runtime, settings, false, runtime.updatedAt, rawLegacy !== undefined);
+        await persistRuntimeInTransaction(runtime, settings, runtime.updatedAt, rawLegacy !== undefined);
       }
       await clearClockAlarm(instanceId);
     } catch (error) {

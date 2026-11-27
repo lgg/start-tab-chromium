@@ -171,6 +171,8 @@
   }
 
   function showOverlay(title, description, tabs = []) {
+    const generation = applyGeneration;
+    const isCurrent = (node) => node.isConnected && generation === applyGeneration;
     removeOverlay();
     window.dispatchEvent(new Event(DISMISS_ONBOARDING_EVENT));
     document.getElementById(ONBOARDING_ID)?.remove();
@@ -198,14 +200,14 @@
     for (const tab of tabs) {
       const button = document.createElement("button");
       button.type = "button";
-      button.textContent = tab.title || tab.url || text("gateUntitledTab", "Untitled tab");
+      button.textContent = tab.title; // webTab already supplies a nonempty title or URL.
       button.style.cssText = "display:block;width:100%;margin:8px 0;padding:10px;text-align:left";
       button.addEventListener("click", () => run(async () => {
-        if (!button.isConnected) return;
+        if (!isCurrent(button)) return;
         const current = await chrome.tabs.getCurrent();
         // The picker may have been replaced while the browser tab lookup
         // was pending. An obsolete choice must never navigate the new view.
-        if (button.isConnected && typeof current?.id === "number") await chrome.tabs.update(current.id, { url: tab.url });
+        if (isCurrent(button) && typeof current?.id === "number") await chrome.tabs.update(current.id, { url: tab.url });
       }));
       panel.append(button);
       firstAction ??= button;
@@ -220,7 +222,7 @@
     settings.type = "button";
     settings.textContent = text("openSettings", "Open settings");
     settings.addEventListener("click", () => {
-      if (settings.isConnected) run(() => chrome.runtime.openOptionsPage());
+      if (isCurrent(settings)) run(() => chrome.runtime.openOptionsPage());
     });
     panel.append(native, settings);
     overlay.append(panel);

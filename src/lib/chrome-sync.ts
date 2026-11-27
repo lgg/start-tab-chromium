@@ -294,14 +294,16 @@ function snapshotRevisionGuard(snapshot: Awaited<ReturnType<typeof prepareSnapsh
 }
 
 async function retrySyncConflicts<T>(operation: () => Promise<T>): Promise<T> {
-  for (let attempt = 1; ; attempt += 1) {
+  async function attempt(remaining: number): Promise<T> {
     try {
       return await operation();
     } catch (error) {
       if (!(error instanceof StartTabDataRevisionConflictError) && !(error instanceof ChromeSyncRemoteConflictError)) throw error;
-      if (attempt >= MAX_LOCAL_REVISION_RETRIES) throw error;
+      if (remaining <= 1) throw error;
+      return attempt(remaining - 1);
     }
   }
+  return attempt(MAX_LOCAL_REVISION_RETRIES);
 }
 
 /** Metadata and chunks can arrive independently from Chrome Sync. A smart

@@ -16,8 +16,8 @@ const selfHosted = read("scripts/validate-self-hosted-ci.mjs");
 const manualQa = read("docs/manual-qa-round39.md");
 const audit = read("docs/audit-2026-08-01-round-39.md");
 
-assert.match(runtimeTarget, /RuntimeMutationTargetKind = "clock" \| "note" \| "tasks" \| "linkPage"/);
-assert.match(runtimeTarget, /case "clock":[\s\S]*block\.type === "timer"[\s\S]*block\.type === "stopwatch"[\s\S]*block\.type === "pomodoro"/);
+assert.match(runtimeTarget, /RuntimeMutationTargetKind = keyof typeof TARGET_TYPES/);
+assert.match(runtimeTarget, /clock: \["timer", "stopwatch", "pomodoro"\]/);
 assert.match(worker, /performClockAction[\s\S]*assertRuntimeMutationTarget\(settings, instanceId, "clock"\)/,
   "Direct clock actions must validate the current block type inside the runtime transaction");
 assert.match(layoutEditor, /export function shouldRefreshLayoutDraft\(active: boolean, dirty: boolean, savePending: boolean\)/);

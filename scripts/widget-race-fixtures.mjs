@@ -81,8 +81,28 @@ try{
   assert.equal(one(hidden,"textarea").value,"hidden unsaved");
   window.confirm=()=>false;button(hidden,"hiddenNoteDiscard").click();await delay();
   assert.equal(hasUnsavedNoteDrafts(),true);
-  window.confirm=()=>true;button(hidden,"hiddenNoteDiscard").click();
+  // The same session can reappear in a new renderer. Neither detached
+  // hidden controls nor old visible retry/discard controls own that draft.
+  const staleHidden=button(hidden,"hiddenNoteDiscard");
+  const staleRetry=button(third.root,"noteDraftRetry");
+  const staleDiscard=button(third.root,"noteDraftDiscard");
+  const returned=mount(note);
+  renderHiddenNoteDrafts(hidden,new Set([note.id]),new Set([note.id]),context);
+  assert.equal(hidden.hidden,true);
+  let prompts=0;
+  window.confirm=()=>{prompts++;return true};
+  const beforeStale=writes.length;
+  staleHidden.click();staleRetry.click();staleDiscard.click();
+  await delay(20);
+  assert.equal(prompts,0);
+  assert.equal(writes.length,beforeStale);
+  assert.equal(hasUnsavedNoteDrafts(),true);
+  assert.equal(one(returned.root,"textarea").value,"hidden unsaved");
+  returned.dispose();
+  renderHiddenNoteDrafts(hidden,new Set(),new Set(),context);
+  button(hidden,"hiddenNoteDiscard").click();
   await until(()=>!hasUnsavedNoteDrafts());
+  assert.equal(prompts,1);
   renderHiddenNoteDrafts(hidden,new Set(),new Set(),context);assert.equal(hidden.hidden,true);
 
   // Old worker acks are committed even without savedTasks/savedLinkPage.

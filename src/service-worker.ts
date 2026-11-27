@@ -53,7 +53,6 @@ import {
   blockTitleKey,
   blockUsesDefaultTitle,
   getStartPageSettings,
-  type BlockInstance,
   type ClockRuntimeState,
   type LocalTask,
   type StartPageSettings,
@@ -86,8 +85,6 @@ interface HandlerResult {
   notificationFailed?: true;
 }
 
-type ClockBlock = Extract<BlockInstance, { type: "timer" | "stopwatch" | "pomodoro" }>;
-
 let runtimeJob: Promise<unknown> = Promise.resolve();
 let statsJob: Promise<void> = Promise.resolve();
 let nativeTabJob: Promise<void> = Promise.resolve();
@@ -110,10 +107,6 @@ const newTabRedirectGuard = new NewTabRedirectGuard({
 
 function ignoreBackgroundError(): void {
   // Event listeners cannot surface async failures to callers in MV3.
-}
-
-function isClockBlock(block: BlockInstance): block is ClockBlock {
-  return block.type === "timer" || block.type === "stopwatch" || block.type === "pomodoro";
 }
 
 function runStatsJob(operation: () => Promise<void>): Promise<void> {
@@ -289,11 +282,7 @@ async function performClockAction(instanceId: string, action: ClockAction): Prom
     occurredAt: number;
   } | null>((runtime, settings) => {
     const now = Date.now();
-    assertRuntimeMutationTarget(settings, instanceId, "clock");
-    const block = settings.layout.blocks.find(
-      (candidate): candidate is ClockBlock => candidate.id === instanceId && isClockBlock(candidate),
-    ) ?? null;
-    if (!block) return { state: null, result: null };
+    const block = assertRuntimeMutationTarget(settings, instanceId, "clock");
     const clock = ownValue(runtime.clocks, instanceId) ?? defaultClockForBlock(block);
     // Two pages can display the same Start/Pause button. Apply the intended
     // state under the lock instead of inverting an already changed clock.

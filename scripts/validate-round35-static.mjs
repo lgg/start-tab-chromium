@@ -114,7 +114,7 @@ assert.match(links76, /session\.view !== draw \|\| !session\.begin\(\)/);
 assert.match(links76, /session\.committed\.observe\(ack\.savedLinkPage, ack\.runtimeUpdatedAt\)/);
 assert.match(runtimeRenderer, /Math\.ceil\(value \/ 1000\) \* 1000/);
 assert.match(runtimeRenderer, /const clockRequests = new ClockRequestGate\(\)/);
-assert.match(runtimeRenderer, /clockRequests\.begin\(block\.id, token\)[\s\S]*await refreshClock\(block, context\)[\s\S]*clockRequests\.finish\(lease\)/);
+assert.match(runtimeRenderer, /clockRequests\.begin\(block\.id, token\)[\s\S]*await refreshClock\(context\)[\s\S]*clockRequests\.finish\(lease\)/);
 assert.match(runtimeRenderer, /clockRequests\.canComplete\(block\.id, clock\.completionToken\)/);
 assert.match(clockGate, /retryAt: this\.now\(\) \+ this\.retryDelayMs/);
 assert.match(newtab, /pageshow[\s\S]*event\.persisted && disposed[\s\S]*location\.reload\(\)/);

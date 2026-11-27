@@ -284,3 +284,27 @@ try{
   assert.deepEqual(await local.get(null),stored);
 }finally{dom.window.close()}
 console.log("Blocklist residual: invalid host, malformed legacy state, concurrent DNR ID claims and delegated page mutations");
+
+
+// A future schema can appear between the initial read and the persistence
+// re-read. Automatic canonicalization is not authorization to overwrite it.
+for(const reader of ["getStartPageRuntimeState","getStartPageViewSnapshot"]){
+  const previous=globalThis.chrome;
+  const fresh=installChrome({startPageSettings:api.normalizeStartPageSettings(settings),startPageRuntimeState:{version:0}});
+  const store=fresh.chrome.storage.local,read=store.get;
+  const future={version:999,updatedAt:100,opaque:{keep:"newer extension data"}};
+  let injected=false;
+  store.get=async keys=>{
+    if(!injected&&Array.isArray(keys)&&keys.length===2&&keys.includes(rt.START_PAGE_RUNTIME_KEY)&&keys.includes("startTabDataRevision")){
+      injected=true;
+      await store.set({[rt.START_PAGE_RUNTIME_KEY]:future});
+    }
+    return read(keys);
+  };
+  try{
+    await assert.rejects(rt[reader](),/newer extension version/);
+    assert.equal(injected,true,reader);
+    assert.deepEqual(fresh.state[rt.START_PAGE_RUNTIME_KEY],future,reader);
+  }finally{store.get=read;globalThis.chrome=previous}
+}
+console.log("Runtime: automatic normalization refuses a concurrently published future schema");
