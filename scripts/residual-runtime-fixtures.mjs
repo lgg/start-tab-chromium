@@ -308,3 +308,40 @@ for(const reader of ["getStartPageRuntimeState","getStartPageViewSnapshot"]){
   }finally{store.get=read;globalThis.chrome=previous}
 }
 console.log("Runtime: automatic normalization refuses a concurrently published future schema");
+
+
+// An old persisted countdown can have a valid deadline/token but no focus
+// start timestamp. Do not invent historical work time. Both auto-start modes
+// must advance the phase exactly once, including a stale repeat completion.
+{
+  const {getFocusStats}=await import("../src/lib/focus-stats.js");
+  for(const autoStart of [false,true]){
+    for(const phase of ["work","break"]){
+      for(const hasFocusStart of [false,true]){
+        const s=api.createDefaultStartPageSettings(100);
+        const p=api.createBlockInstance("pomodoro",{id:"legacy-pomodoro",config:{type:"pomodoro",workSeconds:60,breakSeconds:30,notifyOnComplete:false,autoStartNextPhase:autoStart}});
+        s.layout.blocks=[p];
+        const runtime=rt.normalizeRuntimeState(undefined,s);
+        const startedAt=100000, durationMs=phase==="work"?60000:30000, targetAt=startedAt+durationMs;
+        runtime.clocks[p.id]={...rt.defaultClockForBlock(p),phase,running:true,startedAt,durationMs,targetAt,
+          completionToken:"persisted-phase",focusSessionStartedAt:hasFocusStart?startedAt:null};
+        const fresh=installChrome({startPageSettings:s,startPageRuntimeState:runtime});
+        const result=await rt.completeClockInstance(p.id,"persisted-phase",targetAt+500);
+        assert.equal(result.completed,true);
+        assert.equal(result.clock.phase,phase==="work"?"break":"work");
+        assert.equal(result.clock.running,autoStart);
+        assert.equal(result.clock.lastCompletedToken,"persisted-phase");
+        const completedTime=phase==="work"&&hasFocusStart?durationMs:0;
+        assert.equal(result.focusTimeMs,completedTime);
+        const before=await getFocusStats();
+        assert.equal(before.totals.focusTimeMs,completedTime);
+        assert.equal(before.totals.focusSessionsCompleted,completedTime>0?1:0);
+        assert.equal(before.totals.focusSessionsStarted,autoStart&&phase==="break"?1:0);
+        assert.equal(fresh.alarms.size,autoStart?1:0);
+        assert.equal((await rt.completeClockInstance(p.id,"persisted-phase",targetAt+501)).completed,false);
+        assert.deepEqual(await getFocusStats(),before);
+      }
+    }
+  }
+}
+console.log("Pomodoro: legacy missing focus start, work/break, auto-start, exact stats and duplicate token matrix");
