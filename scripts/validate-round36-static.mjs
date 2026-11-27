@@ -46,8 +46,12 @@ assert.match(options, /renderStatistics\(\)[\s\S]*catch[\s\S]*statisticsUnavaila
   "Statistics failure must leave a visible localized section instead of removing navigation");
 
 assert.match(gate, /LOCALE_OVERRIDE_KEY/);
-assert.match(gate, /_locales\/\$\{locale\}\/\$\{file\}/,
-  "The early gate must honor the explicit locale override before the module UI loads");
+assert.match(gate, /_locales\/\$\{language\}\/\$\{file\}/,
+  "The early gate must load the selected locale catalog");
+assert.match(gate, /const locale = resolvedGateLocale\(items\[LOCALE_OVERRIDE_KEY\]\)/,
+  "The early gate must resolve the committed locale override before the module UI loads");
+assert.match(gate, /locale === "en" \? defaults : await load\(locale\)/,
+  "The early gate must load the resolved locale, not just the default");
 assert.match(gate, /catalogFiles[\s\S]*messages\.json[\s\S]*round7-messages\.json/,
   "The early gate must load every catalog that can contain gate strings");
 assert.doesNotMatch(gate, /openerNewTab/,
