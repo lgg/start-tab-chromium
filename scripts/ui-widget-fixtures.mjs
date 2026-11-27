@@ -410,6 +410,44 @@ try {
       }
     }finally{globalThis.fetch=previousFetch;control.chrome.history.search=previousHistory}
   }
+
+  // Statistics requests can resolve after a layout switch removed the
+  // original card. A detached status node must not be replaced or repainted.
+  {
+    const get=control.chrome.storage.local.get;
+    let release;
+    control.chrome.storage.local.get=keys=>{
+      if(keys==="focusStats")return new Promise(resolve=>{release=async()=>resolve(await get(keys))});
+      return get(keys);
+    };
+    try{
+      const old=widget("stats",{},"detached-statistics");
+      await until(()=>release);
+      old.root.remove();
+      await release();await delay(30);
+      assert.equal(old.root.textContent,"statsPlaceholder");
+      assert.equal(old.root.querySelector(".stats-list"),null);
+    }finally{control.chrome.storage.local.get=get}
+    const active=widget("stats",{},"active-statistics");
+    await until(()=>active.root.querySelector(".stats-list"));
+    assert.equal(active.root.querySelectorAll(".stats-list__item").length,7);
+  }
+  // A history result with no URL is not a clickable link. Mixed valid and
+  // incomplete rows must preserve the actual URL and never invent a target.
+  {
+    const search=control.chrome.history.search;
+    control.chrome.history.search=async()=>[
+      {title:"No destination"},
+      {url:"https://history-without-title.example/"},
+      {url:"javascript:alert(1)",title:"Unsafe"}
+    ];
+    try{
+      const result=widget("recent",{maxResults:19},"missing-history-url");
+      await until(()=>result.root.querySelector("a"));
+      assert.equal(result.root.querySelectorAll("a").length,1);
+      assert.equal(one(result.root,"a").href,"https://history-without-title.example/");
+    }finally{control.chrome.history.search=search}
+  }
   console.log("Widget failure and boundary matrix passed");
   console.log("Widgets: dates, search, hidden drafts, IP, pagination, notes, tasks, clocks, history, pinned, stats, calendar, weather and commands");
 } finally {
