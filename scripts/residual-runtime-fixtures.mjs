@@ -683,3 +683,61 @@ console.log("Legacy runtime: shared dictionary aliases and fractional paused clo
   } finally {globalThis.chrome=previous}
 }
 console.log("Pomodoro: imported stale markers and paused intervals cannot inflate persisted focus statistics");
+
+
+// Canonical content can already match storage even though a previous
+// migration left obsolete keys behind. Those entries must not be revived
+// when a widget with the retired ID is added later.
+{
+  const previous=globalThis.chrome;
+  const s=api.normalizeStartPageSettings(settings);
+  const canonical=rt.normalizeRuntimeState(undefined,s);
+  const futureTask=api.createBlockInstance("localTasks",{id:"retired-task"});
+  const futureLinks=api.createBlockInstance("links",{id:"retired-links"});
+  const stale={localTasks:{[tasks.id]:[{title:"Old task"}],[futureTask.id]:[{title:"Deleted task"}]},linkPages:{[links.id]:7,[futureLinks.id]:3}};
+  for(const reader of ["getStartPageRuntimeState","getStartPageViewSnapshot","setStartPageRuntimeState"]){
+    const fresh=installChrome({startPageSettings:s,startPageRuntimeState:canonical,[legacyKey]:stale});
+    const storage=fresh.chrome.storage.local;
+    try{
+      if(reader==="setStartPageRuntimeState")await rt.setStartPageRuntimeState(canonical);
+      else await rt[reader]();
+      assert.equal(Object.hasOwn(fresh.state,legacyKey),false,reader);
+      const saved=await rt.getStartPageRuntimeState();
+      assert.deepEqual(saved.tasks[tasks.id],[]);
+      assert.equal(saved.linkPages[links.id],0);
+      const revision=saved.updatedAt;
+      assert.equal((await rt.getStartPageViewSnapshot()).runtime.updatedAt,revision,"Second read must not write");
+      const next={...s,layout:{...s.layout,blocks:[...s.layout.blocks,futureTask,futureLinks]}};
+      await storage.set({startPageSettings:next});
+      const expanded=await rt.getStartPageRuntimeState();
+      assert.deepEqual(expanded.tasks[futureTask.id],[]);
+      assert.equal(expanded.linkPages[futureLinks.id],0);
+    } finally{globalThis.chrome=previous}
+  }
+  // Still migrate genuinely missing current values, and retain the exact
+  // prior storage on a failed legacy removal.
+  const missing=structuredClone(canonical);
+  delete missing.tasks[tasks.id];
+  delete missing.linkPages[links.id];
+  const fresh=installChrome({startPageSettings:s,startPageRuntimeState:missing,[legacyKey]:stale});
+  try{
+    const storage=fresh.chrome.storage.local;
+    const originalRemove=storage.remove;
+    const before=await storage.get(null);
+    let rejected=false;
+    storage.remove=async keys=>{
+      if(!rejected&&(keys===legacyKey||Array.isArray(keys)&&keys.includes(legacyKey))){
+        rejected=true;throw Error("legacy cleanup unavailable");
+      }
+      return originalRemove(keys);
+    };
+    await assert.rejects(rt.getStartPageRuntimeState(),/legacy cleanup unavailable/);
+    assert.deepEqual(await storage.get(null),before);
+    storage.remove=originalRemove;
+    const restored=await rt.getStartPageRuntimeState();
+    assert.equal(restored.tasks[tasks.id][0].title,"Old task");
+    assert.equal(restored.linkPages[links.id],7);
+    assert.equal(Object.hasOwn(fresh.state,legacyKey),false);
+  }finally{globalThis.chrome=previous}
+}
+console.log("Runtime migration: retire stale legacy entries without resurrecting deleted widget data");
