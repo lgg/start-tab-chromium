@@ -427,7 +427,8 @@ function setOnboardingActionsDisabled(disabled: boolean): void {
 async function finishOnboarding(presetId: LayoutPresetId | null, owner: HTMLElement): Promise<void> {
   const isCurrent = (): boolean => !disposed && owner.isConnected && document.getElementById("onboarding") === owner
     && !document.getElementById("startTabGateOverlay");
-  if (onboardingFinishing || !isCurrent()) return;
+  if (onboardingFinishing) return;
+  if (!isCurrent()) return;
   onboardingFinishing = true;
   setOnboardingActionsDisabled(true);
   try {
