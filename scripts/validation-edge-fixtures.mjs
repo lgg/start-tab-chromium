@@ -383,6 +383,7 @@ console.log("Round 160: complete runtime mutation target matrix",checks);
   same(full.settings.themes.customThemes.map(x=>x.id),customThemes.map(x=>x.id));
   same(full.settings.themes.selectedThemeId,customThemes[0].id);
   check(full.report.issues.some(x=>x.path==="appearance"));
+  same(full.report.skippedBlocks,0);
   same(normalizeStartPageSettingsWithReport(full.settings).settings,full.settings);
   const room=normalizeStartPageSettingsWithReport({...legacy,themes:{customThemes:customThemes.slice(1)}}).settings;
   same(room.themes.customThemes.length,limits.MAX_CUSTOM_THEMES);
