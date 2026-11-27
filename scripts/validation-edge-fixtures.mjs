@@ -204,4 +204,38 @@ check(normalizeThemeBundle(null).issues.some(x=>x.messageKey==="validationInvali
   // replacement confirmation.
   same(api.layoutReplacementRemovesUserData({...initial,layout:{...initial.layout,blocks:[{...task,title:"My tasks"}]}},empty,runtime),true);
 }
+
+ // Public validation must normalize malformed persisted collection shapes
+ // without accepting their entries as capacity violations.
+{
+  const api=await import("../src/lib/start-page-settings.js");
+  const base=api.createDefaultStartPageSettings(100);
+  for(const malformed of [null,[],{layout:null,themes:null},{layout:[],themes:[]}]) {
+    const prepared=api.prepareStartPageSettingsWrite(malformed,base,base.updatedAt);
+    check(prepared.settings.layout.blocks.length>0);
+    check(prepared.settings.updatedAt>base.updatedAt);
+    check(Array.isArray(prepared.settings.themes.customThemes));
+  }
+  const custom={...base,layout:{...base.layout,blocks:[api.createBlockInstance("note",{id:"preset-empty-task"})]}};
+  const empty={...custom,layout:{...custom.layout,blocks:[]}};
+  const runtime=(await import("../src/lib/start-page-runtime.js")).normalizeRuntimeState(undefined,custom);
+  // An explicitly customized block remains protected even when its runtime
+  // has no data; a default untouched block may be removed without warning.
+  same(api.layoutReplacementRemovesUserData(custom,empty,runtime),false);
+  custom.layout.blocks[0].title="My custom note";
+  same(api.layoutReplacementRemovesUserData(custom,empty,runtime),true);
+  same(v.buildSearchUrl("https://example.com/?q={query}","\ud800"),"https://example.com/?q=%EF%BF%BD");
+}
+
+ // Switching back to aurora from a different effect must not inherit its
+ // incompatible speed/intensity/blur, and malformed CSS stays at fallback.
+{
+  const base=normalizeTheme({background:{kind:"effect",config:{effect:"matrix",speed:3,intensity:0.2,density:0.9}}},BUILT_IN_THEMES[0]);
+  const aurora=normalizeTheme({background:{kind:"effect",config:{effect:"aurora"}}},base);
+  same(aurora.background.config,{effect:"aurora",speed:1,intensity:0.65,blur:72});
+  same(v.safeGradient("url(javascript:bad())","linear-gradient(red, blue)"),"linear-gradient(red, blue)");
+  same(v.safeGradient("   ","radial-gradient(red, blue)"),"radial-gradient(red, blue)");
+  const pinned={items:[{id:"legacy-link",title:"Legacy",url:"https://example.com/",icon:"L"}]};
+  same(v.legacyConfigSource("startPinned",{startPinned:pinned}),pinned);
+}
 console.log("Validation matrix:",checks,"assertions — message boundaries, all widget configs, URL sanitization, legacy and theme fallback branches");

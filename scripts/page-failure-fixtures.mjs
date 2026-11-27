@@ -334,6 +334,53 @@ try{
 
 
 
+
+  // A browser may omit the UI language API and reject Web Locks or
+  // diagnostics writes. The native gate should still remain usable.
+  {
+    const dom=await installDom("newtab/newtab.html","https://extension.example/newtab.html");
+    const control=installChrome(seed());
+    control.state.localeOverride=undefined;
+    delete control.chrome.i18n.getUILanguage;
+    control.chrome.i18n.getMessage=()=> "";
+    control.state.startPageSettings.startTab.enabled=false;
+    const locks=[];
+    Object.defineProperty(navigator,"locks",{configurable:true,value:{request:async(name,options,read)=>{locks.push([name,options.mode]);return read()}}});
+    globalThis.fetch=async()=>{throw Error("offline catalog")};
+    const overlay=()=>document.getElementById("startTabGateOverlay");
+    try{
+      await import("../src/newtab/newtab-gate.js?case="+(++serial));
+      await window.startTabGateReady;
+      assert.match(overlay().textContent,/Start Tab is disabled/);
+      assert.ok(locks.every(([name,mode])=>name==="start-tab:data-write"&&mode==="exclusive"));
+      assert.ok(locks.length>=2);
+      const panel=one(overlay(),'[role="dialog"]');
+      const keys=[...panel.querySelectorAll("button")];
+      keys.forEach(b=>b.disabled=true);
+      const tab=new window.KeyboardEvent("keydown",{key:"Tab",bubbles:true,cancelable:true});
+      panel.dispatchEvent(tab);
+      assert.equal(tab.defaultPrevented,true);assert.equal(document.activeElement,panel);
+      const enter=new window.KeyboardEvent("keydown",{key:"Enter",bubbles:true,cancelable:true});
+      panel.dispatchEvent(enter);assert.equal(enter.defaultPrevented,false);
+      const set=control.chrome.storage.local.set;
+      control.chrome.storage.local.set=async()=>{throw Error("diagnostics unavailable")};
+      window.name="split-view";
+      control.chrome.tabs.getCurrent=async()=>{throw Error("tab lookup unavailable")};
+      control.chrome.tabs.query=async()=>[{id:2,url:"https://untitled.example/"},{id:3,url:"https://whitespace.example/",title:"  "},{id:4}];
+      control.chrome.storage.onChanged.emit({startPageSettings:{newValue:control.state.startPageSettings}},"local");
+      await until(()=>overlay()?.textContent.includes("https://untitled.example/"));
+      assert.ok(overlay().textContent.includes("https://whitespace.example/"));
+      const count=control.calls.length;
+      one(overlay(),"button").click();await delay(30);
+      assert.equal(control.calls.length,count);
+      control.chrome.storage.local.set=set;
+      window.name="";
+      control.state.startPageSettings.startTab.enabled=true;
+      control.chrome.storage.onChanged.emit({startPageSettings:{newValue:control.state.startPageSettings}},"local");
+      await until(()=>!overlay());
+    }finally{globalThis.fetch=catalog;dom.window.close()}
+  }
+
   // Gate generation races: late tab lists and locale catalogs must never
   // resurrect an obsolete overlay or overwrite the latest language.
   {

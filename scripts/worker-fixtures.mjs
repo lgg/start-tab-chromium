@@ -635,5 +635,25 @@ try {
   console.log("Settings boundaries: rejected stale/invalid edits, singleton and capacity checks, migrations, data-loss confirmation");
 
   console.log("Theme normalization and storage: effects, legacy migration, invalid image, duplicate IDs, CRUD, import/export and layout APIs");
+
+  // about:newtab is eligible for fallback redirects but is not an internal
+  // split-picker scheme; a malformed current URL must never be redirected.
+  {
+    const prior=control.calls.filter(c=>c[0]==="update").length;
+    const previousTab=control.tab;
+    try{
+      control.tab={id:301,url:"not a URL"};
+      chrome.tabs.onCreated.emit(control.tab);
+      await new Promise(resolve=>setTimeout(resolve,30));
+      assert.equal(control.calls.filter(c=>c[0]==="update").length,prior);
+      control.tab={id:302,url:"about:newtab"};
+      chrome.tabs.onCreated.emit(control.tab);
+      // Redirect may be disabled in this profile, but eligibility checking
+      // must still leave the worker alive and able to handle messages.
+      await new Promise(resolve=>setTimeout(resolve,30));
+      await ok({type:"block",host:"post-malformed-url.example"});
+      assert.ok(control.state.blockedSites.includes("post-malformed-url.example"));
+    }finally{control.tab=previousTab}
+  }
   console.log("Worker: real message router, blocklist, document validation, runtime CAS, clocks, notifications, redirect and startup");
 } finally { restoreFetch(); }
