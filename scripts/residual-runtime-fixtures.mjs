@@ -613,3 +613,38 @@ console.log("Clock normalization: reject sub-millisecond zero timestamps and bou
   assert.deepEqual(rt.normalizeRuntimeState(normalized,settings),normalized);
 }
 console.log("Task import: stable titles and IDs after truncating at whitespace");
+
+
+ // A legacy key can also be the explicit ID of a different widget that
+ // shares the same runtime dictionary. Do not replay a clock or page index.
+{
+  const timerOwner=api.createBlockInstance("timer",{id:"pomodoro",config:{type:"timer",durationSeconds:5,notifyOnComplete:false}});
+  const pomodoroAlias=api.createBlockInstance("pomodoro",{id:"pomodoro-custom"});
+  const linksOwner=api.createBlockInstance("links",{id:"startPinned"});
+  const pinnedAlias=api.createBlockInstance("startPinned",{id:"pinned-custom"});
+  const layout={...settings,layout:{...settings.layout,blocks:[timerOwner,pomodoroAlias,linksOwner,pinnedAlias]}};
+  const oldClock={running:true,startedAt:100,durationMs:5000};
+  const raw={clocks:{pomodoro:oldClock},linkPages:{startPinned:2}};
+  const normalized=rt.normalizeRuntimeState(raw,layout);
+  assert.equal(normalized.clocks[timerOwner.id].running,true);
+  assert.equal(normalized.clocks[pomodoroAlias.id].running,false);
+  assert.equal(normalized.linkPages[linksOwner.id],2);
+  assert.equal(normalized.linkPages[pinnedAlias.id],0);
+  assert.deepEqual(rt.normalizeRuntimeState(normalized,layout),normalized);
+  const typed=rt.normalizeRuntimeState({...raw,clocks:{pomodoro:{...oldClock,type:"pomodoro"}}},layout);
+  assert.equal(typed.clocks[timerOwner.id].running,false);
+  assert.equal(typed.clocks[pomodoroAlias.id].running,true);
+  const secondary=rt.normalizeRuntimeState({},layout,{clocks:{pomodoro:oldClock}});
+  assert.equal(secondary.clocks[timerOwner.id].running,true);
+  assert.equal(secondary.clocks[pomodoroAlias.id].running,false);
+}
+{
+  for(const progress of [0.1,0.49,0.5,1]){
+    const raw={...initial,clocks:{[timer.id]:{...rt.defaultClockForBlock(timer),durationMs:10000,accumulatedMs:progress}}};
+    const normalized=rt.normalizeRuntimeState(raw,settings);
+    assert.equal(normalized.clocks[timer.id].durationMs,progress<0.5?5000:10000);
+    assert.equal(normalized.clocks[timer.id].accumulatedMs,Math.round(progress));
+    assert.deepEqual(rt.normalizeRuntimeState(normalized,settings),normalized);
+  }
+}
+console.log("Legacy runtime: shared dictionary aliases and fractional paused clock progress are stable");

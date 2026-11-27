@@ -120,7 +120,7 @@ function normalizeClock(block: Extract<BlockInstance, { type: ClockBlockType }>,
   const storedAccumulated = value.accumulatedMs ?? value.elapsedMs;
   const running = value.running === true && startedAt !== null;
   const storedDuration = block.type === "stopwatch" ? 0 : finiteInteger(value.durationMs, configuredDuration, 1000, MAX_CLOCK_MS);
-  const hasProgress = typeof storedAccumulated === "number" && Number.isFinite(storedAccumulated) && storedAccumulated > 0;
+  const hasProgress = typeof storedAccumulated === "number" && Number.isFinite(storedAccumulated) && Math.round(storedAccumulated) > 0;
   const durationMs = block.type === "stopwatch" ? 0 : running || hasProgress ? storedDuration : configuredDuration;
   const accumulatedMs = finiteInteger(storedAccumulated, 0, 0, block.type === "stopwatch" ? MAX_CLOCK_MS : durationMs);
   const targetAt = block.type === "stopwatch" ? null : running ? timestamp(value.targetAt, Math.min(Number.MAX_SAFE_INTEGER, startedAt + Math.max(0, durationMs - accumulatedMs))) : null;
@@ -212,9 +212,17 @@ function ownsLegacyTypeValue(settings: StartPageSettings, block: BlockInstance):
 function legacyClockValue(block: Extract<BlockInstance, { type: ClockBlockType }>, settings: StartPageSettings, primary: Record<string, unknown>, secondary: Record<string, unknown>): unknown {
   const primaryClocks = isRecord(primary.clocks) ? primary.clocks : {};
   const secondaryClocks = isRecord(secondary.clocks) ? secondary.clocks : {};
-  return ownValue(primaryClocks, block.id)
-    ?? ownValue(secondaryClocks, block.id)
-    ?? (ownsLegacyTypeValue(settings, block) ? ownValue(primaryClocks, block.type) ?? ownValue(secondaryClocks, block.type) : undefined);
+  const direct = ownValue(primaryClocks, block.id) ?? ownValue(secondaryClocks, block.id);
+  if (direct !== undefined && direct !== null) return direct;
+  if (!ownsLegacyTypeValue(settings, block)) return undefined;
+  const alias = ownValue(primaryClocks, block.type) ?? ownValue(secondaryClocks, block.type);
+  // A legacy type key can also be another clock's explicit instance ID.
+  // Untyped values belong to that exact ID; only an explicit clock kind can
+  // disambiguate the legacy alias without duplicating an active countdown.
+  const claimedByOtherKind = settings.layout.blocks.some((candidate) =>
+    isClockBlock(candidate) && candidate.id === block.type && candidate.type !== block.type);
+  if (claimedByOtherKind && (!isRecord(alias) || alias.type !== block.type)) return undefined;
+  return alias;
 }
 
 export function isFutureRuntimeSchema(value: unknown): boolean {
@@ -254,9 +262,12 @@ export function normalizeRuntimeState(value: unknown, settings: StartPageSetting
       tasks[block.id] = normalizeTaskList(ownValue(sourceTasks, block.id) ?? ownValue(legacyTasks, block.id) ?? oldSharedTasks);
     }
     if (block.type === "links" || block.type === "startPinned") {
+      const claimedByOtherKind = settings.layout.blocks.some((candidate) =>
+        (candidate.type === "links" || candidate.type === "startPinned")
+        && candidate.id === block.type && candidate.type !== block.type);
       const candidate = ownValue(sourceLinkPages, block.id)
         ?? ownValue(legacyLinkPages, block.id)
-        ?? (version !== RUNTIME_SCHEMA_VERSION && ownsLegacyTypeValue(settings, block) ? ownValue(sourceLinkPages, block.type) : undefined);
+        ?? (version !== RUNTIME_SCHEMA_VERSION && !claimedByOtherKind && ownsLegacyTypeValue(settings, block) ? ownValue(sourceLinkPages, block.type) : undefined);
       linkPages[block.id] = finiteInteger(candidate, 0, 0, 10_000);
     }
   }
