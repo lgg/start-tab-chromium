@@ -170,7 +170,23 @@ assert.deepEqual(parseWeatherPayload({
   current_units: { temperature_2m: 123 },
   daily: { time: ["2026-11-25", "2026-02-31", "2026-11-26", "2026-11-27", "2026-11-25"],
     temperature_2m_min: [1, 0, 10, 1, 0], temperature_2m_max: [8, 9, 5, 3, 5], weather_code: [3, 0, 0, 999, 1] },
-}), { currentTemperature: 7, currentCode: null, unit: "°C", days: [{ date: "2026-11-25", min: 1, max: 8, code: 3 }] });
+}), { currentTemperature: 7, currentCode: null, unit: "°C", dailyUnit: "°C", days: [{ date: "2026-11-25", min: 1, max: 8, code: 3 }] });
+const dailyOnly = {
+  daily: { time: ["2027-01-03", "2027-01-01", "2027-01-02"],
+    temperature_2m_min: [40, 32, 35], temperature_2m_max: [50, 42, 45], weather_code: [0, 1, 2] },
+  daily_units: { temperature_2m_min: "°F", temperature_2m_max: "°F" },
+};
+const forecast = parseWeatherPayload(dailyOnly);
+assert.equal(forecast.dailyUnit, "°F");
+assert.deepEqual(forecast.days.map((day) => day.date), ["2027-01-01", "2027-01-02", "2027-01-03"]);
+const mixed = parseWeatherPayload({...dailyOnly, current: { temperature_2m: 12 }, current_units: { temperature_2m: "°C" }});
+assert.equal(mixed.unit, "°C");
+assert.equal(mixed.dailyUnit, "°F");
+assert.equal(parseWeatherPayload({...dailyOnly, daily_units: { temperature_2m_max: "°F" }}).dailyUnit, "°F");
+assert.equal(parseWeatherPayload({...dailyOnly, daily_units: { temperature_2m_min: "°F" }}).dailyUnit, "°F");
+const inconsistent = {...dailyOnly, daily_units: { temperature_2m_min: "°C", temperature_2m_max: "°F" }};
+assert.throws(() => parseWeatherPayload(inconsistent), /no usable data/);
+assert.deepEqual(parseWeatherPayload({...inconsistent, current: {temperature_2m: 12}}).days, []);
 let clock = 0;
 const cache = new WidgetRequestCache(2, () => clock);
 let finish!: (value: number) => void;

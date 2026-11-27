@@ -68,6 +68,16 @@ try {
       globalThis.fetch=async()=>Response.json({current:payload.current});
       const noDaily=widget("weather",{city:"",displayMode:"week",forecastEndpoint:"https://weather-current-only.example/"},"missing-daily");
       await until(()=>noDaily.root.textContent.includes("weatherUnavailable"));
+      // Partial responses must not be cached as successful for the missing
+      // display mode. Rerender the same widget/config after provider recovery.
+      globalThis.fetch=async()=>Response.json({...payload,daily_units:{temperature_2m_min:"°F",temperature_2m_max:"°F"},current_units:{temperature_2m:"°C"}});
+      const recoveredCurrent=widget("weather",missing.block.config,missing.block.id);
+      await until(()=>recoveredCurrent.root.querySelector(".weather__current"),"current weather recovers immediately");
+      assert.match(recoveredCurrent.root.textContent,/°C/);
+      const recoveredDaily=widget("weather",noDaily.block.config,noDaily.block.id);
+      await until(()=>recoveredDaily.root.querySelector(".weather__day"),"daily weather recovers immediately");
+      assert.match(recoveredDaily.root.textContent,/°F/);
+      assert.doesNotMatch(recoveredDaily.root.textContent,/°C/);
       globalThis.fetch=async()=>Response.json({results:null});
       const noCity=widget("weather",{city:"Unknown city",geocodingEndpoint:"https://missing-city.example/"},"missing-city");
       await until(()=>noCity.root.textContent.includes("weatherUnavailable"));

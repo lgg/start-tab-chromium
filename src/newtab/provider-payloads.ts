@@ -7,6 +7,7 @@ export interface WeatherResult {
   currentTemperature: number | null;
   currentCode: number | null;
   unit: string;
+  dailyUnit: string;
   days: WeatherDay[];
 }
 
@@ -52,13 +53,20 @@ export function parseWeatherPayload(payload: unknown): WeatherResult {
   const current = record(source.current);
   const units = record(source.current_units);
   const daily = record(source.daily);
+  const dailyUnits = record(source.daily_units);
+  const readUnit = (value: unknown): string => typeof value === "string" ? value.trim().slice(0, 16) : "";
+  const currentUnit = readUnit(units?.temperature_2m);
+  const minUnit = readUnit(dailyUnits?.temperature_2m_min);
+  const maxUnit = readUnit(dailyUnits?.temperature_2m_max);
+  const consistentDailyUnits = !minUnit || !maxUnit || minUnit === maxUnit;
+  const dailyUnit = minUnit || maxUnit || currentUnit || "°C";
   const dates = Array.isArray(daily?.time) ? daily.time : [];
   const mins = Array.isArray(daily?.temperature_2m_min) ? daily.temperature_2m_min : [];
   const maxes = Array.isArray(daily?.temperature_2m_max) ? daily.temperature_2m_max : [];
   const codes = Array.isArray(daily?.weather_code) ? daily.weather_code : [];
   const days: WeatherDay[] = [];
   const seen = new Set<string>();
-  for (const [index, date] of dates.slice(0, 31).entries()) {
+  for (const [index, date] of (consistentDailyUnits ? dates.slice(0, 31) : []).entries()) {
     const min = finite(mins[index]);
     const max = finite(maxes[index]);
     const code = weatherCode(codes[index]);
@@ -68,6 +76,6 @@ export function parseWeatherPayload(payload: unknown): WeatherResult {
   }
   const temperature = finite(current?.temperature_2m);
   if (temperature === null && days.length === 0) throw new Error("Weather response has no usable data");
-  const unit = typeof units?.temperature_2m === "string" ? units.temperature_2m.trim().slice(0, 16) : "";
-  return { currentTemperature: temperature, currentCode: weatherCode(current?.weather_code), unit: unit || "°C", days };
+  days.sort((a, b) => a.date.localeCompare(b.date));
+  return { currentTemperature: temperature, currentCode: weatherCode(current?.weather_code), unit: currentUnit || (consistentDailyUnits ? dailyUnit : "°C"), dailyUnit, days };
 }
