@@ -166,9 +166,8 @@ function trapModalFocus(event: KeyboardEvent, container: HTMLElement): void {
     container.focus();
     return;
   }
-  const first = focusable[0];
-  const last = focusable[focusable.length - 1];
-  if (!first || !last) return;
+  const first = focusable[0]!;
+  const last = focusable[focusable.length - 1]!;
   if (event.shiftKey && document.activeElement === first) {
     event.preventDefault();
     last.focus();

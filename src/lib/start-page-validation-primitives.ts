@@ -195,6 +195,5 @@ export function legacyConfigSource(type: BlockType, root: Record<string, unknown
   const source = root[type];
   if (isRecord(source)) return source;
   if (type === "timer" || type === "stopwatch" || type === "pomodoro") return isRecord(root.timers) ? root.timers : {};
-  if (type === "startPinned") return isRecord(root.startPinned) ? root.startPinned : {};
   return {};
 }

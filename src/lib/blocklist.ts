@@ -346,10 +346,11 @@ interface ParsedBlocklistDynamicRule {
 }
 
 function parseBlocklistDynamicRule(rule: chrome.declarativeNetRequest.Rule): ParsedBlocklistDynamicRule | null {
-  const redirectUrl = rule.action.redirect?.url;
-  if (rule.action.type !== chrome.declarativeNetRequest.RuleActionType.REDIRECT || typeof redirectUrl !== "string") {
+  const redirect = rule.action.redirect;
+  if (rule.action.type !== chrome.declarativeNetRequest.RuleActionType.REDIRECT || typeof redirect?.url !== "string") {
     return null;
   }
+  const redirectUrl = redirect.url;
   let url: URL;
   try {
     url = new URL(redirectUrl);
@@ -360,12 +361,12 @@ function parseBlocklistDynamicRule(rule: chrome.declarativeNetRequest.Rule): Par
   if (url.protocol !== blockedUrl.protocol || url.host !== blockedUrl.host || url.pathname !== blockedUrl.pathname || url.hash) return null;
   const siteValues = url.searchParams.getAll("site");
   if (siteValues.length !== 1) return null;
-  const rawSite = siteValues[0] ?? "";
+  const rawSite = siteValues[0]!;
   const site = normalizeStoredHost(rawSite);
   if (!site || rawSite !== site) return null;
 
   const actionKeys = Object.keys(rule.action).sort();
-  const redirectKeys = rule.action.redirect ? Object.keys(rule.action.redirect).sort() : [];
+  const redirectKeys = Object.keys(redirect).sort();
   if (actionKeys.length !== 2
     || actionKeys[0] !== "redirect"
     || actionKeys[1] !== "type"
@@ -524,8 +525,7 @@ async function replaceDynamicRules(
   sites: string[],
   _existing?: readonly chrome.declarativeNetRequest.Rule[],
 ): Promise<void> {
-  let lastCollision: DynamicRuleCollisionError | undefined;
-  for (let attempt = 0; attempt < MAX_DNR_RECONCILE_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; ; attempt += 1) {
     const allCurrentRules = await chrome.declarativeNetRequest.getDynamicRules();
     const foreignRules = foreignDynamicRules(allCurrentRules);
     const rules = buildRules(sites, new Set(foreignRules.map((rule) => rule.id)));
@@ -534,10 +534,9 @@ async function replaceDynamicRules(
       return;
     } catch (error) {
       if (!(error instanceof DynamicRuleCollisionError)) throw error;
-      lastCollision = error;
+      if (attempt >= MAX_DNR_RECONCILE_ATTEMPTS) throw error;
     }
   }
-  throw lastCollision ?? new Error("Blocklist DNR reconciliation exhausted its retry limit");
 }
 
 export async function syncRulesInCurrentTransaction(): Promise<void> {

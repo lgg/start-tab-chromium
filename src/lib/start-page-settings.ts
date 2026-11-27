@@ -524,8 +524,8 @@ export function settingsWithLayoutPreset(current: StartPageSettings, presetId: L
         order,
       });
     }
-    const [existing] = available.splice(existingIndex, 1);
-    if (!existing) throw new Error(`Failed to reuse preset block: ${spec.type}`);
+    // findIndex has already established that this element exists.
+    const existing = available.splice(existingIndex, 1)[0]!;
     return {
       ...existing,
       column: spec.column,

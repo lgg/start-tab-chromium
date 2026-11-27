@@ -268,7 +268,11 @@ console.log("Backup: future schemas, invalid input, missing recovery, rollback f
     cloneRule(6007,r=>{r.condition.requestDomains=["another.example"]}),
     cloneRule(6008,r=>{r.priority+=1}),
     cloneRule(6009,r=>{r.action.redirect.url+="&extra=1"}),
-    cloneRule(6010,r=>{r.action.redirect.url+="#fragment"})
+    cloneRule(6010,r=>{r.action.redirect.url+="#fragment"}),
+    cloneRule(6011,r=>{delete r.action.redirect}),
+    cloneRule(6012,r=>{r.action.redirect.url=page+"?site=&owner=start-tab-blocklist-v1"}),
+    cloneRule(6013,r=>{r.action.redirect.url=page+"?site=ownership.example&owner=start-tab-blocklist-v1";r.action.redirect.extensionPath="/blocked.html"}),
+    cloneRule(6014,r=>{r.action.redirect.url=page.replace("blocked.html","other.html")+"?site=ownership.example&owner=start-tab-blocklist-v1"})
   ];
   const legacy=cloneRule(4321,r=>{
     r.action.redirect.url=page+"?site=legacy.example";
@@ -303,7 +307,7 @@ console.log("Backup: future schemas, invalid input, missing recovery, rollback f
   };
   try{
     await assert.rejects(blocklist.blockHost("always-contested.example"),/claimed concurrently/);
-    assert.ok(foreignIds.length>1);
+    assert.equal(foreignIds.length,4);
     assert.equal(new Set(foreignIds).size,foreignIds.length);
     assert.deepEqual(await local.get(null),before);
     assert.deepEqual(await blocklist.readDynamicRulesSnapshot(),own);

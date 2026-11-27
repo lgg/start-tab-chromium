@@ -35,7 +35,7 @@ const workflow = read(".github/workflows/ci.yml");
 const selfHosted = read("scripts/validate-self-hosted-ci.mjs");
 
 assert.match(json, /export function canonicalJsonValue/);
-assert.match(json, /left < right \? -1 : left > right \? 1 : 0/,
+assert.match(json, /Object\.keys\(value\)\.sort\(\)/,
   "Canonical JSON keys must use locale-independent code-unit ordering");
 for (const source of [settings, runtime, worker, storagePlan, options]) {
   assert.ok(source.includes("jsonContentEqual"), "Every semantic storage comparison must use canonical JSON content equality");
@@ -140,7 +140,7 @@ for (const source of [sync, backupUrls, blocklist]) {
   assert.doesNotMatch(source, /localeCompare/,
     "Checksums, recovery ordering, and canonical rules must not depend on host locale collation");
 }
-assert.match(sync, /function compareJsonKeys/);
+assert.match(sync, /Object\.keys\(value\)[\s\S]*\.sort\(\)/);
 
 assert.ok(readme.includes("General, Blocks, Themes, Backup and sync, Website blocker, and Statistics and migration"));
 assert.ok(readme.includes("Open Start Tab** action in the page header"));

@@ -681,5 +681,37 @@ try{
       assert.equal(control.calls.length,before);
     }finally{control.chrome.tabs.getCurrent=originalGet;dom.window.close()}
   }
-  console.log("Page initialization: blocked subframe and fatal startup reads");
+
+  // The settings read may finish after a newer gate generation. An old
+  // disabled snapshot must not remount the overlay on an enabled page.
+  {
+    const dom=await installDom("newtab/newtab.html","https://extension.example/newtab.html");
+    const control=installChrome(seed());
+    const get=control.chrome.storage.local.get;
+    const overlay=()=>document.getElementById("startTabGateOverlay");
+    try{
+      await import("../src/newtab/newtab-gate.js?case="+(++serial));
+      await window.startTabGateReady;
+      assert.equal(overlay(),null);
+      const disabled=structuredClone(control.state.startPageSettings);
+      disabled.startTab.enabled=false;
+      let release,changes=0;
+      window.addEventListener("start-tab-gate-change",()=>{changes++});
+      control.chrome.storage.local.get=keys=>{
+        if(keys==="startPageSettings"&&!release)return new Promise(resolve=>{release=()=>resolve({startPageSettings:disabled})});
+        return get(keys);
+      };
+      control.chrome.storage.onChanged.emit({startPageSettings:{newValue:disabled}},"local");
+      await until(()=>release);
+      control.chrome.storage.local.get=get;
+      // A missing root must not prevent gate reconciliation.
+      one(document,"#startPage").remove();
+      control.chrome.storage.onChanged.emit({startPageSettings:{newValue:control.state.startPageSettings}},"local");
+      await until(()=>changes===1);
+      release();await delay(30);
+      assert.equal(overlay(),null);
+      assert.equal(changes,1);
+    }finally{control.chrome.storage.local.get=get;dom.window.close()}
+  }
+  console.log("Page initialization: blocked subframe, stale settings generation and fatal startup reads");
 }finally{restoreFetch()}
