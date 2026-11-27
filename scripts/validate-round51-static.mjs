@@ -44,7 +44,7 @@ assert.match(consumeSource,
 assert.match(gate, /function resolvedGateLocale\(override\)/);
 assert.match(gate, /chrome\.i18n\.getUILanguage\(\)/,
   "Automatic locale mode must resolve the browser UI language for fragment-only gate strings");
-assert.match(gate, /return browserLocale\.startsWith\("ru"\) \? "ru" : "en"/);
+assert.match(gate, /const languages = Array\.isArray\(navigator\.languages\)[\s\S]*const supported = normalize\(language\);[\s\S]*if \(supported\) return supported;[\s\S]*return "en";/);
 assert.match(gate, /const locale = resolvedGateLocale\(items\[LOCALE_OVERRIDE_KEY\]\)/);
 assert.match(gate, /Promise\.all\(catalogFiles\.map/,
   "Every gate locale mode must merge all catalog fragments, not only explicit overrides");
