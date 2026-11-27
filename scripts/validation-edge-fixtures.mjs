@@ -216,7 +216,7 @@ check(normalizeThemeBundle(null).issues.some(x=>x.messageKey==="validationInvali
     check(prepared.settings.updatedAt>base.updatedAt);
     check(Array.isArray(prepared.settings.themes.customThemes));
   }
-  const custom={...base,layout:{...base.layout,blocks:[api.createBlockInstance("note",{id:"preset-empty-task"})]}};
+  const custom={...base,layout:{...base.layout,blocks:[structuredClone(base.layout.blocks.find(block=>block.type==="note"))]}};
   const empty={...custom,layout:{...custom.layout,blocks:[]}};
   const runtime=(await import("../src/lib/start-page-runtime.js")).normalizeRuntimeState(undefined,custom);
   // An explicitly customized block remains protected even when its runtime
