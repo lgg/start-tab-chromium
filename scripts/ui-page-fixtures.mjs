@@ -495,6 +495,40 @@ try {
       assert.equal(control.state.startPageRuntimeState.notes[note.id],undefined);
       assert.equal(control.messages.at(-1).type,"replace-start-page-settings");
     }
+
+    // Transport rejections are not always Error objects. Both the original
+    // failure and a failed canonical refresh must remain visible, and the
+    // pending form values must survive the explicit refresh/retry cycle.
+    {
+      const baseline=control.state.startPageSettings.layout.gap;
+      const changed=baseline===26?27:26;
+      const handler=control.handler,get=local.get;
+      value(option("layoutGap"),changed);
+      try{
+        control.handler=async m=>{
+          if(m.type==="replace-start-page-settings"){
+            local.get=async()=>{throw "storage disconnected"};
+            throw "worker disconnected";
+          }
+          return handler(m);
+        };
+        generalSubmit();
+        await until(()=>busyDone()&&status().textContent.includes("worker disconnected")&&status().textContent.includes("storage disconnected"));
+        assert.equal(status().dataset.error,"true");
+        assert.equal(control.state.startPageSettings.layout.gap,baseline);
+        assert.equal(option("layoutGap").value,String(changed));
+        generalSubmit();
+        await until(()=>busyDone()&&status().textContent.includes("storage disconnected"));
+        local.get=get;control.handler=handler;
+        const count=control.messages.length;
+        generalSubmit();
+        await until(()=>busyDone()&&status().textContent===t.t("optionsRefreshedRetry"));
+        assert.equal(control.messages.length,count);
+        assert.equal(option("layoutGap").value,String(changed));
+        generalSubmit();
+        await until(()=>busyDone()&&control.state.startPageSettings.layout.gap===changed);
+      }finally{local.get=get;control.handler=handler}
+    }
     console.log("Options: invalid form, failed save, committed refresh failure, recovery, preset and locale paths");
     console.log("Options: general draft, save, add/edit/duplicate/disable/clear/delete blocks, create/select/delete theme, blocker and reset");
   } finally { dom.window.close(); }

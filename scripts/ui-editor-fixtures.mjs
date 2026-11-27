@@ -615,5 +615,48 @@ try {
     assert.equal(renders,count);
     ed.cancel();
   }
+
+  // The browser can remove a captured card before the final pointer event.
+  // A late event from that card must not change the draft or leave a lease.
+  {
+    const s=cloneSettings(settings),t=host(),p=host(),g=host();
+    const ed=new LayoutEditor(s,{i18n,toolbarHost:t,paletteHost:p,getRuntime:()=>runtime,requestRender:()=>{},previewBlock:()=>{},onSaved:()=>{},onError:e=>errors.push(e)});
+    ed.enter();
+    const card=document.createElement("article");g.append(card);
+    ed.decorateCard(card,s.layout.blocks[0]);
+    const prior=cloneSettings(ed.settings);
+    pointer(one(card,".card__drag-handle"),"pointerdown",10,10,19);
+    assert.equal(ed.isPointerActive,true);
+    card.remove();
+    pointer(card,"pointermove",100,100,19);
+    assert.deepEqual(ed.settings,prior);
+    pointer(card,"pointerup",100,100,19);
+    assert.equal(ed.isPointerActive,false);
+    assert.equal(ed.hasUnsavedChanges,false);
+    assert.deepEqual(ed.settings,prior);
+    ed.cancel();
+  }
+
+  // Missing collection controls must never silently save a partially
+  // rendered link/provider. The user can remove the bad row and save.
+  for(const type of ["links","search"]){
+    const block=createBlockInstance(type,{id:"missing-controls-"+type});
+    const promise=editBlockInstance(block,i18n);
+    const dialog=one(document,"dialog[open]");
+    const collection=one(dialog,".collection-editor");
+    const bad=one(collection,".collection-row");
+    delete bad.dataset.itemId;
+    for(const input of bad.querySelectorAll("input"))input.remove();
+    submit(one(dialog,"form"));
+    assert.equal(dialog.open,true,type);
+    assert.equal(one(dialog,".form-error").hidden,false,type);
+    bad.remove();
+    submit(one(dialog,"form"));
+    const saved=await promise;
+    assert.ok(saved,type);
+    assert.equal(saved.id,block.id);
+    if(type==="links")assert.equal(saved.config.items.length,block.config.items.length-1);
+    else assert.equal(saved.config.providers.length,block.config.providers.length-1);
+  }
   console.log("Theme editor: 4 background kinds, 7 effects, panel preservation, DOM CSS application, cancel");
 } finally { dom.window.close(); }

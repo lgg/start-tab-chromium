@@ -324,24 +324,9 @@ function buildRules(
   });
 }
 
-function stableRuleValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value
-      .map(stableRuleValue)
-      .sort((left, right) => {
-        const leftJson = JSON.stringify(left);
-        const rightJson = JSON.stringify(right);
-        return leftJson < rightJson ? -1 : leftJson > rightJson ? 1 : 0;
-      });
-  }
-  if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
-      .map(([key, child]) => [key, stableRuleValue(child)]),
-  );
-}
-
+/** Owned rules have one domain, one resource type and exactly one redirect.
+ * Compare that validated shape instead of recursively sorting arbitrary
+ * fields. Chrome may reorder rules or properties without changing them. */
 function dynamicRulesEqual(
   actual: readonly chrome.declarativeNetRequest.Rule[],
   expected: readonly chrome.declarativeNetRequest.Rule[],
@@ -349,7 +334,8 @@ function dynamicRulesEqual(
   if (actual.length !== expected.length) return false;
   const normalized = (rules: readonly chrome.declarativeNetRequest.Rule[]) => [...rules]
     .sort((left, right) => left.id - right.id)
-    .map(stableRuleValue);
+    .map((rule) => [rule.id, rule.priority, rule.action.type, rule.action.redirect!.url,
+      rule.condition.requestDomains, rule.condition.resourceTypes]);
   return JSON.stringify(normalized(actual)) === JSON.stringify(normalized(expected));
 }
 
@@ -519,6 +505,15 @@ async function replaceDynamicRulesExact(
 export async function restoreDynamicRulesSnapshot(
   snapshot: readonly chrome.declarativeNetRequest.Rule[],
 ): Promise<void> {
+  // A rollback may restore only this feature's own validated rules.
+  // Never introduce a foreign rule or duplicate ID through a bad snapshot.
+  const ids = new Set<number>();
+  for (const rule of snapshot) {
+    if (!isBlocklistDynamicRule(rule) || ids.has(rule.id)) {
+      throw new Error("Invalid blocklist dynamic-rule snapshot");
+    }
+    ids.add(rule.id);
+  }
   const current = await readDynamicRulesSnapshot();
   if (dynamicRulesEqual(current, snapshot)) return;
   await replaceDynamicRulesExact(snapshot, current);

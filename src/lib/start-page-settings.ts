@@ -1,5 +1,6 @@
 import { commitStorageMutationWithRevision } from "./data-revision.js";
 import { ownValue } from "./dictionary.js";
+import { normalizeEntityId, uniqueEntityId } from "./start-page-validation-primitives.js";
 import { jsonContentEqual } from "./json-content.js";
 import { withStorageLock } from "./storage-lock.js";
 import { MAX_CUSTOM_THEMES, MAX_START_PAGE_BLOCKS } from "./platform-limits.js";
@@ -328,6 +329,18 @@ function nextGridPosition(settings: StartPageSettings): { column: number; row: n
   };
 }
 
+// IDs are allocated before the write so normalization cannot silently rename
+// an entity after its caller has received or captured the identifier.
+function nextBlockId(settings: StartPageSettings, type: BlockType): string {
+  const used = new Set(settings.layout.blocks.map((block) => block.id));
+  return uniqueEntityId(createBlockId(type), used, used);
+}
+
+function nextThemeId(settings: StartPageSettings): string {
+  const used = new Set([...BUILT_IN_THEMES, ...settings.themes.customThemes].map((theme) => theme.id));
+  return uniqueEntityId(createThemeId(), used, used);
+}
+
 export function createBlockInstanceDraft<T extends BlockType>(
   current: StartPageSettings,
   type: T,
@@ -337,6 +350,7 @@ export function createBlockInstanceDraft<T extends BlockType>(
   }
   if (!canAddBlock(current, type)) throw new Error(`Singleton block already exists: ${type}`);
   return createBlockInstance(type, {
+    id: nextBlockId(current, type),
     ...nextGridPosition(current),
     zone: current.layout.zone,
     order: current.layout.blocks.length,
@@ -346,6 +360,9 @@ export function createBlockInstanceDraft<T extends BlockType>(
 export async function saveNewBlockInstance<T extends BlockType>(
   block: BlockInstanceFor<T>,
 ): Promise<BlockInstanceFor<T>> {
+  if (!isBlockType(block.type) || typeof block.id !== "string" || !block.id || normalizeEntityId(block.id, block.type) !== block.id) {
+    throw new Error("Invalid block instance identity");
+  }
   const result = await updateStartPageSettings((current) => {
     if (current.layout.blocks.length >= MAX_START_PAGE_BLOCKS) {
       throw new Error(`Start Tab supports at most ${MAX_START_PAGE_BLOCKS} block instances`);
@@ -423,7 +440,7 @@ export async function duplicateBlockInstance(id: string, title?: string, expecte
     const now = Date.now();
     const duplicate: BlockInstance = {
       ...cloneBlock(source),
-      id: createBlockId(source.type),
+      id: nextBlockId(current, source.type),
       title: title?.trim() || source.title,
       column: Math.min(current.layout.columns, source.column + 1),
       row: source.row + 1,
@@ -574,7 +591,7 @@ export function createCustomThemeDraft(
   const now = Date.now();
   return {
     ...cloneTheme(source),
-    id: createThemeId(),
+    id: nextThemeId(settings),
     name: name.trim() || source.name,
     builtIn: false,
     createdAt: now,
@@ -587,11 +604,11 @@ export async function saveNewCustomTheme(theme: StartPageTheme): Promise<StartPa
   const result = await updateStartPageSettings((current) => {
     const now = Date.now();
     const fallback = cloneTheme(getTheme(current));
-    fallback.id = theme.id;
+    fallback.id = normalizeEntityId(theme.id, "custom-theme");
     fallback.builtIn = false;
     const normalized = normalizeTheme({ ...theme, builtIn: false, updatedAt: now }, fallback);
     normalized.id = getBuiltInTheme(normalized.id) || current.themes.customThemes.some((item) => item.id === normalized.id)
-      ? createThemeId()
+      ? nextThemeId(current)
       : normalized.id;
     normalized.builtIn = false;
     normalized.createdAt = now;
@@ -623,10 +640,10 @@ export async function updateCustomTheme(theme: StartPageTheme, expectedUpdatedAt
       }
       const now = Date.now();
       const fallback = cloneTheme(getTheme(current));
-      fallback.id = theme.id;
+      fallback.id = normalizeEntityId(theme.id, "custom-theme");
       fallback.builtIn = false;
       const normalized = normalizeTheme({ ...theme, builtIn: false, updatedAt: now }, fallback);
-      normalized.id = current.themes.customThemes.some((item) => item.id === normalized.id) ? createThemeId() : normalized.id;
+      normalized.id = getBuiltInTheme(normalized.id) || current.themes.customThemes.some((item) => item.id === normalized.id) ? nextThemeId(current) : normalized.id;
       normalized.builtIn = false;
       normalized.createdAt = now;
       normalized.updatedAt = now;
@@ -671,7 +688,7 @@ export async function duplicateTheme(themeId: string, name?: string, expectedUpd
     const now = Date.now();
     const duplicate: StartPageTheme = {
       ...cloneTheme(source),
-      id: createThemeId(),
+      id: nextThemeId(current),
       name: name?.trim() || source.name,
       builtIn: false,
       createdAt: now,
@@ -726,7 +743,7 @@ export async function importCustomTheme(value: unknown): Promise<{ theme: StartP
     const now = Date.now();
     const theme: StartPageTheme = {
       ...normalizedBundle.value.theme,
-      id: createThemeId(),
+      id: nextThemeId(current),
       builtIn: false,
       createdAt: now,
       updatedAt: now,

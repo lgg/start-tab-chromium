@@ -146,6 +146,56 @@ try{
       assert.equal(redirects[0],"https://blocked.example/");
     }finally{globalThis.location=actual}
   });
+
+  // Noncanonical numeric IP aliases must not arm the interstitial.
+  for(const site of ["127.1","0x7f000001","%E2%98%83.example"]){
+    await blocked("?site="+site,async control=>{
+      assert.equal(one(document,"#unblock").disabled,true);
+      assert.equal(control.messages.length,0);
+    });
+  }
+  // The final statistics acknowledgement may arrive after pagehide. Do not
+  // navigate a discarded interstitial even though its unblock has committed.
+  await blocked("?site=blocked.example",async(control,advance)=>{
+    const actual=globalThis.location,redirects=[];
+    globalThis.location={search:actual.search,replace:url=>redirects.push(url)};
+    let release;
+    try{
+      control.handler=async m=>{
+        if(m.type==="blocked-original-url")return {ok:true,blockedUrl:"https://blocked.example/path"};
+        if(m.type==="unblock"){control.state.blockedSites=[];return {ok:true,changed:true}}
+        return new Promise(resolve=>{release=resolve});
+      };
+      one(document,"#unblock").click();advance(10001);
+      await until(()=>release,"pending statistics acknowledgement");
+      window.dispatchEvent(new window.Event("pagehide"));
+      release({ok:true});
+      await delay(30);
+      assert.deepEqual(redirects,[]);
+      assert.deepEqual(control.state.blockedSites,[]);
+      assert.equal(control.messages.filter(m=>m.type==="record-unblock").length,1);
+    }finally{globalThis.location=actual}
+  });
+  // Initial reads may finish after the page has already been disposed.
+  // Late success and failure must both leave the original DOM untouched.
+  for(const outcome of ["success","failure"]){
+    const dom=await installDom("blocked/blocked.html","https://extension.example/blocked.html?site=blocked.example");
+    const control=installChrome(seed());
+    const get=control.chrome.storage.local.get;
+    let release;
+    control.chrome.storage.local.get=keys=>keys==="localeOverride"?new Promise((resolve,reject)=>{
+      release=async()=>{if(outcome==="failure")reject(Error("locale read interrupted"));else resolve(await get(keys))};
+    }):get(keys);
+    try{
+      const initial=document.body.innerHTML;
+      await import("../src/blocked/blocked.ts?disposed="+(++serial));
+      await until(()=>release,"pending locale read");
+      window.dispatchEvent(new window.Event("pagehide"));
+      await release();await delay(30);
+      assert.equal(document.body.innerHTML,initial);
+      assert.equal(control.messages.length,0);
+    }finally{dom.window.close()}
+  }
   console.log("Blocked page: malformed URL, stale asynchronous pagehide, already removed, fallback and startup failure");
 
   async function popup(run,prepare=()=>{}){
