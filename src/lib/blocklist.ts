@@ -371,9 +371,14 @@ function parseBlocklistDynamicRule(rule: chrome.declarativeNetRequest.Rule): Par
   const normalizedSite = normalizeStoredHost(rawSite);
   // Keep recognizing exact previously owned literal rules even if a newer
   // validator rejects that hostname. Otherwise Clear could strand a rule.
-  const legacyInvalidSite = !normalizedSite && rawSite === normalizeHost(rawSite)
+  let legacyInvalidSite = false;
+  if (!normalizedSite && rawSite === normalizeHost(rawSite)
     && rawSite.length > 0 && !rawSite.startsWith(".") && !rawSite.endsWith(".")
-    && !/[\s/:]/.test(rawSite);
+    && !/[\s/:]/.test(rawSite)) {
+    try {
+      legacyInvalidSite = new URL(`https://${rawSite}/`).hostname === rawSite;
+    } catch { /* Not a literal hostname recognized by the old normalizer. */ }
+  }
   const site = normalizedSite ?? (legacyInvalidSite ? rawSite : null);
   if (!site) return null;
   // Older normalization removed only one www label per pass. Explicitly
