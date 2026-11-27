@@ -202,5 +202,116 @@ try{
       window.dispatchEvent(new window.Event("pagehide"));
     }finally{dom.window.close()}
   }
+
+  // During the final startup locale reconciliation, pagehide may arrive
+  // before a first render. Do not mount the old page after that read settles.
+  {
+    const dom=await installDom("newtab/newtab.html");
+    const s=structuredClone(settings);
+    s.layout.blocks=s.layout.blocks.filter(b=>b.type==="note");
+    const control=installChrome({...seed(),startPageSettings:s,startPageRuntimeState:normalizeRuntimeState(undefined,s),startPageOnboarding:{onboarded:true}});
+    const store=control.chrome.storage.local,get=store.get;
+    let localeReads=0,release,reloads=0;
+    const actualLocation=globalThis.location;
+    try{
+      globalThis.location={reload:()=>{reloads++}};
+      store.get=keys=>{
+        if(keys==="localeOverride"&&++localeReads===2)return new Promise(resolve=>{release=async()=>resolve(await get(keys))});
+        return get(keys);
+      };
+      await import("../src/newtab/newtab.ts?init-dispose="+(++serial));
+      await until(()=>release,"final startup locale read");
+      window.dispatchEvent(new window.Event("pagehide"));
+      await release();
+      await delay(40);
+      assert.equal(document.querySelector("#grid [data-block-id]"),null);
+      assert.equal(document.getElementById("onboarding"),null);
+      assert.equal(reloads,0);
+    }finally{store.get=get;globalThis.location=actualLocation;dom.window.close()}
+  }
+
+  // Two real gate events enqueue independent snapshot refreshes. Once
+  // the page is disposed, the second queued refresh must never read storage.
+  {
+    const dom=await installDom("newtab/newtab.html");
+    const s=structuredClone(settings);
+    s.layout.blocks=s.layout.blocks.filter(b=>b.type==="note");
+    const control=installChrome({...seed(),startPageSettings:s,startPageRuntimeState:normalizeRuntimeState(undefined,s),startPageOnboarding:{onboarded:true}});
+    const store=control.chrome.storage.local,get=store.get;
+    let release,reads=0;
+    try{
+      await import("../src/newtab/newtab.ts?queued-dispose="+(++serial));
+      await until(()=>document.querySelector("#grid [data-block-id]"));
+      const markup=one(document,"#grid").innerHTML;
+      store.get=keys=>{
+        if(Array.isArray(keys)&&keys.includes("startPageSettings")&&keys.includes("startPageRuntimeState")){
+          reads++;
+          if(reads===1)return new Promise(resolve=>{release=async()=>resolve(await get(keys))});
+        }
+        return get(keys);
+      };
+      window.dispatchEvent(new window.Event("start-tab-gate-change"));
+      await until(()=>release,"first gate refresh");
+      window.dispatchEvent(new window.Event("start-tab-gate-change"));
+      window.dispatchEvent(new window.Event("pagehide"));
+      await release();
+      await delay(50);
+      assert.equal(reads,1);
+      assert.equal(one(document,"#grid").innerHTML,markup);
+      assert.equal(control.messages.length,0);
+    }finally{store.get=get;dom.window.close()}
+  }
+
+  // Web Locks releases the exclusive lease when its callback settles;
+  // delivery of the request's result is asynchronous. Model that boundary,
+  // not an out-of-order storage write, and let a new Options generation
+  // finish while the prior Statistics result is still in transit.
+  for(const oldFailure of [false,true]){
+    const dom=await installDom("options/options.html");
+    const control=installChrome(seed());
+    const store=control.chrome.storage.local,get=store.get;
+    const tails=new Map();
+    let active=null,firstStats=true,release;
+    Object.defineProperty(navigator,"locks",{configurable:true,value:{
+      request(name,options,callback){
+        const request={hold:false};
+        const prev=tails.get(name)??Promise.resolve();
+        const execution=prev.catch(()=>{}).then(async()=>{
+          active=request;
+          try{return await callback({name,mode:options.mode})}
+          finally{active=null}
+        });
+        tails.set(name,execution.then(()=>{},()=>{}));
+        return execution.then(value=>request.hold
+          ? new Promise((resolve,reject)=>{release=()=>oldFailure?reject(Error("obsolete statistics delivery")):resolve(value)})
+          : value);
+      }
+    }});
+    store.get=async keys=>{
+      if(keys==="focusStats"&&firstStats){firstStats=false;assert.ok(active);active.hold=true}
+      return get(keys);
+    };
+    try{
+      const t=await (await import("../src/lib/i18n.js")).loadI18n();
+      await import("../src/options/options.ts?stats-delivery="+(++serial));
+      await until(()=>release,"old statistics delivery");
+      const clear=[...one(document,"#blocker").querySelectorAll("button")].find(b=>b.textContent===t.t("clearBlocklist"));
+      assert.ok(clear);
+      control.handler=async m=>{
+        assert.equal(m.type,"clear");
+        control.state.blockedSites=[];
+        return {ok:true};
+      };
+      clear.click();
+      await until(()=>document.querySelector("#statistics .stats-grid")&&document.body.getAttribute("aria-busy")!=="true","new statistics generation");
+      const latest=one(document,"#statistics");
+      const status=one(document,"#status").textContent;
+      release();await delay(50);
+      assert.equal(document.querySelectorAll("#statistics").length,1);
+      assert.equal(one(document,"#statistics"),latest);
+      assert.equal(one(document,"#status").textContent,status);
+      assert.equal(control.messages.length,1);
+    }finally{store.get=get;delete navigator.locks;dom.window.close()}
+  }
   console.log("Residual page races: shared popup lease, initialization failures, blocked page disposal and external onboarding completion");
 }finally{globalThis.fetch=catalog;restoreFetch()}
