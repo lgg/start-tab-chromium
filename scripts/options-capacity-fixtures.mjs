@@ -35,3 +35,31 @@ try{
   assert.equal(control.messages.length,0);
   console.log("Options capacity: all supported blocks/themes render, create/duplicate/import controls disabled and Google integration enabled");
 }finally{restoreFetch();dom.window.close()}
+
+
+// Statistics errors should render a localized fallback without disabling
+// the rest of Options, including when the page was opened at #statistics.
+const recoveryFetch=installFetch();
+const recoveryDom=await installDom("options/options.html","https://extension.example/options.html#statistics");
+const fresh=createDefaultStartPageSettings(100);
+const recovery=installChrome({startPageSettings:fresh,startPageRuntimeState:normalizeRuntimeState(undefined,fresh),localeOverride:"en",blockedSites:[]});
+let scrolls=0;
+window.HTMLElement.prototype.scrollIntoView=function(opts){if(this.id==="statistics"){assert.equal(opts.block,"start");scrolls++}};
+const get=recovery.chrome.storage.local.get;
+recovery.chrome.storage.local.get=async keys=>{if(keys==="focusStats")throw "statistics bridge unavailable";return get(keys)};
+try{
+  const t=await loadI18n();
+  await import("../src/options/options.ts?case=statistics-recovery");
+  await until(()=>document.querySelector("#statistics .empty-state"));
+  assert.equal(one(document,"#statistics .empty-state").textContent,t.t("statisticsUnavailable"));
+  assert.equal(one(document,"#status").textContent,"statistics bridge unavailable");
+  assert.equal(scrolls,1);
+  assert.equal(button(one(document,"#backup"),t.t("syncNow")).disabled,false);
+  recovery.chrome.storage.local.get=get;
+  const {START_PAGE_MIGRATION_REPORT_KEY}=await import("../src/lib/start-page-settings.js");
+  await recovery.chrome.storage.local.set({[START_PAGE_MIGRATION_REPORT_KEY]:{fromVersion:1,toVersion:3,migratedBlocks:4,skippedBlocks:2,issues:[]}});
+  button(one(document,"#backup"),t.t("syncNow")).click();
+  await until(()=>document.querySelector("#statistics .stats-grid"));
+  assert.ok(one(document,"#statistics").textContent.includes(t.t("migrationSummary",{from:1,to:3,blocks:4,skipped:2})));
+  assert.equal(scrolls,2);
+}finally{recovery.chrome.storage.local.get=get;recoveryFetch();recoveryDom.window.close()}
