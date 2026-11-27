@@ -295,3 +295,23 @@ console.log("Validation matrix:",checks,"assertions — message boundaries, all 
   same(repaired.background,valid.background);
 }
 console.log("Round 158: validation assertions", checks);
+
+
+// Canonicalization must be byte-stable for distinct UTF-16 keys, integer-like
+// keys and data properties whose names also exist on Object.prototype.
+{
+  const {canonicalJsonValue,jsonContentEqual}=await import("../src/lib/json-content.js");
+  const keys=["\uffff","😀","a","A","__proto__","constructor","10","2","01","é","e\u0301"];
+  const original=Object.fromEntries(keys.map((key,index)=>[key,{index,nested:[null,{z:2,a:1}]}]));
+  const reversed=Object.fromEntries(Object.entries(original).reverse());
+  same(JSON.stringify(canonicalJsonValue(original)),JSON.stringify(canonicalJsonValue(reversed)));
+  check(jsonContentEqual(original,reversed));
+  check(Object.hasOwn(canonicalJsonValue(original),"__proto__"));
+  check(!jsonContentEqual(original,{...original,A:{index:-1}}));
+  const {formatDateParts}=await import("../src/newtab/date-pattern.js");
+  same(formatDateParts("dddd YYYY MMMM DD HH:mm:ss / literal",{
+    weekday:"YYYY",year:"2026",month:"DD",day:"27",hour:"01",minute:"02",second:"03"
+  }),"YYYY 2026 DD 27 01:02:03 / literal");
+  same(formatDateParts("YYYYYYYY-HH-mm-ss",{}),"---");
+}
+console.log("Round 159: canonical UTF-16 ordering and exact date-token substitution",checks);
