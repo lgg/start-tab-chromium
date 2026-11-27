@@ -1,6 +1,6 @@
 /** Format only tokens in the original pattern, never in localized output. */
 export function formatDateParts(pattern: string, parts: Readonly<Record<string, string>>): string {
-  const replacements: Record<string, string> = {
+  const replacements = {
     dddd: parts.weekday ?? "",
     YYYY: parts.year ?? "",
     MMMM: parts.month ?? "",
@@ -9,7 +9,7 @@ export function formatDateParts(pattern: string, parts: Readonly<Record<string, 
     mm: parts.minute ?? "",
     ss: parts.second ?? "",
   };
-  return pattern.replace(/dddd|YYYY|MMMM|DD|HH|mm|ss/g, (token) => replacements[token] ?? token);
+  return pattern.replace(/dddd|YYYY|MMMM|DD|HH|mm|ss/g, (token) => replacements[token as keyof typeof replacements]);
 }
 
 /** One formatter per mounted widget; a single parts extraction per tick. */
