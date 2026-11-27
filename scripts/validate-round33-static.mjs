@@ -50,7 +50,8 @@ assert.doesNotMatch(options, /locale\.value !== "auto"\) location\.reload/);
 assert.match(editor, /function providersEditor\([\s\S]*onChange: \(providers: SearchProvider\[\]\) => void/,
   "The search provider collection must publish live changes");
 assert.match(editor, /for \(const input of \[id, title, url\]\) input\.addEventListener\("input", notify\)/);
-assert.match(editor, /remove\.addEventListener\("click", \(\) => \{ row\.remove\(\); notify\(\); \}\)/);
+assert.match(editor, /remove\.addEventListener\("click", \(\) => \{\s*row\.remove\(\);\s*notify\(\);\s*root\.dispatchEvent\(new Event\("change", \{ bubbles: true \}\)\);\s*\}\)/,
+  "Removing a search provider must update the selection and mark the form dirty");
 assert.match(editor, /provider\.replaceChildren\([\s\S]*provider\.selectedIndex = providerSelectionIndexAfterEdit/,
   "The default-provider select must remain valid while providers are edited");
 

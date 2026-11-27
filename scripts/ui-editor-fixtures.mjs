@@ -240,6 +240,46 @@ try {
     assert.notEqual(original.title, result.title);
     if (["links", "startPinned"].includes(descriptor.type)) assert.ok(result.config.items.some(i => i.url === "https://new.example/"));
   }
+  // Structural collection edits alone must trigger the discard guard.
+  // No text input or checkbox events precede these mouse clicks.
+  for (const type of ["links", "startPinned", "search"]) {
+    const original = createBlockInstance(type);
+    if (type !== "search") {
+      original.config.items = [{id:"existing-link",icon:"E",title:"Existing",url:"https://existing.example/"}];
+    }
+    const addLabel = type === "search" ? "addSearchProvider" : "addLink";
+    const removeLabel = type === "search" ? "removeSearchProvider" : "removeLink";
+    for (const action of ["add", "remove"]) {
+      const pending = editBlockInstance(original, i18n);
+      const dialog = one(document, "dialog[open]");
+      const rows = () => [...dialog.querySelectorAll(".collection-row")];
+      const initialCount = rows().length;
+      let confirmations = 0;
+      window.confirm = () => { confirmations++; return false; };
+      if (action === "add") button(dialog, addLabel).click();
+      else button(rows()[0], removeLabel).click();
+      assert.equal(rows().length, initialCount + (action === "add" ? 1 : -1));
+      button(dialog, "cancel").click();
+      assert.equal(confirmations, 1, type + " " + action);
+      assert.equal(dialog.isConnected, true);
+      const escape = new window.Event("cancel", {cancelable:true});
+      dialog.dispatchEvent(escape);
+      assert.equal(escape.defaultPrevented, true);
+      assert.equal(confirmations, 2);
+      window.confirm = () => { confirmations++; return true; };
+      button(dialog, "close").click();
+      assert.equal(await pending, null);
+      assert.equal(confirmations, 3);
+    }
+    const untouched = editBlockInstance(original, i18n);
+    const untouchedDialog = one(document,"dialog[open]");
+    window.confirm = () => { throw Error("clean form must not ask for confirmation"); };
+    button(untouchedDialog,"cancel").click();
+    assert.equal(await untouched,null);
+  }
+  window.confirm=()=>true;
+  console.log("Deep audit: collection add/remove dirty state, cancel and Escape protection");
+
   const pending = editBlockInstance(createBlockInstance("timer"), i18n);
   let d = one(document, "dialog[open]");
   value(field(d, "timerSeconds"), "0");
