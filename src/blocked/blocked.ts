@@ -1,7 +1,7 @@
 import { blockedSiteForUrl, hostFromUrl, normalizeHost } from "../lib/blocklist.js";
 import { loadI18n, type I18n } from "../lib/i18n.js";
 import { sendMessage } from "../lib/messages.js";
-import { remainingCountdownSeconds } from "./countdown.js";
+import { remainingCountdownSeconds, countdownSecondUnitKey } from "./countdown.js";
 
 const WAIT_SECONDS = 10;
 const messageEl = document.getElementById("message") as HTMLHeadingElement;
@@ -16,6 +16,7 @@ const errorEl = document.getElementById("unblockError") as HTMLParagraphElement;
 const host = readBlockedHost();
 let interval: number | undefined;
 let countdownActive = false;
+let countdownGeneration = 0;
 let pageActive = true;
 let i18n: I18n;
 
@@ -31,16 +32,6 @@ async function blockedHostIsActive(): Promise<boolean> {
   return Boolean(host) && await blockedSiteForUrl(`https://${host}/`) === host;
 }
 
-function unit(value: number): string {
-  if (i18n.locale !== "ru") return i18n.t(value === 1 ? "secondOne" : "secondMany");
-
-  const mod10 = value % 10;
-  const mod100 = value % 100;
-  if (mod10 === 1 && mod100 !== 11) return i18n.t("secondOne");
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return i18n.t("secondFew");
-  return i18n.t("secondMany");
-}
-
 function renderMessage(): void {
   const phrases = i18n.list("motivationPhrases");
   messageEl.textContent = phrases[Math.floor(Math.random() * phrases.length)] ?? i18n.t("blockedUnknownSiteMessage");
@@ -50,6 +41,7 @@ function renderMessage(): void {
 }
 
 function clearCountdownTimer(): void {
+  countdownGeneration += 1;
   window.clearInterval(interval);
   interval = undefined;
 }
@@ -63,15 +55,16 @@ function startCountdown(): void {
   cancelEl.disabled = false;
   actionsEl.hidden = true;
   countdownEl.hidden = false;
+  const generation = ++countdownGeneration;
   const deadline = performance.now() + WAIT_SECONDS * 1000;
 
   const tick = (): void => {
-    if (!pageActive || !countdownActive) return;
+    if (!pageActive || !countdownActive || generation !== countdownGeneration) return;
     const remaining = remainingCountdownSeconds(deadline, performance.now());
     countdownTextEl.textContent = i18n.t("unblockingCountdown", {
       host,
       remaining,
-      unit: unit(remaining),
+      unit: i18n.t(countdownSecondUnitKey(i18n.locale, remaining)),
     });
     if (remaining <= 0) {
       clearCountdownTimer();

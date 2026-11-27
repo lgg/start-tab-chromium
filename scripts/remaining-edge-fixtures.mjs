@@ -513,5 +513,33 @@ console.log("Navigation: failed session lookup, DNR repair, native grant cleanup
       assert.deepEqual((await dnr.getDynamicRules()).find(rule=>rule.id===foreign.id),foreign);
     }finally{globalThis.chrome=priorChrome}
   }
+  // A tab can be closed while eligibility is being checked, and a newer
+  // observation can arrive synchronously from the platform's URL getter.
+  {
+    const {NewTabRedirectGuard}=await import("../src/lib/tab-navigation-change.js");
+    let redirects=0,release;
+    const guard=new NewTabRedirectGuard({
+      isEligible:url=>url==="chrome://newtab/",
+      getTab:()=>new Promise(resolve=>{release=resolve}),
+      shouldBypass:async()=>false,
+      isEnabled:async()=>true,
+      redirect:async()=>{redirects++}
+    });
+    const first=guard.observe(7,"chrome://newtab/");
+    assert.ok(release);
+    guard.cancel(7);
+    release({url:"chrome://newtab/"});
+    await first;
+    assert.equal(redirects,0);
+    const second=guard.observe(7,"chrome://newtab/");
+    const releaseFirst=release;
+    releaseFirst({url:"chrome://newtab/"});
+    await Promise.resolve();await Promise.resolve();await Promise.resolve();await Promise.resolve();
+    // Cancel any still pending final inspection before allowing it to finish.
+    guard.cancel(7);
+    release({url:"chrome://newtab/"});
+    await second;
+    assert.equal(redirects,0);
+  }
 console.log("Residual helpers: effect aggregation, canonical data, split-view markers, tab lifecycle and draft acknowledgement");
 }

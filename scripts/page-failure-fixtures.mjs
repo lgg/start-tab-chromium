@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { installDom, installChrome, installFetch, one, until, delay, value } from "./ui-fixture-dom.mjs";
 import { loadI18n } from "../src/lib/i18n.js";
+import { countdownSecondUnitKey } from "../src/blocked/countdown.js";
 import { createDefaultStartPageSettings } from "../src/lib/start-page-settings.js";
 let serial=0;
 const restoreFetch=installFetch();
@@ -26,6 +27,52 @@ async function blocked(query,run,options={}){
   }finally{globalThis.fetch=catalog;Object.defineProperty(globalThis,"performance",{configurable:true,writable:true,value:originalPerformance});dom.window.close()}
 }
 try{
+  for(const seconds of [0,1,2,4,5,10,11,12,13,14,15,21,22,24,25,101,111,112,114,122]){
+    const ru=seconds%10===1&&seconds%100!==11?"secondOne":([2,3,4].includes(seconds%10)&&![12,13,14].includes(seconds%100))?"secondFew":"secondMany";
+    assert.equal(countdownSecondUnitKey("ru",seconds),ru);
+    assert.equal(countdownSecondUnitKey("en",seconds),seconds===1?"secondOne":"secondMany");
+  }
+  // A queued callback of a cancelled countdown must not shorten its successor;
+  // callbacks queued at expiry must not issue a second unblock transaction.
+  await blocked("?site=blocked.example",async(control,advance,getTick)=>{
+    let release;
+    const unblock=one(document,"#unblock"),cancel=one(document,"#cancel");
+    control.handler=m=>m.type==="blocked-original-url"?new Promise(resolve=>{release=resolve}):Promise.resolve({ok:true,changed:true});
+    unblock.click();
+    const stale=getTick();
+    advance(9000);
+    cancel.click();
+    unblock.click();
+    const live=getTick(),initial=one(document,"#countdownText").textContent;
+    stale();
+    assert.equal(one(document,"#countdownText").textContent,initial);
+    assert.equal(getTick(),live);
+    advance(10001);
+    await until(()=>release);
+    live();stale();
+    cancel.dispatchEvent(new window.MouseEvent("click",{bubbles:true}));
+    assert.equal(cancel.disabled,true);
+    assert.equal(control.messages.length,1);
+    window.dispatchEvent(new window.Event("pagehide"));
+    cancel.dispatchEvent(new window.MouseEvent("click",{bubbles:true}));
+    release({ok:true,blockedUrl:"https://blocked.example/"});
+    await delay(20);
+    assert.deepEqual(control.messages.map(m=>m.type),["blocked-original-url"]);
+  });
+  // A valid catalog may contain an intentionally empty motivation list.
+  await blocked("?site=blocked.example",async control=>{
+    const t=await loadI18n();
+    assert.equal(one(document,"#message").textContent,t.t("blockedUnknownSiteMessage"));
+    assert.equal(one(document,"#unblock").disabled,false);
+  },{prepare:async()=>{
+    globalThis.fetch=async url=>{
+      const response=await catalog(url);
+      if(!response.ok)return response;
+      const data=await response.json();
+      if(data.motivationPhrases)data.motivationPhrases={message:""};
+      return Response.json(data);
+    };
+  }});
   for(const query of ["","?site=","?site=BLOCKED.example","?site=blocked.example&site=other.example","?site=invalid%2Fhost"]){
     await blocked(query,async control=>{
       assert.equal(one(document,"#unblock").disabled,true);

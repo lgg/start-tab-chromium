@@ -15,16 +15,17 @@ export function normalizeBackupLastBlockedUrls(
   mode: BackupCollectionMode,
 ): Record<string, string> {
   const normalized = normalizeLastBlockedUrls(value);
-  const entries = Object.entries(normalized).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
+  const entries = Object.keys(normalized).sort();
   if (mode === "strict-import" && entries.length > MAX_BLOCKED_SITES) {
     throw new Error(`Start Tab backup contains more than ${MAX_BLOCKED_SITES} last blocked URLs`);
   }
   const allowed = new Set(blockedSites);
   const bounded = createDictionary<string>();
-  for (const [host, url] of entries) {
+  let count = 0;
+  for (const host of entries) {
     if (!allowed.has(host)) continue;
-    bounded[host] = url;
-    if (Object.keys(bounded).length >= MAX_BLOCKED_SITES) break;
+    bounded[host] = normalized[host]!;
+    if (++count >= MAX_BLOCKED_SITES) break;
   }
   return bounded;
 }

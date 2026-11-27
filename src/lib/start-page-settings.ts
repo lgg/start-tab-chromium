@@ -185,7 +185,6 @@ async function readRawSettings(): Promise<unknown> {
 async function persistSettingsInTransaction(
   settings: StartPageSettings,
   report?: MigrationReport,
-  clearMigrationReport = false,
 ): Promise<void> {
   await commitStorageMutationWithRevision(
     [START_PAGE_SETTINGS_KEY, START_PAGE_MIGRATION_REPORT_KEY],
@@ -193,7 +192,6 @@ async function persistSettingsInTransaction(
       const payload: Record<string, unknown> = { [START_PAGE_SETTINGS_KEY]: settings };
       if (report) payload[START_PAGE_MIGRATION_REPORT_KEY] = report;
       await chrome.storage.local.set(payload);
-      if (clearMigrationReport) await chrome.storage.local.remove(START_PAGE_MIGRATION_REPORT_KEY);
     },
     settings.updatedAt || Date.now(),
   );

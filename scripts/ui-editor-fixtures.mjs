@@ -658,5 +658,26 @@ try {
     if(type==="links")assert.equal(saved.config.items.length,block.config.items.length-1);
     else assert.equal(saved.config.providers.length,block.config.providers.length-1);
   }
+  // An invalid effect selection must retain the previous panel and its
+  // unsaved input. Switching to another valid panel and back stays lossless.
+  {
+    const source={...theme,background:{kind:"effect",baseColor:"#08111f",config:{effect:"aurora",speed:1,intensity:0.65,blur:72}}};
+    const pending=editTheme(source,i18n);
+    const dialog=one(document,"dialog[open]");
+    const effect=field(dialog,"backgroundEffect");
+    value(field(dialog,"effectBlur"),37);
+    value(effect,"unknown-effect","change");
+    assert.equal(effect.value,"aurora");
+    assert.equal(field(dialog,"effectBlur").value,"37");
+    value(effect,"matrix","change");
+    value(field(dialog,"effectDensity"),0.73);
+    value(effect,"","change");
+    assert.equal(effect.value,"matrix");
+    assert.equal(field(dialog,"effectDensity").value,"0.73");
+    value(effect,"aurora","change");
+    assert.equal(field(dialog,"effectBlur").value,"37");
+    submit(one(dialog,"form"));
+    assert.equal((await pending).background.config.blur,37);
+  }
   console.log("Theme editor: 4 background kinds, 7 effects, panel preservation, DOM CSS application, cancel");
 } finally { dom.window.close(); }
