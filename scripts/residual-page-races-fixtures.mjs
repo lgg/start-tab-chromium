@@ -338,5 +338,44 @@ try{
       window.dispatchEvent(new window.Event("pagehide"));
     }finally{dom.window.close()}
   }
+
+  // pagehide may occur before init has registered its ordinary listeners,
+  // including while the locale catalog or initial settings snapshot waits.
+  for(const stage of ["locale","snapshot"]){
+    const dom=await installDom("newtab/newtab.html");
+    const s=structuredClone(settings);
+    s.layout.blocks=s.layout.blocks.filter(b=>b.type==="note");
+    const control=installChrome({...seed(),startPageSettings:s,startPageRuntimeState:normalizeRuntimeState(undefined,s),startPageOnboarding:{onboarded:true}});
+    const store=control.chrome.storage.local,get=store.get,loc=globalThis.location;
+    let release,reads=0,reloads=0,opened=0;
+    try{
+      globalThis.location={reload:()=>{reloads++}};
+      control.chrome.runtime.openOptionsPage=async()=>{opened++};
+      store.get=keys=>{
+        reads++;
+        const match=stage==="locale"?keys==="localeOverride":Array.isArray(keys)&&keys.includes("startPageSettings")&&keys.includes("startPageRuntimeState");
+        if(match&&!release)return new Promise(resolve=>{release=async()=>resolve(await get(keys))});
+        return get(keys);
+      };
+      await import("../src/newtab/newtab.ts?early-pagehide="+(++serial));
+      await until(()=>release,"early "+stage);
+      window.dispatchEvent(new window.Event("pagehide"));
+      await release();
+      await delay(50);
+      assert.equal(document.querySelector("#grid [data-block-id]"),null,stage);
+      assert.equal(document.getElementById("onboarding"),null,stage);
+      const before=reads;
+      one(document,"#settings").click();
+      control.chrome.storage.onChanged.emit({startPageSettings:{newValue:s}},"local");
+      await delay(30);
+      assert.equal(reads,before,stage);
+      assert.equal(opened,0);
+      assert.equal(control.messages.length,0);
+      const shown=new window.Event("pageshow");
+      Object.defineProperty(shown,"persisted",{value:true});
+      window.dispatchEvent(shown);
+      assert.equal(reloads,1);
+    }finally{store.get=get;globalThis.location=loc;dom.window.close()}
+  }
   console.log("Residual page races: shared popup lease, initialization failures, blocked page disposal and external onboarding completion");
 }finally{globalThis.fetch=catalog;restoreFetch()}

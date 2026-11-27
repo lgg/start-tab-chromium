@@ -794,5 +794,76 @@ try{
       assert.equal(one(document,"#startPage").hasAttribute("inert"),false);
     }finally{dom.window.close()}
   }
+
+  // A failed gate refresh used to invalidate the visible generation forever.
+  // Provide a usable recovery screen with a retry, native tab and Settings.
+  {
+    const dom=await installDom("newtab/newtab.html","https://extension.example/newtab.html");
+    const control=installChrome(seed());
+    control.state.startPageSettings.startTab.enabled=false;
+    const store=control.chrome.storage.local,get=store.get;
+    const overlay=()=>document.getElementById("startTabGateOverlay");
+    try{
+      const t=await loadI18n();
+      await import("../src/newtab/newtab-gate.js?case="+(++serial));
+      await window.startTabGateReady;
+      const old=overlay();
+      store.get=async keys=>{if(keys==="startPageSettings")throw Error("settings unavailable");return get(keys)};
+      control.chrome.storage.onChanged.emit({startPageSettings:{newValue:control.state.startPageSettings}},"local");
+      await until(()=>overlay()!==old&&overlay()?.textContent.includes(t.t("gateRefreshFailed")));
+      let opened=0;
+      control.chrome.runtime.openOptionsPage=async()=>{opened++};
+      [...overlay().querySelectorAll("button")].at(-1).click();
+      assert.equal(opened,1);
+      const retry=[...overlay().querySelectorAll("button")].find(b=>b.textContent===t.t("gateRetry"));
+      assert.ok(retry);
+      store.get=get;
+      control.state.startPageSettings.startTab.enabled=true;
+      retry.click();
+      await until(()=>!overlay());
+      assert.equal(one(document,"#startPage").hasAttribute("inert"),false);
+    }finally{store.get=get;dom.window.close()}
+  }
+  // Rapid choices share one lease, failed navigation is visible and retryable,
+  // and pagehide invalidates a lookup before it can navigate a reused tab.
+  {
+    const dom=await installDom("newtab/newtab.html","https://extension.example/newtab.html");
+    const control=installChrome(seed());
+    window.name="split-view";
+    control.chrome.tabs.query=async()=>[{id:2,url:"https://first.example/",title:"First"},{id:3,url:"https://second.example/",title:"Second"}];
+    const get=control.chrome.tabs.getCurrent,update=control.chrome.tabs.update;
+    const overlay=()=>document.getElementById("startTabGateOverlay");
+    try{
+      const t=await loadI18n();
+      await import("../src/newtab/newtab-gate.js?case="+(++serial));
+      await window.startTabGateReady;
+      const [first,second]=overlay().querySelectorAll("[data-split-choice]");
+      let release,lookups=0;
+      control.chrome.tabs.getCurrent=()=>{lookups++;return new Promise(resolve=>{release=resolve})};
+      first.click();second.click();
+      assert.equal(lookups,1);
+      assert.equal(first.getAttribute("aria-busy"),"true");
+      control.chrome.tabs.update=async()=>{throw Error("navigation denied")};
+      release({id:1});
+      await until(()=>overlay().querySelector('[role="alert"]:not([hidden])')?.textContent===t.t("gateChoiceFailed"));
+      assert.equal(second.getAttribute("aria-busy"),"false");
+      control.chrome.tabs.update=update;
+      second.click();
+      release({id:1});
+      await until(()=>control.calls.some(c=>c[0]==="update"&&c[2].url==="https://second.example/"));
+      await until(()=>second.getAttribute("aria-busy")==="false");
+      const updates=control.calls.filter(c=>c[0]==="update").length;
+      first.click();
+      window.dispatchEvent(new window.Event("pagehide"));
+      release({id:1});
+      await delay(30);
+      assert.equal(control.calls.filter(c=>c[0]==="update").length,updates);
+      const before=lookups;
+      second.click();
+      control.chrome.storage.onChanged.emit({startPageSettings:{newValue:control.state.startPageSettings}},"local");
+      await delay(30);
+      assert.equal(lookups,before);
+    }finally{control.chrome.tabs.getCurrent=get;control.chrome.tabs.update=update;dom.window.close()}
+  }
   console.log("Page initialization: blocked subframe, stale settings and picker generations, fatal startup reads");
 }finally{restoreFetch()}

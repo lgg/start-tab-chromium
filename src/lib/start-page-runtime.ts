@@ -272,11 +272,22 @@ async function persistRuntimeInTransaction(
   settings: StartPageSettings,
   expectedUpdatedAt: number | null = null,
   removeLegacy = false,
+  repairSource?: Record<string, unknown>,
 ): Promise<StartPageRuntimeState> {
-  const items = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, DATA_REVISION_KEY]);
+  const keys = [START_PAGE_RUNTIME_KEY, DATA_REVISION_KEY, START_PAGE_SETTINGS_KEY, LEGACY_INSTANCE_RUNTIME_KEY];
+  const items = await chrome.storage.local.get(keys);
   const raw = items[START_PAGE_RUNTIME_KEY];
   if (isFutureRuntimeSchema(raw)) {
     throw new Error("Start Tab runtime data was created by a newer extension version and cannot be modified safely");
+  }
+  if (isFutureStartPageSchema(items[START_PAGE_SETTINGS_KEY])) {
+    throw new Error("Start Tab settings were created by a newer extension version and runtime data cannot be modified safely");
+  }
+  // A read-triggered repair must not prune a newer layout or overwrite a
+  // newer runtime/legacy value, even if an older context bypassed our lock.
+  if (repairSource && [START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY].some(key =>
+    !jsonContentEqual(repairSource[key], items[key]))) {
+    throw new Error("Start Tab data changed during runtime normalization; reload before saving");
   }
   const currentUpdatedAt = normalizeRuntimeState(raw, settings).updatedAt;
   if (expectedUpdatedAt !== null
@@ -318,7 +329,7 @@ export async function getStartPageViewSnapshot(): Promise<{ settings: StartPageS
     const runtime = isFutureStartPageSchema(rawSettings) || isFutureRuntimeSchema(rawRuntime)
       || jsonContentEqual(rawRuntime, normalized)
       ? normalized
-      : await persistRuntimeInTransaction(normalized, settings, null, stored[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined);
+      : await persistRuntimeInTransaction(normalized, settings, null, stored[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined, stored);
     return { settings, runtime, localePreference: localePreferenceFromStored(stored[LOCALE_OVERRIDE_KEY]) };
   });
 }
@@ -334,7 +345,7 @@ export async function getStartPageRuntimeState(inputSettings?: StartPageSettings
     const normalized = normalizeRuntimeState(raw, settings, items[LEGACY_INSTANCE_RUNTIME_KEY]);
     const canonical = isFutureStartPageSchema(rawSettings) || isFutureRuntimeSchema(raw) || jsonContentEqual(raw, normalized)
       ? normalized
-      : await persistRuntimeInTransaction(normalized, settings, null, items[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined);
+      : await persistRuntimeInTransaction(normalized, settings, null, items[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined, items);
     // An editor layout is a projection, not authority to prune stored data.
     return inputSettings ? normalizeRuntimeState(canonical, inputSettings) : canonical;
   });

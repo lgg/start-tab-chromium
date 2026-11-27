@@ -19,10 +19,10 @@ const manualQa = read("docs/manual-qa-round42.md");
 assert.match(onboarding, /START_PAGE_ONBOARDING_KEY = "startPageOnboarding"/);
 assert.match(onboarding, /Object\.prototype\.hasOwnProperty\.call\(value, "onboarded"\)/);
 assert.match(onboarding, /onboardingStorageAction/);
-assert.match(newtab, /withStorageLock\("onboarding", async \(\) => \{[\s\S]*if \(await onboardingState\(\)\)/,
+assert.match(newtab, /withStorageLock\("onboarding", async \(\) => \{\s*if \(!isCurrent\(\)\) return;\s*const complete = await onboardingState\(\);\s*if \(!isCurrent\(\)\) return;\s*if \(complete\)/,
   "Onboarding completion must serialize across extension contexts and revalidate after waiting for the lock");
 assert.ok(
-  newtab.indexOf("if (await onboardingState())") < newtab.indexOf("settingsWithLayoutPreset(savedSettings, presetId)"),
+  newtab.indexOf("const complete = await onboardingState();") >= 0 && newtab.indexOf("const complete = await onboardingState();") < newtab.indexOf("settingsWithLayoutPreset(savedSettings, presetId)"),
   "The latest onboarding state must be checked before a preset can be applied",
 );
 assert.match(newtab, /const complete = await onboardingState\(\);[\s\S]*onboardingStorageAction\(\{ newValue: \{ onboarded: complete \} \}\)/);

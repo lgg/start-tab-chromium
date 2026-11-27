@@ -168,5 +168,34 @@ try{
       window.dispatchEvent(new window.Event("pagehide"));
     }finally{release();store.get=get;dom.window.close()}
   }
+
+  // A stale onboarding control must not commit a layout after the early gate
+  // takes ownership, including while the first committed-state read is pending.
+  for(const pending of [false,true]){
+    const dom=await installDom("newtab/newtab.html","https://extension.example/newtab.html");
+    const s=createDefaultStartPageSettings(100);
+    const control=installChrome({startPageSettings:s,startPageRuntimeState:normalizeRuntimeState(undefined,s),localeOverride:"en",startPageOnboarding:{onboarded:false}});
+    const store=control.chrome.storage.local,get=store.get;
+    try{
+      await import("../src/newtab/newtab.ts?stale-onboarding="+(++serial));
+      await until(()=>document.getElementById("onboarding"));
+      const modal=one(document,"#onboarding");
+      const preset=one(modal,".onboarding__presets button");
+      let release;
+      if(pending){
+        store.get=keys=>keys==="startPageOnboarding"&&!release?new Promise(resolve=>{release=async()=>resolve(await get(keys))}):get(keys);
+        preset.click();await until(()=>release);
+      }
+      window.dispatchEvent(new window.Event("start-tab-dismiss-onboarding"));
+      const gate=document.createElement("div");gate.id="startTabGateOverlay";document.body.append(gate);
+      assert.equal(modal.isConnected,false);
+      if(release)await release();else preset.click();
+      await delay(40);
+      assert.equal(control.messages.length,0);
+      assert.equal(control.state.startPageOnboarding.onboarded,false);
+      assert.deepEqual(control.state.startPageSettings,structuredClone(s));
+      window.dispatchEvent(new window.Event("pagehide"));
+    }finally{store.get=get;dom.window.close()}
+  }
   console.log("Onboarding: destructive preset cancelled, cross-tab completion and no duplicate writes");
 }finally{restoreFetch()}

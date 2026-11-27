@@ -14,6 +14,8 @@
   let catalogLoadGeneration = 0;
   let applyGeneration = 0;
   let nativeActionPending = false;
+  let pageActive = true;
+  let pickerActionPending = false;
   const nativeStatusElements = new WeakMap();
 
   const run = (action) => {
@@ -36,6 +38,7 @@
   }
 
   async function loadGateCatalog() {
+    if (!pageActive) return false;
     const generation = ++catalogLoadGeneration;
     const items = await readCommitted(LOCALE_OVERRIDE_KEY).catch(() => ({}));
     const locale = resolvedGateLocale(items[LOCALE_OVERRIDE_KEY]);
@@ -48,7 +51,7 @@
       }
     }));
     const nextCatalog = Object.assign({}, ...catalogs);
-    if (generation !== catalogLoadGeneration) return false;
+    if (!pageActive || generation !== catalogLoadGeneration) return false;
     catalog = nextCatalog;
     return true;
   }
@@ -91,7 +94,7 @@
   }
 
   async function runNative(button) {
-    if (nativeActionPending || !button.isConnected) return;
+    if (!pageActive || nativeActionPending || !button.isConnected) return;
     nativeActionPending = true;
     syncNativeButtons();
     try {
@@ -101,6 +104,7 @@
       }
       await openNative();
     } catch {
+      if (!pageActive) return;
       // The gate may have rebuilt its overlay while the worker was busy.
       const replacement = document.querySelector("#" + OVERLAY_ID + " [data-native-new-tab]");
       const target = replacement || (button.isConnected ? button : document.getElementById("nativeNewTab"));
@@ -111,7 +115,7 @@
       }
     } finally {
       nativeActionPending = false;
-      syncNativeButtons();
+      if (pageActive) syncNativeButtons();
     }
   }
 
@@ -170,9 +174,9 @@
     previousFocus = null;
   }
 
-  function showOverlay(title, description, tabs = []) {
+  function showOverlay(title, description, tabs = [], retry = false) {
     const generation = applyGeneration;
-    const isCurrent = (node) => node.isConnected && generation === applyGeneration;
+    const isCurrent = (node) => pageActive && node.isConnected && generation === applyGeneration;
     removeOverlay();
     window.dispatchEvent(new Event(DISMISS_ONBOARDING_EVENT));
     document.getElementById(ONBOARDING_ID)?.remove();
@@ -197,27 +201,69 @@
     body.textContent = description;
     panel.append(heading, body);
     let firstAction = null;
+    const choices = [];
+    const choiceStatus = document.createElement("p");
+    choiceStatus.hidden = true;
+    choiceStatus.setAttribute("role", "alert");
+    const syncChoices = () => {
+      for (const choice of choices) {
+        choice.setAttribute("aria-disabled", String(pickerActionPending));
+        choice.setAttribute("aria-busy", String(pickerActionPending));
+      }
+    };
     for (const tab of tabs) {
       const button = document.createElement("button");
       button.type = "button";
       button.textContent = tab.title; // webTab already supplies a nonempty title or URL.
       button.style.cssText = "display:block;width:100%;margin:8px 0;padding:10px;text-align:left";
       button.addEventListener("click", () => run(async () => {
-        if (!isCurrent(button)) return;
-        const current = await chrome.tabs.getCurrent();
-        // The picker may have been replaced while the browser tab lookup
-        // was pending. An obsolete choice must never navigate the new view.
-        if (isCurrent(button) && typeof current?.id === "number") await chrome.tabs.update(current.id, { url: tab.url });
+        if (!isCurrent(button) || pickerActionPending) return;
+        pickerActionPending = true;
+        syncChoices();
+        choiceStatus.hidden = true;
+        try {
+          const current = await chrome.tabs.getCurrent();
+          if (!isCurrent(button)) return;
+          if (typeof current?.id !== "number") throw new Error("Split picker has no current tab");
+          await chrome.tabs.update(current.id, { url: tab.url });
+        } catch {
+          if (isCurrent(button)) {
+            choiceStatus.textContent = text("gateChoiceFailed", "Could not open the selected tab. Try again.");
+            choiceStatus.hidden = false;
+          }
+        } finally {
+          pickerActionPending = false;
+          // A new generation might have mounted while the request was pending.
+          if (pageActive) {
+            for (const choice of document.querySelectorAll("#" + OVERLAY_ID + " [data-split-choice]")) {
+              choice.setAttribute("aria-disabled", "false");
+              choice.setAttribute("aria-busy", "false");
+            }
+          }
+        }
       }));
+      button.setAttribute("data-split-choice", "");
+      choices.push(button);
       panel.append(button);
       firstAction ??= button;
+    }
+    if (choices.length) { panel.append(choiceStatus); syncChoices(); }
+    if (retry) {
+      const retryButton = document.createElement("button");
+      retryButton.type = "button";
+      retryButton.textContent = text("gateRetry", "Retry");
+      retryButton.addEventListener("click", () => {
+        if (isCurrent(retryButton)) run(apply);
+      });
+      panel.append(retryButton);
+      firstAction ??= retryButton;
     }
     const native = document.createElement("button");
     native.type = "button";
     native.setAttribute("data-native-new-tab", "");
     syncNativeButton(native);
     native.textContent = text("openNativeNewTab", "Open browser new tab");
-    native.addEventListener("click", () => run(() => runNative(native)));
+    native.addEventListener("click", () => { if (isCurrent(native)) run(() => runNative(native)); });
     const settings = document.createElement("button");
     settings.type = "button";
     settings.textContent = text("openSettings", "Open settings");
@@ -238,10 +284,12 @@
 
   async function splitContext() {
     const current = await chrome.tabs.getCurrent().catch(() => null);
+    if (!pageActive) return false;
     const marked = [location.href, document.referrer, window.name].some(containsSplitMarker);
     let openerMarked = false;
     if (!marked && typeof current?.openerTabId === "number") {
       const opener = await chrome.tabs.get(current.openerTabId).catch(() => null);
+      if (!pageActive) return false;
       openerMarked = [opener?.url, opener?.pendingUrl, opener?.title].some(containsSplitMarker);
     }
     const split = marked || openerMarked;
@@ -254,44 +302,67 @@
   }
 
   async function apply() {
+    if (!pageActive) return;
     const generation = ++applyGeneration;
     try {
-      if (await splitContext()) {
+      const split = await splitContext();
+      if (!pageActive || generation !== applyGeneration) return;
+      if (split) {
         const current = await chrome.tabs.getCurrent().catch(() => null);
+        if (!pageActive || generation !== applyGeneration) return;
         const tabs = (await chrome.tabs.query({ currentWindow: true }).catch(() => []))
           .filter((tab) => tab.id !== current?.id)
           .map(webTab)
           .filter(Boolean);
-        if (generation !== applyGeneration) return;
+        if (!pageActive || generation !== applyGeneration) return;
         showOverlay(text("splitViewTitle", "Choose a tab for Split View"), text("splitViewText", "Select an open tab below."), tabs);
         return;
       }
       const items = await readCommitted(SETTINGS_KEY);
-      if (generation !== applyGeneration) return;
+      if (!pageActive || generation !== applyGeneration) return;
       if (items[SETTINGS_KEY]?.startTab?.enabled !== false) removeOverlay();
       else showOverlay(text("startTabDisabledTitle", "Start Tab is disabled"), text("startTabDisabledText", "Re-enable Start Tab in extension settings."));
+    } catch {
+      // An unsuccessful refresh invalidates the previous picker. Do not
+      // leave its inert overlay on screen with permanently stale controls.
+      if (pageActive && generation === applyGeneration) {
+        showOverlay(text("somethingWentWrong", "Something went wrong."), text("gateRefreshFailed", "Could not read Start Tab settings. Retry or open extension settings."), [], true);
+      }
     } finally {
-      if (generation === applyGeneration) window.dispatchEvent(new Event(GATE_CHANGE_EVENT));
+      if (pageActive && generation === applyGeneration) window.dispatchEvent(new Event(GATE_CHANGE_EVENT));
+    }
+  }
+
+  function handleStorageChange(changes, area) {
+    if (!pageActive || area !== "local") return;
+    if (changes[LOCALE_OVERRIDE_KEY]) {
+      void loadGateCatalog().then((current) => current ? apply() : undefined).catch(ignore);
+    }
+    if (changes[SETTINGS_KEY]) {
+      // A combined settings/locale transaction must invalidate stale choices
+      // immediately, rather than wait for a possibly slow locale catalog.
+      void apply().catch(ignore);
     }
   }
 
   async function initGate() {
+    if (!pageActive) return;
     const nativeButton = document.getElementById("nativeNewTab");
     if (nativeButton) {
       nativeButton.setAttribute("data-native-new-tab", "");
       syncNativeButton(nativeButton);
       nativeButton.addEventListener("click", () => run(() => runNative(nativeButton)));
     }
-    chrome.storage.onChanged.addListener((changes, area) => {
-      if (area !== "local") return;
-      if (changes[LOCALE_OVERRIDE_KEY]) {
-        void loadGateCatalog().then((current) => current ? apply() : undefined).catch(ignore);
-      } else if (changes[SETTINGS_KEY]) {
-        void apply().catch(ignore);
-      }
-    });
+    chrome.storage.onChanged.addListener(handleStorageChange);
     if (await loadGateCatalog()) await apply();
   }
+
+  window.addEventListener("pagehide", () => {
+    pageActive = false;
+    applyGeneration++;
+    catalogLoadGeneration++;
+    chrome.storage.onChanged.removeListener(handleStorageChange);
+  }, { once: true });
 
   window.startTabGateReady = Promise.resolve().then(initGate).catch(ignore);
 })();

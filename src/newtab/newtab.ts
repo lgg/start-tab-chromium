@@ -144,7 +144,8 @@ function reportUiError(error: unknown): void {
 }
 
 function runUiTask(action: () => Promise<unknown>): void {
-  void action().catch(reportUiError);
+  if (disposed) return;
+  void action().catch((error: unknown) => { if (!disposed) reportUiError(error); });
 }
 
 function syncStartPageInert(): void {
@@ -423,18 +424,25 @@ function setOnboardingActionsDisabled(disabled: boolean): void {
   });
 }
 
-async function finishOnboarding(presetId: LayoutPresetId | null): Promise<void> {
+async function finishOnboarding(presetId: LayoutPresetId | null, owner: HTMLElement): Promise<void> {
+  const isCurrent = (): boolean => !disposed && owner.isConnected && document.getElementById("onboarding") === owner
+    && !document.getElementById("startTabGateOverlay");
   if (onboardingFinishing) return;
+  if (!isCurrent()) return;
   onboardingFinishing = true;
   setOnboardingActionsDisabled(true);
   try {
     await withStorageLock("onboarding", async () => {
-      if (await onboardingState()) {
+      if (!isCurrent()) return;
+      const complete = await onboardingState();
+      if (!isCurrent()) return;
+      if (complete) {
         dismissOnboarding();
         return;
       }
       if (presetId) {
         await refreshState();
+        if (!isCurrent() || !savedSettings.startTab.enabled) return;
         const next = settingsWithLayoutPreset(savedSettings, presetId);
         const removesUserData = layoutReplacementRemovesUserData(savedSettings, next, runtime);
         if (removesUserData && !window.confirm(i18n.t("applyPresetWithDataConfirm"))) return;
@@ -448,19 +456,19 @@ async function finishOnboarding(presetId: LayoutPresetId | null): Promise<void> 
       } else {
         await withStorageLock("data-write", async () => {
           const items = await chrome.storage.local.get(START_PAGE_ONBOARDING_KEY);
-          if (isStartPageOnboardingComplete(items[START_PAGE_ONBOARDING_KEY])) return;
+          if (!isCurrent() || isStartPageOnboardingComplete(items[START_PAGE_ONBOARDING_KEY])) return;
           await commitStorageMutationWithRevision(
             [START_PAGE_ONBOARDING_KEY],
             () => chrome.storage.local.set({ [START_PAGE_ONBOARDING_KEY]: { onboarded: true } }),
           );
         });
       }
-      dismissOnboarding();
-      queueStateRefresh();
+      if (isCurrent()) dismissOnboarding();
+      if (!disposed) queueStateRefresh();
     });
   } finally {
     onboardingFinishing = false;
-    if (document.getElementById("onboarding")) setOnboardingActionsDisabled(false);
+    if (isCurrent()) setOnboardingActionsDisabled(false);
   }
 }
 
@@ -498,11 +506,11 @@ async function showOnboarding(): Promise<void> {
     const presets = element("div", "onboarding__presets");
     for (const preset of LAYOUT_PRESETS) {
       const item = button(i18n.t(preset.titleKey), "button button--secondary");
-      item.addEventListener("click", () => runUiTask(() => finishOnboarding(preset.id)));
+      item.addEventListener("click", () => runUiTask(() => finishOnboarding(preset.id, overlay)));
       presets.append(item);
     }
     const skip = button(i18n.t("onboardingSkip"), "button button--ghost");
-    skip.addEventListener("click", () => runUiTask(() => finishOnboarding(null)));
+    skip.addEventListener("click", () => runUiTask(() => finishOnboarding(null, overlay)));
     panel.append(title, text, presets, skip);
     overlay.append(panel);
     document.body.append(overlay);
@@ -594,7 +602,7 @@ function handleBeforeUnload(event: BeforeUnloadEvent): void {
 function dispose(): void {
   if (disposed) return;
   disposed = true;
-  editor.cancelPointer();
+  editor?.cancelPointer();
   clearRenderCleanups();
   renderScheduler.dispose();
   chrome.storage.onChanged.removeListener(handleStorageChange);
@@ -602,14 +610,21 @@ function dispose(): void {
   window.removeEventListener(DISMISS_ONBOARDING_EVENT, dismissOnboardingFromGate);
   window.removeEventListener("resize", handleResize);
   window.removeEventListener("beforeunload", handleBeforeUnload);
+  settingsButton.removeEventListener("click", handleOpenSettings);
+}
+
+function handleOpenSettings(): void {
+  runUiTask(() => chrome.runtime.openOptionsPage());
 }
 
 async function init(): Promise<void> {
   const loaded = await loadI18n();
+  if (disposed) return;
   i18n = loaded;
   loadedLocalePreference = loaded.preference;
   document.title = i18n.t("appName");
   const initialSnapshot = await getStartPageViewSnapshot();
+  if (disposed) return;
   savedSettings = initialSnapshot.settings;
   runtime = initialSnapshot.runtime;
   editor = new LayoutEditor(savedSettings, {
@@ -630,18 +645,12 @@ async function init(): Promise<void> {
     },
     onError: reportUiError,
   });
-  settingsButton.addEventListener("click", () => runUiTask(() => chrome.runtime.openOptionsPage()));
+  settingsButton.addEventListener("click", handleOpenSettings);
   chrome.storage.onChanged.addListener(handleStorageChange);
   window.addEventListener(GATE_CHANGE_EVENT, handleGateChange);
   window.addEventListener(DISMISS_ONBOARDING_EVENT, dismissOnboardingFromGate);
   window.addEventListener("resize", handleResize);
   window.addEventListener("beforeunload", handleBeforeUnload);
-  // BFCache restores the existing DOM after pagehide disposed all listeners
-  // and widget timers. Reinitialize via reload rather than a half-live page.
-  window.addEventListener("pageshow", (event) => {
-    if (event.persisted && disposed) location.reload();
-  });
-  window.addEventListener("pagehide", dispose, { once: true });
   // Changes committed before listener registration may never be delivered to
   // this page. Subscribe first, then reconcile before its initial render.
   await refreshState();
@@ -650,7 +659,15 @@ async function init(): Promise<void> {
   await showOnboarding();
 }
 
+// Register before the first awaited startup read. A page can enter the
+// BFCache or close even while locale or storage initialization is pending.
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted && disposed) location.reload();
+});
+window.addEventListener("pagehide", dispose, { once: true });
+
 void init().catch((error: unknown) => {
+  if (disposed) return;
   const message = error instanceof Error ? error.message : String(error);
   grid.replaceChildren(element("p", "fatal-error", message));
 });
