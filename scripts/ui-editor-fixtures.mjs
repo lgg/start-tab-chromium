@@ -696,5 +696,55 @@ try {
     submit(one(dialog,"form"));
     assert.equal((await pending).background.config.blur,43);
   }
+
+  // Imported CSS colors must round-trip through controls unchanged. Native
+  // color inputs cannot represent all the accepted CSS token syntax, and
+  // commas inside color functions are not palette separators.
+  {
+    const colors=["rgba(12, 34, 56, .5)","hsl(120, 40%, 50%)","var(--accent, rgb(1, 2, 3))"];
+    const source={...theme,tokens:{...theme.tokens,textPrimary:"rgb(240, 241, 242)",textSecondary:"rebeccapurple",cardSurface:"#1234",accent:"rgba(1, 2, 3, .6)"},background:{kind:"effect",baseColor:"rgb(1, 2, 3)",config:{effect:"animated-gradient",speed:3.5,intensity:.95,angle:135,colors}}};
+    const pending=editTheme(source,i18n);
+    const dialog=one(document,"dialog[open]");
+    const kind=field(dialog,"backgroundTile"),effect=field(dialog,"backgroundEffect");
+    assert.equal(field(dialog,"themeTextPrimary").value,source.tokens.textPrimary);
+    assert.equal(field(dialog,"themeTextSecondary").value,source.tokens.textSecondary);
+    assert.equal(field(dialog,"themeCardSurface").value,source.tokens.cardSurface);
+    assert.equal(field(dialog,"themeAccent").value,source.tokens.accent);
+    assert.equal(field(dialog,"backgroundBaseColor").value,source.background.baseColor);
+    const palette=field(dialog,"effectColors");
+    assert.equal(palette.value,colors.join(", "));
+    value(kind,"invalid-kind","change");
+    assert.equal(kind.value,"effect");
+    assert.equal(field(dialog,"effectColors"),palette);
+    value(effect,"noise","change");
+    const speed=field(dialog,"effectSpeed"),intensity=field(dialog,"effectIntensity");
+    assert.equal(speed.value,"0.5");
+    assert.equal(intensity.value,"0.22");
+    assert.equal(speed.max,"2");
+    assert.equal(intensity.max,"0.65");
+    value(speed,3);value(intensity,.9);
+    assert.equal(speed.checkValidity(),false);assert.equal(intensity.checkValidity(),false);
+    submit(one(dialog,"form"));
+    assert.equal(dialog.open,true);
+    value(speed,1.75);value(intensity,.55);
+    value(effect,"animated-gradient","change");
+    assert.equal(field(dialog,"effectSpeed").value,"3.5");
+    assert.equal(field(dialog,"effectIntensity").value,"0.95");
+    assert.equal(field(dialog,"effectColors").value,colors.join(", "));
+    value(effect,"noise","change");
+    assert.equal(field(dialog,"effectSpeed").value,"1.75");
+    assert.equal(field(dialog,"effectIntensity").value,"0.55");
+    value(effect,"animated-gradient","change");
+    submit(one(dialog,"form"));
+    const saved=await pending;
+    assert.deepEqual(saved.background,source.background);
+    assert.deepEqual(saved.tokens,source.tokens);
+    const noisePending=editTheme(saved,i18n);
+    const next=one(document,"dialog[open]");
+    value(field(next,"backgroundEffect"),"noise","change");
+    value(field(next,"effectSpeed"),1.75);value(field(next,"effectIntensity"),.55);
+    submit(one(next,"form"));
+    assert.deepEqual((await noisePending).background.config,{effect:"noise",speed:1.75,intensity:.55,animated:false});
+  }
   console.log("Theme editor: 4 background kinds, 7 effects, panel preservation, DOM CSS application, cancel");
 } finally { dom.window.close(); }
