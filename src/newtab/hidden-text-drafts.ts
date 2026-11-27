@@ -19,18 +19,19 @@ export function renderHiddenTextDrafts(host: HTMLElement, drafts: readonly Hidde
   const entries = drafts.map((draft) => {
     const row = element("div", "hidden-note-draft");
     const kind = context.i18n.t(draft.kind === "task" ? "hiddenTaskDraft" : "hiddenSearchDraft");
-    const title = element("strong", "", draft.title ? kind + " — " + draft.title : kind);
+    const titleText = draft.title ? kind + " — " + draft.title : kind;
+    const title = element("strong", "", titleText);
     const text = element("textarea", "note");
     text.readOnly = true;
     text.value = draft.value;
-    text.setAttribute("aria-label", title.textContent ?? kind);
+    text.setAttribute("aria-label", titleText);
     const select = actionButton(context.i18n.t("hiddenNoteSelect"), () => {
       if (!row.isConnected) return;
       text.focus();
       text.select();
     }, "button button--secondary", context.reportError);
     const discard = actionButton(context.i18n.t("hiddenNoteDiscard"), () => {
-      if (!row.isConnected || !window.confirm(context.i18n.t("hiddenWidgetDiscardConfirm"))) return;
+      if (!row.isConnected || draft.pending || !window.confirm(context.i18n.t("hiddenWidgetDiscardConfirm"))) return;
       if (draft.discard()) context.requestRender();
     }, "button button--secondary", context.reportError);
     discard.disabled = draft.pending;
