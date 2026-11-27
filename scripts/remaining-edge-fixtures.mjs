@@ -543,3 +543,98 @@ console.log("Navigation: failed session lookup, DNR repair, native grant cleanup
   }
 console.log("Residual helpers: effect aggregation, canonical data, split-view markers, tab lifecycle and draft acknowledgement");
 }
+
+
+
+// The live-tab URL accessor can synchronously invalidate the observation.
+// Even a successful final inspection must not redirect after that cancellation.
+{
+  const { NewTabRedirectGuard } = await import("../src/lib/tab-navigation-change.js");
+  const url = "chrome://newtab/";
+  let reads = 0, redirects = 0;
+  const guard = new NewTabRedirectGuard({
+    isEligible: value => value === url,
+    getTab: async () => {
+      if (++reads === 1) return { url };
+      return { get url() { guard.cancel(42); return url; } };
+    },
+    shouldBypass: async () => false,
+    isEnabled: async () => true,
+    redirect: async () => { redirects++; }
+  });
+  await guard.observe(42, url);
+  assert.equal(reads, 2);
+  assert.equal(redirects, 0);
+}
+
+// An obsolete or declined discard must not re-render or lose a hidden draft.
+// A pending draft cannot be discarded; the next successful action can render.
+{
+  const { installDom, i18n } = await import("./ui-fixture-dom.mjs");
+  const { renderHiddenTextDrafts } = await import("../src/newtab/hidden-text-drafts.js");
+  const dom = await installDom();
+  try {
+    const host = document.createElement("section");
+    document.body.append(host);
+    let discards = 0, renders = 0, allowDiscard = false;
+    const errors = [];
+    const context = { i18n, reportError: error => errors.push(error), requestRender: () => { renders++; } };
+    const draft = { kind: "search", title: "", value: "unfinished query", pending: false,
+      discard: () => { discards++; return allowDiscard; } };
+    const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
+    renderHiddenTextDrafts(host, [draft], context);
+    const text = host.querySelector("textarea");
+    const [select, discard] = host.querySelectorAll("button");
+    assert.equal(text.value, draft.value);
+    assert.equal(text.readOnly, true);
+    assert.equal(text.getAttribute("aria-label"), "hiddenSearchDraft");
+    select.click();
+    await flush();
+    assert.equal(document.activeElement, text);
+    window.confirm = () => false;
+    discard.click();
+    await flush();
+    assert.equal(discards, 0);
+    window.confirm = () => true;
+    discard.click();
+    await flush();
+    assert.equal(discards, 1);
+    assert.equal(renders, 0);
+    assert.equal(text.value, draft.value);
+    renderHiddenTextDrafts(host, [{ ...draft, pending: true }], context);
+    const pendingDiscard = host.querySelectorAll("button")[1];
+    assert.equal(pendingDiscard.disabled, true);
+    pendingDiscard.click();
+    discard.click();
+    select.click();
+    await flush();
+    assert.equal(discards, 1);
+    assert.equal(renders, 0);
+    renderHiddenTextDrafts(host, [draft], context);
+    allowDiscard = true;
+    host.querySelectorAll("button")[1].click();
+    await flush();
+    assert.equal(discards, 2);
+    assert.equal(renders, 1);
+    renderHiddenTextDrafts(host, [], context);
+    assert.equal(host.hidden, true);
+    assert.equal(host.childNodes.length, 0);
+    assert.deepEqual(errors, []);
+  } finally { dom.window.close(); }
+}
+
+// A zero-capacity request still retains one entry; rejected or evicted
+// operations must not delete a replacement with the same key.
+{
+  let rejectOld;
+  const cache = new WidgetRequestCache(0, () => 0);
+  const old = cache.get("a", 100, () => new Promise((_, reject) => { rejectOld = reject; }));
+  await Promise.resolve();
+  assert.equal(cache.get("a", 100, async () => 99), old);
+  assert.equal(await cache.get("b", 100, async () => 2), 2);
+  assert.equal(await cache.get("a", 100, async () => 3), 3);
+  rejectOld(new Error("obsolete request"));
+  await assert.rejects(old, /obsolete request/);
+  assert.equal(await cache.get("a", 100, async () => 99), 3);
+}
+console.log("Round 158: live-tab cancellation, hidden draft discard boundaries and single-entry cache eviction");

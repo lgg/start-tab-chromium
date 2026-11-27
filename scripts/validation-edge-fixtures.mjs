@@ -262,3 +262,36 @@ check(normalizeThemeBundle(null).issues.some(x=>x.messageKey==="validationInvali
   check(!used.has(candidate)&&!reserved.has(candidate));
 }
 console.log("Validation matrix:",checks,"assertions — message boundaries, all widget configs, URL sanitization, legacy and theme fallback branches");
+
+
+
+// Legacy aliases and modern explicit values must normalize independently.
+// A valid old timer field must not override a modern zero (which is clamped).
+{
+  const legacy = {timers:{pomodoroWorkSeconds:1200,pomodoroBreakSeconds:180}};
+  same(normalizeBlockConfig("pomodoro",null,legacy).workSeconds,1200);
+  same(normalizeBlockConfig("pomodoro",null,legacy).breakSeconds,180);
+  const modern = normalizeBlockConfig("pomodoro",{workSeconds:0,breakSeconds:0,pomodoroWorkSeconds:1200,pomodoroBreakSeconds:180});
+  same(modern.workSeconds,60);
+  same(modern.breakSeconds,30);
+  const mixed = normalizeBlockConfig("pomodoro",{workSeconds:600,pomodoroBreakSeconds:90});
+  same(mixed.workSeconds,600);
+  same(mixed.breakSeconds,90);
+  same(normalizeBlockConfig("pomodoro",{pomodoroWorkSeconds:300,breakSeconds:60}).workSeconds,300);
+  same(normalizeBlockConfig("timer",{durationSeconds:0,timerSeconds:90}).durationSeconds,1);
+  same(normalizeBlockConfig("startPinned",null,{startPinned:"invalid"}),defaultBlockConfig("startPinned"));
+}
+
+// An invalid image cannot change a non-image fallback into a broken image.
+// When already using an image, retain its known safe URL and fit.
+{
+  const base=normalizeTheme({background:{kind:"solid",color:"#112233"}},BUILT_IN_THEMES[0]);
+  const invalid=[];
+  const rejected=normalizeTheme({background:{kind:"image",url:"javascript:alert(1)"}},base,"theme",invalid);
+  same(rejected.background,base.background);
+  same(invalid.map(i=>i.messageKey),["validationInvalidUrl"]);
+  const valid=normalizeTheme({background:{kind:"image",url:"https://example.com/p.png",fit:"contain",position:"top"}},base);
+  const repaired=normalizeTheme({background:{kind:"image",url:""}},valid);
+  same(repaired.background,valid.background);
+}
+console.log("Round 158: validation assertions", checks);
