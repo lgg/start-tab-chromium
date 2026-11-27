@@ -285,6 +285,64 @@ console.log("Backup: future schemas, invalid input, missing recovery, rollback f
   console.log("DNR ownership: malformed URLs, duplicate sites, noncanonical hosts, foreign owners, resource and domain mismatch, legacy migration");
 }
 
+
+ // Exhausted concurrent rule-ID claims must not overwrite the foreign
+ // rules or publish the requested site in durable storage.
+{
+  const dnr=control.chrome.declarativeNetRequest;
+  const realUpdate=dnr.updateDynamicRules;
+  const before=await local.get(null);
+  const own=await blocklist.readDynamicRulesSnapshot();
+  const foreignIds=[];
+  dnr.updateDynamicRules=async ({removeRuleIds=[],addRules=[]})=>{
+    const contested=addRules.find(r=>r.condition.requestDomains?.includes("always-contested.example"));
+    if(!contested)return realUpdate({removeRuleIds,addRules});
+    foreignIds.push(contested.id);
+    await realUpdate({addRules:[{id:contested.id,priority:1,action:{type:"block"},condition:{urlFilter:"||foreign-"+foreignIds.length+".example^"}}]});
+    throw Error("another feature claimed the ID");
+  };
+  try{
+    await assert.rejects(blocklist.blockHost("always-contested.example"),/claimed concurrently/);
+    assert.ok(foreignIds.length>1);
+    assert.equal(new Set(foreignIds).size,foreignIds.length);
+    assert.deepEqual(await local.get(null),before);
+    assert.deepEqual(await blocklist.readDynamicRulesSnapshot(),own);
+    const all=await dnr.getDynamicRules();
+    assert.ok(foreignIds.every(id=>all.some(r=>r.id===id&&r.action.type==="block")));
+  }finally{dnr.updateDynamicRules=realUpdate}
+}
+ // A no-op storage repair can fail at DNR reconciliation and again during
+ // rollback. Both failures must remain visible, even without a storage write.
+{
+  const dnr=control.chrome.declarativeNetRequest;
+  const realUpdate=dnr.updateDynamicRules;
+  const before=await local.get(null);
+  const snapshot=await blocklist.readDynamicRulesSnapshot();
+  const host="repair-only.example";
+  await local.set({blockedSites:[host]});
+  await local.remove("lastBlockedUrls");
+  const stored=await local.get(null);
+  let attempts=0;
+  dnr.updateDynamicRules=async ({removeRuleIds=[],addRules=[]})=>{
+    attempts++;
+    if(attempts===1){
+      // Simulate a platform which changed rules but returned a rejection.
+      await realUpdate({removeRuleIds,addRules});
+      throw Error("repair acknowledgement unavailable");
+    }
+    throw Error("repair rollback unavailable");
+  };
+  try{
+    await assert.rejects(blocklist.replaceBlockedSites([host]),e=>e instanceof AggregateError&&/DNR repair failed/.test(e.message)&&e.errors[0].message==="repair acknowledgement unavailable"&&e.errors[1].message==="repair rollback unavailable");
+    assert.equal(attempts,2);
+    assert.deepEqual(await local.get(null),stored);
+  }finally{
+    dnr.updateDynamicRules=realUpdate;
+    await blocklist.restoreDynamicRulesSnapshot(snapshot);
+    await local.set(before);
+  }
+}
+
 const dom=await installDom();
 const restoreFetch=installFetch();
 try {
