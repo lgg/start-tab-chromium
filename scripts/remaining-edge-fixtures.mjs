@@ -224,6 +224,32 @@ try{
   assert.deepEqual(removedTabs,[9]);
 }finally{tabs.create=originalCreateTab;tabs.get=originalGetTab;tabs.update=originalUpdateTab;tabs.remove=originalRemoveTab;local.remove=originalRemoveStorage}
 await local.remove(native.NATIVE_NEW_TAB_BYPASS_KEY);
+
+ // The asynchronous bypass read can finish after the grant's deadline.
+ // Do not sleep for a negative delay or retry against an already expired
+ // lease; continue the browser fallback sequence and clean up the tab.
+{
+  const originalNow=Date.now, originalGet=local.get;
+  const originalCreate=tabs.create, originalTabGet=tabs.get, originalTabUpdate=tabs.update, originalTabRemove=tabs.remove;
+  let now=100000,attempts=0,removed=[];
+  Date.now=()=>now;
+  tabs.create=async options=>{control.tab={id:73,...options};return {...control.tab}};
+  tabs.get=async()=>({...control.tab});
+  tabs.update=async(id,options)=>{attempts++;control.tab={id,...options};return {...control.tab}};
+  tabs.remove=async id=>{removed.push(id)};
+  local.get=async keys=>{
+    const result=await originalGet(keys);
+    if(keys===native.NATIVE_NEW_TAB_BYPASS_KEY&&result[keys]?.tabId===73&&!result[keys].consumedAt)now+=100;
+    return result;
+  };
+  try{
+    await assert.rejects(native.openNativeNewTab({consumptionTimeoutMs:10,pollIntervalMs:1}),e=>e instanceof AggregateError&&e.errors.length===3);
+    assert.equal(attempts,3);
+    assert.deepEqual(removed,[73]);
+    assert.equal(control.state[native.NATIVE_NEW_TAB_BYPASS_KEY],undefined);
+  }finally{Date.now=originalNow;local.get=originalGet;tabs.create=originalCreate;tabs.get=originalTabGet;tabs.update=originalTabUpdate;tabs.remove=originalTabRemove}
+}
+
 const {installDom}=await import("./ui-fixture-dom.mjs");
 const dom=await installDom();
 try{
@@ -292,5 +318,122 @@ console.log("Navigation: failed session lookup, DNR repair, native grant cleanup
   const {formatDateParts,createDatePartsFormatter}=await import("../src/newtab/date-pattern.js");
   assert.equal(formatDateParts("YYYY-MM DD HH:mm:ss",{}),"-MM  ::");
   assert.equal(createDatePartsFormatter("en-GB","UTC")(new Date("2026-11-26T12:34:56Z")).hour,"12");
-  console.log("Residual helpers: effect aggregation, canonical data, split-view markers, tab lifecycle and draft acknowledgement");
+  
+  // A direct guarded import does not require the optional legacy fallback
+  // when a durable revision exists. A stale revision must reject before any
+  // DNR or storage change; a matching revision commits atomically.
+  {
+    const {exportBackup,importBackup}=await import("../src/lib/backup.js");
+    const priorChrome=globalThis.chrome;
+    const fresh=installChrome({startPageSettings:settings,startPageRuntimeState:runtime,
+      blockedSites:["old-import.example"],startTabDataRevision:{version:1,updatedAt:4000}});
+    try{
+      const bundle=await exportBackup();
+      bundle.storage.blockedSites=["new-import.example"];
+      const snapshot=await fresh.chrome.storage.local.get(null);
+      const rules=await fresh.chrome.declarativeNetRequest.getDynamicRules();
+      await assert.rejects(importBackup(bundle,{expectedCurrentDataRevision:3999}),rev.StartTabDataRevisionConflictError);
+      assert.deepEqual(await fresh.chrome.storage.local.get(null),snapshot);
+      assert.deepEqual(await fresh.chrome.declarativeNetRequest.getDynamicRules(),rules);
+      await importBackup(bundle,{expectedCurrentDataRevision:4000});
+      assert.deepEqual(fresh.state.blockedSites,["new-import.example"]);
+      assert.ok(fresh.state.startTabDataRevision.updatedAt>4000);
+    }finally{globalThis.chrome=priorChrome}
+  }
+
+  // Starting a new request cleans up expired completion cooldowns but
+  // cannot release a different instance's outstanding request.
+  {
+    const {ClockRequestGate}=await import("../src/newtab/clock-request-gate.js");
+    let time=0;
+    const gate=new ClockRequestGate(()=>time,100);
+    const old=gate.begin("first","token-1");
+    assert.ok(old);gate.finish(old);
+    const live=gate.begin("second","token-2");
+    assert.ok(live);
+    assert.equal(gate.canComplete("first","token-1"),false);
+    assert.equal(gate.begin("first","token-1"),null);
+    time=101;
+    const retry=gate.begin("first","token-1");
+    assert.ok(retry);
+    gate.finish(old);
+    assert.equal(gate.isPending("first"),true);
+    assert.equal(gate.isPending("second"),true);
+    gate.finish(retry);gate.finish(live);
+    assert.equal(gate.canComplete("first","token-1"),false);
+    assert.equal(gate.canComplete("first","new-token"),true);
+  }
+  // A sparse JS layout is not a matching preset merely because it has
+  // the right length and grid geometry. Missing entries must fail safely.
+  {
+    const candidate=api.settingsWithLayoutPreset(settings,"focus");
+    assert.equal(api.layoutMatchesPreset(candidate,"focus"),true);
+    delete candidate.layout.blocks[1];
+    assert.equal(api.layoutMatchesPreset(candidate,"focus"),false);
+  }
+
+  // A newer observed navigation supersedes an old redirect even if the
+  // Chrome API's last read still returns the old new-tab URL.
+  {
+    const {NewTabRedirectGuard}=await import("../src/lib/tab-navigation-change.js");
+    const redirects=[];
+    let release,reads=0;
+    const guard=new NewTabRedirectGuard({
+      isEligible:url=>url==="chrome://newtab/",
+      getTab:async()=>{reads++;return {url:"chrome://newtab/"}},
+      shouldBypass:()=>new Promise(resolve=>{release=resolve}),
+      isEnabled:async()=>true,
+      redirect:async id=>{redirects.push(id)}
+    });
+    const first=guard.observe(1,"chrome://newtab/");
+    for(let attempt=0;!release&&attempt<100;attempt++)await Promise.resolve();
+    assert.ok(release,"redirect guard did not reach the bypass check");
+    await guard.observe(1,"https://user-chosen.example/");
+    release(false);
+    await first;
+    assert.equal(reads,1);
+    assert.deepEqual(redirects,[]);
+    release=undefined;
+    const next=guard.observe(1,"chrome://newtab/");
+    for(let attempt=0;!release&&attempt<100;attempt++)await Promise.resolve();
+    assert.ok(release,"redirect guard did not reach the bypass check");
+    release(false);
+    await next;
+    assert.deepEqual(redirects,[1]);
+  }
+  // Malformed historical storage must be removed without touching the
+  // current DNR rules or leaking URLs from a previously blocked profile.
+  {
+    const bl=await import("../src/lib/blocklist.js");
+    const priorChrome=globalThis.chrome;
+    const fresh=installChrome({blockedSites:["blocked.example"],lastBlockedUrls:["https://blocked.example/old"]});
+    try{
+      await bl.syncRules();
+      const rules=await fresh.chrome.declarativeNetRequest.getDynamicRules();
+      await bl.clearLastBlockedUrl("blocked.example");
+      assert.equal(Object.hasOwn(fresh.state,"lastBlockedUrls"),false);
+      assert.deepEqual(await fresh.chrome.declarativeNetRequest.getDynamicRules(),rules);
+      assert.equal(await bl.rememberBlockedNavigation("https://blocked.example/new"),"blocked.example");
+      assert.equal(await bl.getLastBlockedUrl("blocked.example"),"https://blocked.example/new");
+    }finally{globalThis.chrome=priorChrome}
+  }
+
+  // Normalizing a legacy custom theme ID can reveal a collision that was
+  // not apparent in the raw ID. Creating the legacy theme must allocate a
+  // fresh ID and must never overwrite the existing theme.
+  {
+    const priorChrome=globalThis.chrome;
+    const fresh=installChrome({startPageSettings:settings,startPageRuntimeState:runtime});
+    try{
+      const original=await api.saveNewCustomTheme({...api.createCustomThemeDraft(settings,"Original"),id:"legacy-theme-id"});
+      const saved=await api.updateCustomTheme({...original,id:" legacy-theme-id ",name:"Imported legacy theme"});
+      assert.notEqual(saved.id,original.id);
+      assert.equal(saved.name,"Imported legacy theme");
+      const state=await api.getStartPageSettings();
+      assert.equal(state.themes.customThemes.length,2);
+      assert.equal(state.themes.customThemes.find(t=>t.id===original.id).name,"Original");
+      assert.equal(state.themes.selectedThemeId,saved.id);
+    }finally{globalThis.chrome=priorChrome}
+  }
+console.log("Residual helpers: effect aggregation, canonical data, split-view markers, tab lifecycle and draft acknowledgement");
 }

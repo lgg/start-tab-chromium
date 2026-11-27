@@ -549,5 +549,71 @@ try {
     assert.equal(ed.settings.layout.mode,"free");
     ed.cancel();
   }
+
+  // A grid-mode configuration must resolve collisions against the current
+  // draft rather than replacing a block with stale free-mode coordinates.
+  {
+    const s=cloneSettings(settings);s.layout.mode="grid";
+    s.layout.blocks=[createBlockInstance("note",{id:"grid-config",column:1,row:1,width:2,height:2}),createBlockInstance("timer",{id:"grid-neighbor",column:3,row:1,width:2,height:2})];
+    const t=host(),p=host(),g=host();
+    const ed=new LayoutEditor(s,{i18n,toolbarHost:t,paletteHost:p,getRuntime:()=>runtime,requestRender:()=>{},previewBlock:()=>{},onSaved:()=>{},onError:e=>errors.push(e)});
+    ed.enter();
+    const card=document.createElement("article");g.append(card);ed.decorateCard(card,s.layout.blocks[0]);
+    button(card,"editBlock").click();
+    const dialog=one(document,"dialog[open]");
+    value(field(dialog,"instanceName"),"Grid configured note");submit(one(dialog,"form"));
+    await until(()=>ed.settings.layout.blocks[0].title==="Grid configured note");
+    assert.equal(ed.settings.layout.blocks.length,2);
+    assert.equal(ed.settings.layout.mode,"grid");
+    assert.equal(ed.settings.layout.blocks[0].id,"grid-config");
+    assert.deepEqual(ed.settings.layout.blocks[1],s.layout.blocks[1]);
+    ed.cancel();
+  }
+
+  // Older workers may acknowledge a save without the savedSettings payload.
+  // Read back the committed canonical settings, not the optimistic draft.
+  {
+    const s=cloneSettings(settings), t=host(), p=host();
+    const previous=control.handler;
+    const previousStorage=structuredClone(control.state.startPageSettings);
+    let saved;
+    const ed=new LayoutEditor(s,{i18n,toolbarHost:t,paletteHost:p,getRuntime:()=>runtime,requestRender:()=>{},previewBlock:()=>{},onSaved:value=>{saved=value},onError:e=>errors.push(e)});
+    ed.enter();
+    const n=errors.length;
+    control.handler=async m=>{
+      assert.equal(m.type,"replace-start-page-settings");
+      control.state.startPageSettings={...structuredClone(m.settings),updatedAt:Date.now()+1000};
+      return {ok:true};
+    };
+    try{
+      await ed.save();
+      assert.equal(ed.isActive,false);
+      assert.equal(ed.hasUnsavedChanges,false);
+      assert.equal(saved.updatedAt,control.state.startPageSettings.updatedAt);
+      assert.equal(errors.length,n);
+    }finally{control.handler=previous;control.state.startPageSettings=previousStorage}
+  }
+
+  // A stale palette button captured before a singleton is added must not
+  // create a duplicate even if a queued click is delivered to detached DOM.
+  {
+    const s=cloneSettings(settings);
+    s.layout.blocks=s.layout.blocks.filter(b=>b.type!=="commands");
+    const t=host(),p=host();let renders=0;
+    const ed=new LayoutEditor(s,{i18n,toolbarHost:t,paletteHost:p,getRuntime:()=>runtime,requestRender:()=>renders++,previewBlock:()=>{},onSaved:()=>{},onError:e=>errors.push(e)});
+    ed.enter();
+    const add=[...p.querySelectorAll("button")].find(b=>b.textContent.includes("blockTitleCommands"));
+    assert.ok(add);assert.equal(add.disabled,false);
+    add.click();
+    assert.equal(ed.settings.layout.blocks.filter(b=>b.type==="commands").length,1);
+    const count=renders, snapshot=cloneSettings(ed.settings);
+    event(add,"click");
+    assert.deepEqual(ed.settings,snapshot);
+    assert.equal(renders,count);
+    value(one(t,'[aria-label="layoutZone"]'),ed.settings.layout.zone,"change");
+    assert.deepEqual(ed.settings,snapshot);
+    assert.equal(renders,count);
+    ed.cancel();
+  }
   console.log("Theme editor: 4 background kinds, 7 effects, panel preservation, DOM CSS application, cancel");
 } finally { dom.window.close(); }

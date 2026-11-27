@@ -178,33 +178,53 @@ resetState();
 let firstConsumptionWrite = true;
 let backgroundConsume: Promise<boolean> | null = null;
 const grantExpiries: number[] = [];
-storageSetHook = async (items) => {
-  const value = items[NATIVE_NEW_TAB_BYPASS_KEY] as { expiresAt?: number; consumedAt?: number } | undefined;
-  if (!value) return;
-  if (typeof value.consumedAt !== "number" && typeof value.expiresAt === "number") grantExpiries.push(value.expiresAt);
-  if (typeof value.consumedAt === "number" && firstConsumptionWrite) {
-    firstConsumptionWrite = false;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-};
-let updateCount = 0;
-updateHandler = async (tabId) => {
-  updateCount += 1;
-  if (updateCount === 1) {
-    backgroundConsume = consumeNativeNewTabBypass(tabId);
-    return;
-  }
-  assert.equal(await consumeNativeNewTabBypass(tabId), true);
-};
-await openNativeNewTab({ consumptionTimeoutMs: 5, pollIntervalMs: 1 });
-assert.ok(backgroundConsume, "The delayed first-attempt consumer must have started");
-assert.equal(await backgroundConsume, true);
-assert.equal(updateCount, 2, "The second candidate should recover after the first attempt times out");
-assert.equal(grantExpiries.length, 2, "Exactly two grants should be published for the recovery scenario");
-const finalBypass = storage[NATIVE_NEW_TAB_BYPASS_KEY] as { expiresAt?: number; consumedAt?: number };
-assert.equal(finalBypass.expiresAt, grantExpiries[1],
-  "A late first-attempt consumer must not overwrite the second attempt's grant");
-assert.equal(typeof finalBypass.consumedAt, "number");
+let signalFirstWrite!: () => void;
+let releaseFirstWrite!: () => void;
+const firstWriteStarted = new Promise<void>((resolve) => { signalFirstWrite = resolve; });
+const firstWriteReleased = new Promise<void>((resolve) => { releaseFirstWrite = resolve; });
+let raceNow = 20_000;
+Date.now = () => raceNow;
+try {
+  storageSetHook = async (items) => {
+    const value = items[NATIVE_NEW_TAB_BYPASS_KEY] as { expiresAt?: number; consumedAt?: number } | undefined;
+    if (!value) return;
+    if (typeof value.consumedAt !== "number" && typeof value.expiresAt === "number") grantExpiries.push(value.expiresAt);
+    if (typeof value.consumedAt === "number" && firstConsumptionWrite) {
+      firstConsumptionWrite = false;
+      signalFirstWrite();
+      await firstWriteReleased;
+    }
+  };
+  let updateCount = 0;
+  updateHandler = async (tabId) => {
+    updateCount += 1;
+    if (updateCount === 1) {
+      backgroundConsume = consumeNativeNewTabBypass(tabId);
+      // The first consumer has inspected a valid lease and is holding the
+      // write lock. Expire its grant deterministically before the opener
+      // can acknowledge it. The next task releases the blocked write only
+      // after the retry has had a chance to queue for the same lock.
+      await firstWriteStarted;
+      raceNow += 6;
+      setTimeout(releaseFirstWrite, 0);
+      return;
+    }
+    assert.equal(await consumeNativeNewTabBypass(tabId), true);
+  };
+  await openNativeNewTab({ consumptionTimeoutMs: 5, pollIntervalMs: 1 });
+  assert.ok(backgroundConsume, "The delayed first-attempt consumer must have started");
+  assert.equal(await backgroundConsume, true);
+  assert.equal(updateCount, 2, "The second candidate should recover after the first attempt times out");
+  assert.equal(grantExpiries.length, 2, "Exactly two grants should be published for the recovery scenario");
+  assert.ok(grantExpiries[1]! > grantExpiries[0]!, "The retry receives a fresh lease");
+  const finalBypass = storage[NATIVE_NEW_TAB_BYPASS_KEY] as { expiresAt?: number; consumedAt?: number };
+  assert.equal(finalBypass.expiresAt, grantExpiries[1],
+    "A late first-attempt consumer must not overwrite the second attempt's grant");
+  assert.equal(typeof finalBypass.consumedAt, "number");
+} finally {
+  releaseFirstWrite();
+  Date.now = realNow;
+}
 
 console.log("Round 51 native new-tab fixtures passed");
 

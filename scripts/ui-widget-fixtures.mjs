@@ -73,6 +73,22 @@ try {
       await until(()=>noCity.root.textContent.includes("weatherUnavailable"));
     }finally{globalThis.fetch=oldFetch}
   }
+
+  // Locale canonicalization is a platform boundary: even if a Chromium
+  // derivative cannot canonicalize any of the requested locales, date
+  // rendering falls back to English rather than making the card unusable.
+  {
+    const original=Intl.getCanonicalLocales;
+    try{
+      Intl.getCanonicalLocales=()=>[];
+      const empty=widget("dateTime",{mode:"date",locale:"en-GB",dateFormat:"MMMM",timeZone:"UTC"},"locale-empty-canonical");
+      const expected=new Intl.DateTimeFormat("en",{month:"long",timeZone:"UTC"}).format(new Date());
+      assert.equal(one(empty.root,".date-time__date").textContent,expected);
+      Intl.getCanonicalLocales=()=>{throw RangeError("platform locale canonicalization unavailable")};
+      const fallback=widget("dateTime",{mode:"date",locale:"en-GB",dateFormat:"MMMM",timeZone:"UTC"},"locale-no-canonical");
+      assert.equal(one(fallback.root,".date-time__date").textContent,expected);
+    }finally{Intl.getCanonicalLocales=original}
+  }
   const search = widget("search");
   const searchInput = one(search.root, "input");
   submit(one(search.root, "form"));
@@ -393,6 +409,44 @@ try {
         await delay(30);assert.equal(h.root.textContent,"recentLoading");
       }
     }finally{globalThis.fetch=previousFetch;control.chrome.history.search=previousHistory}
+  }
+
+  // Statistics requests can resolve after a layout switch removed the
+  // original card. A detached status node must not be replaced or repainted.
+  {
+    const get=control.chrome.storage.local.get;
+    let release;
+    control.chrome.storage.local.get=keys=>{
+      if(keys==="focusStats")return new Promise(resolve=>{release=async()=>resolve(await get(keys))});
+      return get(keys);
+    };
+    try{
+      const old=widget("stats",{},"detached-statistics");
+      await until(()=>release);
+      old.root.remove();
+      await release();await delay(30);
+      assert.equal(old.root.textContent,"statsPlaceholder");
+      assert.equal(old.root.querySelector(".stats-list"),null);
+    }finally{control.chrome.storage.local.get=get}
+    const active=widget("stats",{},"active-statistics");
+    await until(()=>active.root.querySelector(".stats-list"));
+    assert.equal(active.root.querySelectorAll(".stats-list__item").length,7);
+  }
+  // A history result with no URL is not a clickable link. Mixed valid and
+  // incomplete rows must preserve the actual URL and never invent a target.
+  {
+    const search=control.chrome.history.search;
+    control.chrome.history.search=async()=>[
+      {title:"No destination"},
+      {url:"https://history-without-title.example/"},
+      {url:"javascript:alert(1)",title:"Unsafe"}
+    ];
+    try{
+      const result=widget("recent",{maxResults:19},"missing-history-url");
+      await until(()=>result.root.querySelector("a"));
+      assert.equal(result.root.querySelectorAll("a").length,1);
+      assert.equal(one(result.root,"a").href,"https://history-without-title.example/");
+    }finally{control.chrome.history.search=search}
   }
   console.log("Widget failure and boundary matrix passed");
   console.log("Widgets: dates, search, hidden drafts, IP, pagination, notes, tasks, clocks, history, pinned, stats, calendar, weather and commands");
