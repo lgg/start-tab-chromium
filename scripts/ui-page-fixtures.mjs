@@ -122,6 +122,9 @@ try {
   // backup controls and blocklist/statistics, using Chrome API doubles.
   dom = await installDom("options/options.html");
   control = handlers(installChrome(seed()));
+  // A newly created widget stores its title key, unlike older preset labels.
+  const localizedDate=control.state.startPageSettings.layout.blocks.find(b=>b.type==="dateTime");
+  localizedDate.title="blockTitleDateTime";
   control.chrome.runtime.getManifest = () => ({ version: "3.0.0", chrome_url_overrides: { newtab: "newtab.html" } });
   try {
     const t = await loadI18n();
@@ -136,6 +139,9 @@ try {
     await import("../src/options/options.js");
     await until(() => document.getElementById("statistics")?.querySelector(".stats-grid"), "options startup");
     for (const id of ["general","blocks","themes","backup","blocker","statistics"]) assert.ok(section(id));
+    const localizedRow=[...section("blocks").querySelectorAll(".instance-row")].find(row=>row.querySelector(".instance-row__meta")?.textContent.includes(localizedDate.id));
+    assert.ok(localizedRow);
+    assert.equal(one(localizedRow,".instance-row__title").textContent,t.t("blockTitleDateTime"));
     assert.ok(one(document, "#optionsNav").querySelectorAll("a").length >= 6);
     btn(document, "openStartTab").click();
     await until(() => control.calls.some(c => c[0] === "create"));
