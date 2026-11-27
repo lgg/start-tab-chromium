@@ -56,7 +56,9 @@
       const catalogs = await Promise.all(catalogFiles.map(async (file) => {
         try {
           const response = await fetch(chrome.runtime.getURL(`_locales/${language}/${file}`));
-          return response.ok ? await response.json() : null;
+          if (!response.ok) return null;
+          const value = await response.json();
+          return value && typeof value === "object" && !Array.isArray(value) ? value : null;
         } catch {
           return null;
         }
