@@ -636,5 +636,27 @@ try {
     assert.deepEqual(ed.settings,prior);
     ed.cancel();
   }
+
+  // Missing collection controls must never silently save a partially
+  // rendered link/provider. The user can remove the bad row and save.
+  for(const type of ["links","search"]){
+    const block=createBlockInstance(type,{id:"missing-controls-"+type});
+    const promise=editBlockInstance(block,i18n);
+    const dialog=one(document,"dialog[open]");
+    const collection=one(dialog,".collection-editor");
+    const bad=one(collection,".collection-row");
+    delete bad.dataset.itemId;
+    for(const input of bad.querySelectorAll("input"))input.remove();
+    submit(one(dialog,"form"));
+    assert.equal(dialog.open,true,type);
+    assert.equal(one(dialog,".form-error").hidden,false,type);
+    bad.remove();
+    submit(one(dialog,"form"));
+    const saved=await promise;
+    assert.ok(saved,type);
+    assert.equal(saved.id,block.id);
+    if(type==="links")assert.equal(saved.config.items.length,block.config.items.length-1);
+    else assert.equal(saved.config.providers.length,block.config.providers.length-1);
+  }
   console.log("Theme editor: 4 background kinds, 7 effects, panel preservation, DOM CSS application, cancel");
 } finally { dom.window.close(); }
