@@ -23,7 +23,7 @@ import {
 import { normalizeBlockConfig } from "./start-page-block-validation.js";
 import { ownValue } from "./dictionary.js";
 import { placeGridBlocks } from "./grid-layout.js";
-import { MAX_FREE_GEOMETRY, MAX_GRID_BLOCK_HEIGHT, MAX_GRID_ROW, MAX_START_PAGE_BLOCKS } from "./platform-limits.js";
+import { MAX_CUSTOM_THEMES, MAX_FREE_GEOMETRY, MAX_GRID_BLOCK_HEIGHT, MAX_GRID_ROW, MAX_START_PAGE_BLOCKS } from "./platform-limits.js";
 import { migrateLegacyTheme, normalizeCustomThemes } from "./start-page-theme-validation.js";
 import {
   booleanValue,
@@ -134,7 +134,12 @@ export function normalizeStartPageSettingsWithReport(value: unknown): { settings
   const blocks = normalizeBlocks(layout.blocks, value, columns, zone, mode, issues, migrationIssues);
   const customThemes = normalizeCustomThemes(themes.customThemes, issues);
   const migratedLegacyTheme = fromVersion < START_PAGE_SCHEMA_VERSION ? migrateLegacyTheme(value, issues) : null;
-  if (migratedLegacyTheme && !customThemes.some((theme) => theme.id === migratedLegacyTheme.id)) customThemes.push(migratedLegacyTheme);
+  if (migratedLegacyTheme && !customThemes.some((theme) => theme.id === migratedLegacyTheme.id)) {
+    // A legacy appearance is an additional custom theme, not an exception
+    // to the persisted capacity. Do not evict existing user themes.
+    if (customThemes.length < MAX_CUSTOM_THEMES) customThemes.push(migratedLegacyTheme);
+    else migrationIssues.push({ path: "appearance", reason: "Legacy theme exceeds custom theme capacity" });
+  }
   const requestedThemeId = normalizeEntityId(themes.selectedThemeId, migratedLegacyTheme?.id ?? DEFAULT_SETTINGS.themes.selectedThemeId);
   const selectedThemeId = getBuiltInTheme(requestedThemeId) || customThemes.some((theme) => theme.id === requestedThemeId) ? requestedThemeId : DEFAULT_SETTINGS.themes.selectedThemeId;
   const settings: StartPageSettings = {
