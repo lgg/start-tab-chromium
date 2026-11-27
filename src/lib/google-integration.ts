@@ -279,11 +279,15 @@ async function findDriveBackupFile(interactive = false): Promise<DriveFile | nul
 }
 
 function driveMultipartBoundary(content: string): string {
-  let boundary: string;
-  do {
-    boundary = `start-tab-${crypto.randomUUID().replaceAll("-", "")}`;
-  } while (content.includes(boundary));
-  return boundary;
+  // A broken/repeating random source must not hang the extension or hold
+  // the Drive lock forever. Keep attempts bounded, with a distinct suffix
+  // even if randomUUID returns the same value on each call.
+  for (let attempt = 0; attempt < 32; attempt += 1) {
+    const base = `start-tab-${crypto.randomUUID().replaceAll("-", "")}`;
+    const boundary = attempt === 0 ? base : `${base}-${attempt}`;
+    if (!content.includes(boundary)) return boundary;
+  }
+  throw new Error("Unable to allocate a safe Google Drive multipart boundary");
 }
 
 export async function uploadDriveBackup(): Promise<void> {
