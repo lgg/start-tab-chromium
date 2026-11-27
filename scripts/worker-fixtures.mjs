@@ -146,6 +146,43 @@ try {
   await new Promise(resolve=>setTimeout(resolve,40));
   assert.equal(control.calls.length,previousCount);
   chrome.runtime.getManifest=oldManifest;
+
+  // Automatic locale, unavailable catalogs and malformed catalog bodies
+  // must all leave a readable notification, even if Chrome itself supplies
+  // no message. Use an expired persisted countdown, not a synthetic reply.
+  {
+    const priorLocale=control.state.localeOverride,priorFetch=globalThis.fetch,priorMessage=chrome.i18n.getMessage;
+    try{
+      chrome.i18n.getMessage=()=>"";
+      for(const scenario of ["auto","http","network","invalid-json","empty-translation"]){
+        if(scenario==="auto")delete control.state.localeOverride;
+        else control.state.localeOverride="ru";
+        let catalogReads=0;
+        globalThis.fetch=async()=>{
+          catalogReads++;
+          if(scenario==="network")throw Error("network unavailable");
+          if(scenario==="http")return new Response(null,{status:503});
+          if(scenario==="invalid-json")return new Response("{");
+          return Response.json({timerDone:{message:""}});
+        };
+        await ok({type:"clock-action",instanceId:"worker-timer",action:"reset"});
+        await ok({type:"clock-action",instanceId:"worker-timer",action:"start"});
+        const clock=control.state.startPageRuntimeState.clocks["worker-timer"];
+        clock.startedAt=Date.now()-3000;clock.targetAt=clock.startedAt+clock.durationMs;
+        const count=control.calls.filter(c=>c[0]==="notification").length;
+        await ok({type:"complete-clock",instanceId:"worker-timer",token:clock.completionToken});
+        const notices=control.calls.filter(c=>c[0]==="notification");
+        assert.equal(notices.length,count+1,scenario);
+        assert.equal(notices.at(-1)[2].message,"timerDone",scenario);
+        assert.equal((await view()).runtime.clocks["worker-timer"].running,false);
+        if(scenario==="auto")assert.equal(catalogReads,0);
+        else assert.ok(catalogReads>=1);
+      }
+    }finally{
+      globalThis.fetch=priorFetch;chrome.i18n.getMessage=priorMessage;
+      if(priorLocale===undefined)delete control.state.localeOverride;else control.state.localeOverride=priorLocale;
+    }
+  }
   console.log("Worker residual: translation fallbacks, interrupted pomodoro, rejected browser redirect and blocker-only manifest");
 
   {
