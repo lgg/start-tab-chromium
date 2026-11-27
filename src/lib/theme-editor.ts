@@ -1,6 +1,6 @@
 import type { I18n } from "./i18n.js";
 import { FormPanelCache, parseNumberField } from "./form-panel-cache.js";
-import { focusExistingSettingsDialog, nextSettingsDialogTitleId } from "./settings-dialog-guard.js";
+import { focusExistingSettingsDialog, nextSettingsDialogTitleId, protectSettingsDialogDraft } from "./settings-dialog-guard.js";
 import {
 cloneTheme,
 normalizeTheme,
@@ -288,6 +288,7 @@ form.append(header, body, footer);
 dialog.append(form);
 document.body.append(dialog);
 let dirty = false;
+protectSettingsDialogDraft(dialog, () => dirty);
 let result: StartPageTheme | null = null;
 form.addEventListener("input", () => { dirty = true; });
 form.addEventListener("change", () => { dirty = true; });
