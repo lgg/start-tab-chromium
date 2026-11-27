@@ -236,6 +236,128 @@ assert.deepEqual(v.legacyConfigSource("timer",{}),{});
 assert.equal(v.normalizeSearchProviders([{urlTemplate:"https://example.com/?q={query}"}],[],"providers",[]).length,1);
 console.log("Residual runtime: legacy migration, clock phases, future schema, alarm rollback, orphan cleanup, capacity and revision exhaustion");
 
+// Durable write guards must reject concurrent values at the last read before
+// writing, not restore stale rollback snapshots over a newer extension.
+{
+  const {commitStorageMutationWithRevision,StartTabDataRevisionConflictError}=await import("../src/lib/data-revision.js");
+  const previous=globalThis.chrome;
+  const fresh=installChrome({guardOnly:{value:"original"},owned:{value:"original"}});
+  const store=fresh.chrome.storage.local;
+  try{
+    let called=false;
+    await assert.rejects(commitStorageMutationWithRevision(["owned"],async()=>{called=true},100,{expectedStorage:{guardOnly:{value:"different"}}}),StartTabDataRevisionConflictError);
+    assert.equal(called,false);
+    assert.deepEqual(fresh.state.owned,{value:"original"});
+    await assert.rejects(commitStorageMutationWithRevision(["owned"],async()=>{
+      await store.set({owned:{value:"temporary"},guardOnly:{value:"concurrent"}});
+      throw Error("write failed");
+    },100,{expectedStorage:{guardOnly:{value:"original"}}}),/write failed/);
+    assert.deepEqual(fresh.state.owned,{value:"original"});
+    assert.deepEqual(fresh.state.guardOnly,{value:"concurrent"});
+  }finally{globalThis.chrome=previous}
+}
+for(const operation of ["migration","settings-edit","runtime-repair","runtime-edit","runtime-delete","layout-replace"]){
+  for(const atFinalRead of [true,false]){
+    if(!atFinalRead&&["migration","settings-edit","layout-replace"].includes(operation))continue;
+    const previous=globalThis.chrome;
+    const s=api.normalizeStartPageSettings(settings);
+    const initialRuntime=rt.normalizeRuntimeState(undefined,s);
+    initialRuntime.updatedAt=300;
+    initialRuntime.notes[note.id]="original text";
+    const initialSettings=operation==="migration"?{...s,schemaVersion:0}:s;
+    const rawRuntime=operation==="runtime-repair"?{...initialRuntime,version:0}:initialRuntime;
+    const fresh=installChrome({startPageSettings:initialSettings,startPageRuntimeState:rawRuntime});
+    const store=fresh.chrome.storage.local,read=store.get;
+    const changedKey=["migration","settings-edit"].includes(operation)?"startPageSettings":rt.START_PAGE_RUNTIME_KEY;
+    const changed=changedKey==="startPageSettings"?{schemaVersion:999,opaque:"future data"}:{...rawRuntime,notes:{...rawRuntime.notes,[note.id]:"concurrent text"}};
+    let matches=0,injected=false;
+    const trigger=operation==="runtime-delete"?(atFinalRead?3:2):operation==="layout-replace"?2:["migration","settings-edit"].includes(operation)?1:atFinalRead?2:1;
+    store.get=async keys=>{
+      const relevant=Array.isArray(keys)&&keys.includes("startPageSettings")&&keys.includes("startTabDataRevision")&&
+        (changedKey==="startPageSettings"?keys.includes("startPageMigrationReport"):keys.includes(rt.START_PAGE_RUNTIME_KEY));
+      if(relevant&&++matches===trigger){
+        injected=true;
+        await store.set({[changedKey]:changed});
+      }
+      return read(keys);
+    };
+    try{
+      const next={...s,layout:{...s.layout,blocks:s.layout.blocks.filter(b=>b.id!==note.id)}};
+      const run=()=>operation==="migration"?api.getStartPageSettings():
+        operation==="settings-edit"?api.updateStartPageSettings(current=>({...current,startTab:{enabled:false}})):
+        operation==="runtime-repair"?rt.getStartPageRuntimeState():
+        operation==="runtime-edit"?rt.updateStartPageRuntimeState(current=>{current.notes[note.id]="stale write";return current}):
+        operation==="runtime-delete"?rt.deleteInstanceRuntime(note.id):
+        rt.replaceStartPageSettingsWithRuntime(next,s.updatedAt,rawRuntime.updatedAt);
+      await assert.rejects(run(),/changed|newer extension version/,operation);
+      assert.equal(injected,true,operation);
+      assert.deepEqual(fresh.state[changedKey],structuredClone(changed),operation);
+      assert.deepEqual(fresh.state[changedKey==="startPageSettings"?rt.START_PAGE_RUNTIME_KEY:"startPageSettings"],
+        structuredClone(changedKey==="startPageSettings"?rawRuntime:initialSettings),operation);
+      assert.equal(fresh.state.startTabDataRevision,undefined,operation);
+      assert.equal(fresh.alarms.size,0,operation);
+    }finally{store.get=read;globalThis.chrome=previous}
+  }
+}
+console.log("Deep audit: storage write boundary conflicts preserve newer data without rollback");
+
+{
+  const previous=globalThis.chrome;
+  const s=api.normalizeStartPageSettings(settings);
+  const initialRuntime=rt.normalizeRuntimeState(undefined,s);
+  initialRuntime.updatedAt=300;
+  initialRuntime.notes[note.id]="private text";
+  const fresh=installChrome({startPageSettings:s,startPageRuntimeState:initialRuntime});
+  try{
+    const changed={...s,layout:{...s.layout,blocks:s.layout.blocks.map(b=>b.id===note.id?api.createBlockInstance("timer",{id:note.id}):b)}};
+    assert.equal(api.layoutReplacementRemovesUserData(s,changed,initialRuntime),true);
+    await assert.rejects(rt.replaceStartPageSettingsWithRuntime(changed,s.updatedAt,initialRuntime.updatedAt),/identity and type/);
+    assert.deepEqual(fresh.state.startPageRuntimeState,structuredClone(initialRuntime));
+    assert.deepEqual(fresh.state.startPageSettings,structuredClone(s));
+    await assert.rejects(rt.replaceStartPageSettingsWithRuntime({...s,schemaVersion:999},s.updatedAt,initialRuntime.updatedAt),/newer extension version/);
+    const descriptor=Object.getOwnPropertyDescriptor(globalThis,"crypto");
+    try{
+      Object.defineProperty(globalThis,"crypto",{configurable:true,value:{randomUUID:()=>"collision"}});
+      const source={...s,layout:{...s.layout,blocks:[api.createBlockInstance("note",{id:"timer-collision"})]}};
+      const next=api.settingsWithLayoutPreset(source,"focus");
+      assert.equal(next.layout.blocks.find(b=>b.type==="note").id,"timer-collision");
+      assert.equal(next.layout.blocks.find(b=>b.type==="timer").id,"timer-collision-2");
+      assert.equal(new Set(next.layout.blocks.map(b=>b.id)).size,next.layout.blocks.length);
+      api.prepareStartPageSettingsWrite(next,source,source.updatedAt);
+    }finally{Object.defineProperty(globalThis,"crypto",descriptor)}
+  }finally{globalThis.chrome=previous}
+}
+console.log("Deep audit: block identity cannot change type; preset IDs reserve all current owners");
+
+{
+  const previous=globalThis.chrome;
+  const {isMessage}=await import("../src/lib/messages.js");
+  for(const token of ["x".repeat(257),"\ud800","\udc00","valid:\u{1f552}/token"]){
+    const s=api.normalizeStartPageSettings(settings);
+    const running=rt.normalizeRuntimeState(undefined,s);
+    running.updatedAt=123;
+    running.clocks[timer.id]={...rt.defaultClockForBlock(timer),running:true,startedAt:100,targetAt:5100,completionToken:token};
+    const fresh=installChrome({startPageSettings:s,startPageRuntimeState:running});
+    try{
+      const normalized=await rt.getStartPageRuntimeState();
+      const repaired=normalized.clocks[timer.id].completionToken;
+      if(token.startsWith("valid"))assert.equal(repaired,token);
+      else assert.match(repaired,/^legacy-timer-/);
+      assert.equal(isMessage({type:"complete-clock",instanceId:timer.id,token:repaired}),true);
+      assert.deepEqual(rt.parseClockAlarmName(rt.clockAlarmName(timer.id,repaired)),{instanceId:timer.id,token:repaired});
+      await rt.reconcileStoredClockAlarms();
+      assert.equal(fresh.alarms.has(rt.clockAlarmName(timer.id,repaired)),true);
+      const completed=await rt.completeClockInstance(timer.id,repaired,5200);
+      assert.equal(completed.completed,true);
+      assert.equal(completed.clock.running,false);
+      assert.equal(fresh.alarms.size,0);
+    }finally{globalThis.chrome=previous}
+  }
+  const mismatched=rt.normalizeRuntimeState({version:initial.version,clocks:{[timer.id]:{...rt.defaultClockForBlock(pomodoro),running:true,startedAt:100}}},settings);
+  assert.deepEqual(mismatched.clocks[timer.id],rt.defaultClockForBlock(timer));
+}
+console.log("Deep audit: malformed completion tokens repaired, valid Unicode preserved and alarms complete");
+
 const bl=await import("../src/lib/blocklist.js");
 await assert.rejects(bl.blockHost(""),/Invalid host/);
 await assert.rejects(bl.unblockHost("ftp://example.com"),/Invalid host/);
