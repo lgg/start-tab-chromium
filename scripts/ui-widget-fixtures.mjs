@@ -201,6 +201,34 @@ try {
   await until(() => taskInput.value === "" && tasks.root.querySelector(".task__title"));
   pruneTaskForms(new Set([tasks.block.id]));
 
+  // Rebuilding rows in the same renderer invalidates old controls as well
+  // as controls from a previous renderer. Force repeated generated IDs.
+  {
+    const descriptor=Object.getOwnPropertyDescriptor(globalThis,"crypto");
+    try {
+      Object.defineProperty(globalThis,"crypto",{configurable:true,value:{randomUUID:()=>"task-audit-id"}});
+      const t=widget("localTasks",{},"task-audit-widget");
+      const form=one(t.root,"form"),input=one(form,"input");
+      value(input,"first");submit(form);
+      await until(()=>input.value===""&&t.root.querySelector(".task__title"));
+      const staleRemove=button(t.root,"removeTask"),staleCheck=one(t.root,".task__check");
+      value(input,"second");submit(form);
+      await until(()=>input.value===""&&t.root.querySelectorAll(".task__title").length===2);
+      assert.deepEqual(context.runtime.tasks[t.block.id].map(x=>x.id),["task-audit-id","task-audit-id-2"]);
+      const count=writes.length;
+      staleRemove.click();staleCheck.checked=true;event(staleCheck,"change");
+      assert.equal(writes.length,count);
+      assert.deepEqual(context.runtime.tasks[t.block.id].map(x=>[x.title,x.done]),[["first",false],["second",false]]);
+      button(t.root,"removeTask").click();
+      await until(()=>t.root.querySelectorAll(".task__title").length===1);
+      assert.equal(context.runtime.tasks[t.block.id][0].title,"second");
+    } finally {
+      if(descriptor)Object.defineProperty(globalThis,"crypto",descriptor);
+      else delete globalThis.crypto;
+    }
+  }
+
+
   // Clock controls send real message shapes and reconcile the mocked runtime.
   control.handler = async m => {
     if (m.type === "clock-action") {
