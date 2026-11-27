@@ -344,6 +344,34 @@ try {
     await until(()=>countryMissing.root.textContent.includes("198.51.100.1"));
     assert.match(countryMissing.root.textContent,/ipUnknownCountry/);
   }finally{globalThis.fetch=fetchBeforeIp}
+
+  // Both successful and rejected asynchronous responses must be ignored
+  // after the corresponding widget is removed, not just on one path.
+  {
+    const previousFetch=globalThis.fetch,previousHistory=control.chrome.history.search;
+    try{
+      let finishCalendar,failWeather;
+      globalThis.fetch=async url=>{
+        if(new URL(String(url)).hostname==="www.googleapis.com")return new Promise(resolve=>{finishCalendar=resolve});
+        return new Promise((_,reject)=>{failWeather=reject});
+      };
+      const cal=widget("googleCalendar",{calendarId:"stale-success"},"stale-calendar-success");
+      await until(()=>finishCalendar);cal.root.remove();
+      finishCalendar(Response.json({items:[{id:"e",summary:"Do not paint",start:{date:"2027-01-01"},end:{date:"2027-01-02"}}]}));
+      await delay(30);assert.equal(cal.root.textContent,"googleCalendarLoading");
+      const weather=widget("weather",{city:"",forecastEndpoint:"https://detached-rejection.example/"},"stale-weather-rejection");
+      await until(()=>failWeather);weather.root.remove();failWeather(Error("old weather rejected"));
+      await delay(30);assert.equal(weather.root.textContent,"weatherLoading");
+      for(const mode of ["success","failure"]){
+        let resolveHistory,rejectHistory;
+        control.chrome.history.search=async()=>new Promise((resolve,reject)=>{resolveHistory=resolve;rejectHistory=reject});
+        const h=widget("recent",{maxResults:mode==="success"?16:17},"stale-history-"+mode);
+        await until(()=>resolveHistory);h.root.remove();
+        if(mode==="success")resolveHistory([{url:"https://old.example/",title:"Old"}]);else rejectHistory(Error("old history rejected"));
+        await delay(30);assert.equal(h.root.textContent,"recentLoading");
+      }
+    }finally{globalThis.fetch=previousFetch;control.chrome.history.search=previousHistory}
+  }
   console.log("Widget failure and boundary matrix passed");
   console.log("Widgets: dates, search, hidden drafts, IP, pagination, notes, tasks, clocks, history, pinned, stats, calendar, weather and commands");
 } finally {
