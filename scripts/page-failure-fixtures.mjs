@@ -333,6 +333,65 @@ try{
   }finally{globalThis.fetch=catalog;gateDom.window.close()}
 
 
+
+  // Gate generation races: late tab lists and locale catalogs must never
+  // resurrect an obsolete overlay or overwrite the latest language.
+  {
+    const dom=await installDom("newtab/newtab.html","https://extension.example/newtab.html");
+    const control=installChrome(seed());
+    const overlay=()=>document.getElementById("startTabGateOverlay");
+    try{
+      await import("../src/newtab/newtab-gate.js?case="+(++serial));
+      await window.startTabGateReady;
+      assert.equal(overlay(),null);
+      let resolveTabs;
+      control.chrome.tabs.query=async()=>new Promise(resolve=>{resolveTabs=resolve});
+      window.name="split-view";
+      control.chrome.storage.onChanged.emit({startPageSettings:{newValue:control.state.startPageSettings}},"local");
+      await until(()=>resolveTabs);
+      window.name="";
+      control.state.startPageSettings.startTab.enabled=false;
+      control.chrome.storage.onChanged.emit({startPageSettings:{newValue:control.state.startPageSettings}},"local");
+      const english=await loadI18n();
+      await until(()=>overlay()?.textContent.includes(english.t("startTabDisabledTitle")));
+      resolveTabs([{id:2,title:"Obsolete tab",url:"https://obsolete.example/"}]);
+      await delay(30);
+      assert.ok(!overlay().textContent.includes("Obsolete tab"));
+      let pendingCatalog=[];
+      globalThis.fetch=async url=>String(url).includes("/ru/")?new Promise(resolve=>pendingCatalog.push(()=>resolve(catalog(url)))):catalog(url);
+      control.state.localeOverride="ru";
+      control.chrome.storage.onChanged.emit({localeOverride:{newValue:"ru"}},"local");
+      await until(()=>pendingCatalog.length===3);
+      control.state.localeOverride="en";
+      control.chrome.storage.onChanged.emit({localeOverride:{newValue:"en"}},"local");
+      await delay(30);
+      for(const finish of pendingCatalog)finish();
+      await delay(30);
+      assert.match(overlay().textContent,new RegExp(english.t("startTabDisabledTitle")));
+      globalThis.fetch=catalog;
+      // A native-tab failure belongs to the current overlay, not the
+      // detached button which originally dispatched the request.
+      let release;
+      control.handler=()=>new Promise(resolve=>{release=resolve});
+      const old=one(overlay(),"[data-native-new-tab]");old.click();
+      await until(()=>release);
+      control.chrome.storage.onChanged.emit({startPageSettings:{newValue:control.state.startPageSettings}},"local");
+      await until(()=>!old.isConnected);
+      const replacement=one(overlay(),"[data-native-new-tab]");
+      assert.equal(replacement.getAttribute("aria-busy"),"true");
+      release(undefined);
+      await until(()=>overlay()?.querySelector('[role="alert"]:not([hidden])'));
+      assert.equal(replacement.hasAttribute("aria-busy"),false);
+      const n=control.messages.length;
+      old.click();await delay(20);
+      assert.equal(control.messages.length,n);
+      control.state.startPageSettings.startTab.enabled=true;
+      control.chrome.storage.onChanged.emit({startPageSettings:{newValue:control.state.startPageSettings}},"local");
+      await until(()=>!overlay());
+      assert.equal(one(document,"#startPage").hasAttribute("inert"),false);
+    }finally{globalThis.fetch=catalog;dom.window.close()}
+  }
+
   // A web-accessible blocked page embedded as a subframe must never expose
   // an active countdown or send unblock messages.
   const frameDom=await installDom("blocked/blocked.html","https://extension.example/blocked.html?site=blocked.example");
