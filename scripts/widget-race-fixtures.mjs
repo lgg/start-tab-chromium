@@ -359,6 +359,51 @@ try{
       assert.equal(context.runtime.notes[b.id],"new note");
     }finally{write=previous}
   }
+
+  // A legacy ACK may arrive just as another tab deletes the corresponding
+  // widget. Canonical readback must accept the removed instance, not revive
+  // its old tasks/link page, and stale detached buttons cannot issue writes.
+  for(const original of [tasks,links]){
+    const id="removed-while-saving-"+original.type;
+    const b={...structuredClone(original),id};
+    settings.layout.blocks.push(b);
+    control.state.startPageSettings=structuredClone(settings);
+    context.runtime.updatedAt=++revision;
+    if(b.type==="localTasks")context.runtime.tasks[id]=[{id:"keep",title:"Old task",done:false,createdAt:1,updatedAt:1}];
+    else context.runtime.linkPages[id]=0;
+    control.state.startPageRuntimeState=structuredClone(context.runtime);
+    const mounted=mount(b);
+    let release;
+    const previousWrite=write;
+    const before=errors.length;
+    write=m=>new Promise(resolve=>{release=()=>{
+      commit(m);
+      // The mock worker has committed; the later settings transaction
+      // removes the widget and prunes its corresponding runtime map.
+      settings.layout.blocks=settings.layout.blocks.filter(item=>item.id!==id);
+      control.state.startPageSettings=structuredClone(settings);
+      delete context.runtime.tasks[id];delete context.runtime.linkPages[id];
+      context.runtime.updatedAt=++revision;
+      control.state.startPageRuntimeState=structuredClone(context.runtime);
+      resolve({ok:true});
+    }});
+    try{
+      const stale=b.type==="localTasks"?one(mounted.root,".task__check"):button(mounted.root,"nextPage");
+      if(b.type==="localTasks"){stale.checked=true;event(stale,"change")}else stale.click();
+      await until(()=>release);
+      const count=writes.length;
+      mounted.dispose();
+      release();
+      await until(()=>control.state.startPageSettings.layout.blocks.every(item=>item.id!==id));
+      await delay(40);
+      if(b.type==="localTasks")event(stale,"change");else event(stale,"click");
+      await delay(20);
+      assert.equal(writes.length,count);
+      assert.equal(errors.length,before);
+      assert.equal(control.state.startPageRuntimeState.tasks[id],undefined);
+      assert.equal(control.state.startPageRuntimeState.linkPages[id],undefined);
+    }finally{write=previousWrite}
+  }
   console.log("Widgets: fallback search, disconnected controls, hidden search drafts, absent IP country and pinned failure");
   console.log("Widget races: pending notes, explicit overwrite, hidden drafts, legacy ACKs, failed refresh and timer completion");
 }finally{dom.window.close()}
