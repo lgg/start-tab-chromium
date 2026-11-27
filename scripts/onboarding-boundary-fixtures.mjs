@@ -103,5 +103,37 @@ try{
       window.dispatchEvent(new window.Event("pagehide"));
     }finally{dom.window.close()}
   }
+  // Another tab can complete onboarding after the first committed-state
+  // read, but before the final skip transaction takes the data-write lock.
+  {
+    const dom=await installDom("newtab/newtab.html","https://extension.example/newtab.html");
+    const s=createDefaultStartPageSettings(100);
+    s.layout.blocks=s.layout.blocks.filter(b=>b.type==="note");
+    const control=installChrome({startPageSettings:s,startPageRuntimeState:normalizeRuntimeState(undefined,s),localeOverride:"en",startPageOnboarding:{onboarded:false}});
+    try{
+      const t=await loadI18n();
+      await import("../src/newtab/newtab.ts?onboarding="+(++serial));
+      const modal=()=>document.getElementById("onboarding");
+      await until(()=>modal());
+      const store=control.chrome.storage.local, get=store.get,set=store.set;
+      let reads=0,writes=0;
+      store.get=async keys=>{
+        const snapshot=await get(keys);
+        if(keys==="startPageOnboarding"&&++reads===1)control.state.startPageOnboarding={onboarded:true};
+        return snapshot;
+      };
+      store.set=async items=>{
+        if(Object.hasOwn(items,"startPageOnboarding"))writes++;
+        return set(items);
+      };
+      button(modal(),t.t("onboardingSkip")).click();
+      await until(()=>!modal());
+      assert.ok(reads>=2);
+      assert.equal(writes,0);
+      assert.equal(control.messages.length,0);
+      assert.deepEqual(control.state.startPageOnboarding,{onboarded:true});
+      window.dispatchEvent(new window.Event("pagehide"));
+    }finally{dom.window.close()}
+  }
   console.log("Onboarding: destructive preset cancelled, cross-tab completion and no duplicate writes");
 }finally{restoreFetch()}
