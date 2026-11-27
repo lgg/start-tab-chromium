@@ -51,7 +51,7 @@ assert.match(chromeSync, /for \(let index = 0; index < MAX_SYNC_CHUNKS; index \+
   "The committed Browser Sync frame must include every canonical chunk slot");
 assert.match(chromeSync, /payload\[chunkKey\(index\)\] = chunks\[index\] \?\? "";/,
   "Inactive Browser Sync slots must be overwritten with empty values");
-assert.match(chromeSync, /const payload = completeChromeSyncPayload\(meta, snapshot\.chunks\);/,
+assert.match(chromeSync, /const payload = completeChromeSyncPayload\(meta, chunks\);/,
   "Remote uploads must use the complete frame");
 assert.doesNotMatch(chromeSync, /staleRemovedBeforeWrite|chrome\.storage\.sync\.remove\(staleKeys\)|const staleKeys/,
   "A post-upload stale-key removal must never race and corrupt another device snapshot");
