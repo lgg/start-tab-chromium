@@ -313,5 +313,30 @@ try{
       assert.equal(control.messages.length,1);
     }finally{store.get=get;delete navigator.locks;dom.window.close()}
   }
+
+  // An onboarding event can be the only event observed after a concurrent
+  // committed layout change. Its refresh must repaint the new snapshot,
+  // rather than show the onboarding dialog over the previous layout.
+  {
+    const dom=await installDom("newtab/newtab.html");
+    const s=structuredClone(settings);
+    s.layout.blocks=s.layout.blocks.filter(b=>b.type==="note");
+    const control=installChrome({...seed(),startPageSettings:s,startPageRuntimeState:normalizeRuntimeState(undefined,s),startPageOnboarding:{onboarded:true}});
+    try{
+      await import("../src/newtab/newtab.ts?onboarding-snapshot="+(++serial));
+      await until(()=>document.querySelector("#grid [data-block-id]"));
+      const original=one(document,"#grid [data-block-id]");
+      const next=structuredClone(control.state.startPageSettings);
+      next.layout.blocks[0].title="Latest committed scratchpad";
+      next.updatedAt++;
+      control.state.startPageSettings=next;
+      control.state.startPageOnboarding={onboarded:false};
+      control.chrome.storage.onChanged.emit({startPageOnboarding:{newValue:{onboarded:false}}},"local");
+      await until(()=>document.getElementById("onboarding")&&!original.isConnected);
+      assert.equal(one(document,"#grid .card__title").textContent,"Latest committed scratchpad");
+      assert.equal(control.messages.length,0);
+      window.dispatchEvent(new window.Event("pagehide"));
+    }finally{dom.window.close()}
+  }
   console.log("Residual page races: shared popup lease, initialization failures, blocked page disposal and external onboarding completion");
 }finally{globalThis.fetch=catalog;restoreFetch()}
