@@ -107,7 +107,13 @@ async function fetchWeather(block: Extract<BlockInstance, { type: "weather" }>):
   url.searchParams.set("current", "temperature_2m,weather_code");
   url.searchParams.set("daily", "weather_code,temperature_2m_max,temperature_2m_min");
   url.searchParams.set("timezone", "auto");
-  return parseWeatherPayload(await fetchWidgetJson(url.toString()));
+  const weather = parseWeatherPayload(await fetchWidgetJson(url.toString()));
+  // Validate the requested view before the cache marks the load successful.
+  // A partial response must remain retryable on the next render.
+  if (block.config.displayMode === "current" ? weather.currentTemperature === null : weather.days.length === 0) {
+    throw new Error("Missing weather for the configured display mode");
+  }
+  return weather;
 }
 
 export function weatherDaysForDisplay(weather: Pick<WeatherResult, "days">, displayMode: "day" | "week"): WeatherDay[] {
@@ -150,7 +156,7 @@ export function renderWeather(
         day: new Intl.DateTimeFormat(context.i18n.locale, { weekday: "short", month: "short", day: "numeric" }).format(new Date(`${day.date}T12:00:00`)),
         min: Math.round(day.min),
         max: Math.round(day.max),
-        unit: weather.unit,
+        unit: weather.dailyUnit,
         summary: weatherSummary(day.code, context.i18n),
       }))));
     }
