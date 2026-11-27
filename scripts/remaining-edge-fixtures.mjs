@@ -386,7 +386,8 @@ console.log("Navigation: failed session lookup, DNR repair, native grant cleanup
       redirect:async id=>{redirects.push(id)}
     });
     const first=guard.observe(1,"chrome://newtab/");
-    while(!release)await Promise.resolve();
+    for(let attempt=0;!release&&attempt<100;attempt++)await Promise.resolve();
+    assert.ok(release,"redirect guard did not reach the bypass check");
     await guard.observe(1,"https://user-chosen.example/");
     release(false);
     await first;
@@ -394,7 +395,8 @@ console.log("Navigation: failed session lookup, DNR repair, native grant cleanup
     assert.deepEqual(redirects,[]);
     release=undefined;
     const next=guard.observe(1,"chrome://newtab/");
-    while(!release)await Promise.resolve();
+    for(let attempt=0;!release&&attempt<100;attempt++)await Promise.resolve();
+    assert.ok(release,"redirect guard did not reach the bypass check");
     release(false);
     await next;
     assert.deepEqual(redirects,[1]);
@@ -413,6 +415,24 @@ console.log("Navigation: failed session lookup, DNR repair, native grant cleanup
       assert.deepEqual(await fresh.chrome.declarativeNetRequest.getDynamicRules(),rules);
       assert.equal(await bl.rememberBlockedNavigation("https://blocked.example/new"),"blocked.example");
       assert.equal(await bl.getLastBlockedUrl("blocked.example"),"https://blocked.example/new");
+    }finally{globalThis.chrome=priorChrome}
+  }
+
+  // Normalizing a legacy custom theme ID can reveal a collision that was
+  // not apparent in the raw ID. Creating the legacy theme must allocate a
+  // fresh ID and must never overwrite the existing theme.
+  {
+    const priorChrome=globalThis.chrome;
+    const fresh=installChrome({startPageSettings:settings,startPageRuntimeState:runtime});
+    try{
+      const original=await api.saveNewCustomTheme({...api.createCustomThemeDraft(settings,"Original"),id:"legacy-theme-id"});
+      const saved=await api.updateCustomTheme({...original,id:" legacy-theme-id ",name:"Imported legacy theme"});
+      assert.notEqual(saved.id,original.id);
+      assert.equal(saved.name,"Imported legacy theme");
+      const state=await api.getStartPageSettings();
+      assert.equal(state.themes.customThemes.length,2);
+      assert.equal(state.themes.customThemes.find(t=>t.id===original.id).name,"Original");
+      assert.equal(state.themes.selectedThemeId,saved.id);
     }finally{globalThis.chrome=priorChrome}
   }
 console.log("Residual helpers: effect aggregation, canonical data, split-view markers, tab lifecycle and draft acknowledgement");
