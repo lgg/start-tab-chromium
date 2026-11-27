@@ -93,6 +93,52 @@ try {
   assert.deepEqual(control.state.blockedSites,["restored.example"]);
   assert.equal(mediaReads,1);
 
+  // Exercise real upload with a repeated random value and an existing
+  // collision in the backup itself. A safe suffix must allow completion,
+  // while exhaustion must reject without posting or retaining the lock.
+  {
+    const descriptor=Object.getOwnPropertyDescriptor(globalThis,"crypto");
+    const realCrypto=globalThis.crypto;
+    const previous=structuredClone(control.state);
+    const base="start-tab-"+"a".repeat(32);
+    const noteId="multipart-note";
+    const {createBlockInstance,createDefaultStartPageSettings}=await import("../src/lib/start-page-settings.js");
+    const {normalizeRuntimeState}=await import("../src/lib/start-page-runtime.js");
+    const settings=createDefaultStartPageSettings(100);
+    settings.layout.blocks=[createBlockInstance("note",{id:noteId})];
+    const runtime=normalizeRuntimeState(undefined,settings);
+    control.state.startPageSettings=settings;
+    control.state.startPageRuntimeState=runtime;
+    let uploads=0;
+    try {
+      Object.defineProperty(globalThis,"crypto",{configurable:true,value:{randomUUID:()=>"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",subtle:realCrypto.subtle}});
+      globalThis.fetch=async(url,init)=>{
+        if(init?.method==="POST"){
+          uploads++;
+          const boundary=init.headers.get("Content-Type").split("boundary=")[1];
+          assert.equal(boundary,base+"-1");
+          assert.ok(init.body.includes(base));
+          assert.equal(init.body.split("--"+boundary).length,4);
+          return response({id:"backup"});
+        }
+        return response({files:[]});
+      };
+      runtime.notes[noteId]=base;
+      await google.uploadDriveBackup();
+      assert.equal(uploads,1);
+      runtime.notes[noteId]=[base,...Array.from({length:31},(_,i)=>base+"-"+(i+1))].join(" ");
+      await assert.rejects(google.uploadDriveBackup(),/Unable to allocate a safe Google Drive multipart boundary/);
+      assert.equal(uploads,1);
+      runtime.notes[noteId]=base;
+      await google.uploadDriveBackup();
+      assert.equal(uploads,2);
+    } finally {
+      if(descriptor)Object.defineProperty(globalThis,"crypto",descriptor);else delete globalThis.crypto;
+      for(const key of Object.keys(control.state))delete control.state[key];
+      Object.assign(control.state,previous);
+    }
+  }
+
   // The real provider reader must reject empty/error responses, release
   // locked streams on invalid JSON, and not wait for failed cancellation.
   {
