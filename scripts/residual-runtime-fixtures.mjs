@@ -741,3 +741,36 @@ console.log("Pomodoro: imported stale markers and paused intervals cannot inflat
   }finally{globalThis.chrome=previous}
 }
 console.log("Runtime migration: retire stale legacy entries without resurrecting deleted widget data");
+
+
+// A running imported countdown can have an authoritative deadline which
+// differs from the historical start timestamp. Pause must retain exactly
+// the displayed remaining time, and a backwards clock jump cannot undo
+// progress committed in an earlier segment.
+{
+  for(const block of [timer,pomodoro]){
+    const base=rt.defaultClockForBlock(block);
+    const duration=base.durationMs;
+    const accumulated=1000;
+    const now=100000;
+    const original={...base,running:true,startedAt:now-500,accumulatedMs:accumulated,targetAt:now+duration-2000,completionToken:"deadline-audit"};
+    for(const [deadline,remaining] of [[now+duration-2000,duration-2000],[now+duration+10000,duration-accumulated],[now-100,0]]){
+      const clock={...original,targetAt:deadline};
+      assert.equal(rt.remainingClockMs(clock,now),remaining);
+      const paused=rt.pauseClockState(clock,now);
+      assert.equal(rt.remainingClockMs(paused,now),remaining);
+      assert.equal(paused.accumulatedMs,duration-remaining);
+      if(remaining>0){
+        const resumed=rt.startClockState(paused,now+50000);
+        assert.equal(rt.remainingClockMs(resumed,now+50000),remaining);
+        assert.equal(resumed.targetAt,now+50000+remaining);
+      }
+    }
+    const noDeadline={...original,targetAt:null};
+    assert.equal(rt.elapsedClockMs(noDeadline,now),1500);
+  }
+  const stopwatch=api.createBlockInstance("stopwatch",{id:"deadline-stopwatch"});
+  const running=rt.startClockState({...rt.defaultClockForBlock(stopwatch),accumulatedMs:1000},100000);
+  assert.equal(rt.pauseClockState(running,100500).accumulatedMs,1500);
+}
+console.log("Countdown: imported deadline and pause/resume agree without losing prior progress");
