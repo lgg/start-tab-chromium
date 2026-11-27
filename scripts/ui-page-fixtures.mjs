@@ -373,6 +373,83 @@ try {
     await delay(20);
     assert.equal(control.messages.length,previousMessages);
     window.confirm=()=>true;
+
+    // Dirty general form must survive a rejected unrelated action, and
+    // an in-flight save must not be replayed by synthetic submit events.
+    {
+      const currentGap=control.state.startPageSettings.layout.gap;
+      const n=control.messages.length;
+      value(option("layoutGap"),26);
+      window.confirm=()=>false;
+      btn(section("blocker"),"clearBlocklist").click();
+      btn(section("backup"),"syncNow").click();
+      await delay(30);
+      assert.equal(control.messages.length,n);
+      assert.equal(option("layoutGap").value,"26");
+      assert.equal(control.state.startPageSettings.layout.gap,currentGap);
+      window.confirm=()=>true;
+      let release;
+      const previous=control.handler;
+      control.handler=m=>m.type==="replace-start-page-settings"?new Promise(resolve=>{release=async()=>resolve(await previous(m))}):previous(m);
+      try{
+        generalSubmit();await until(()=>release);
+        const inFlight=control.messages.length;
+        generalSubmit();generalSubmit();
+        await delay(20);
+        assert.equal(control.messages.length,inFlight);
+        await release();
+        await until(()=>busyDone()&&control.state.startPageSettings.layout.gap===26);
+      }finally{control.handler=previous}
+      const clean=new window.Event("beforeunload",{cancelable:true});window.dispatchEvent(clean);
+      assert.equal(clean.defaultPrevented,false);
+    }
+    // Smart sync must report each result instead of a generic success.
+    {
+      const api=await import("../src/lib/chrome-sync.js");
+      const message=key=>t.t(key);
+      await control.chrome.storage.sync.remove(Object.keys(await control.chrome.storage.sync.get(null)));
+      btn(section("backup"),"syncNow").click();
+      await until(()=>busyDone()&&status().textContent===message("syncUploaded"));
+      btn(section("backup"),"syncNow").click();
+      await until(()=>busyDone()&&status().textContent===message("syncUnchanged"));
+      // Preserve the baseline, then publish remote-only content from a
+      // separate mock profile and restore the original local profile.
+      const savedLocal=await control.chrome.storage.local.get(null);
+      const savedRemote=await control.chrome.storage.sync.get(null);
+      const remote=installChrome(savedLocal);
+      try{
+        await remote.chrome.storage.sync.set(savedRemote);
+        await remote.chrome.storage.local.set({blockedSites:["remote-only-options.example"]});
+        await api.uploadChromeSyncBackup();
+        await control.chrome.storage.sync.set(await remote.chrome.storage.sync.get(null));
+      }finally{globalThis.chrome=control.chrome}
+      btn(section("backup"),"syncNow").click();
+      await until(()=>busyDone()&&status().textContent===message("syncRestored"));
+      assert.deepEqual(control.state.blockedSites,["remote-only-options.example"]);
+    }
+    // An existing note must not be discarded silently by a layout preset.
+    {
+      const old=structuredClone(control.state.startPageSettings);
+      const note=createBlockInstance("note",{id:"options-private-note",title:"Private note"});
+      old.layout.blocks.push(note);
+      old.layout.profile="custom";
+      control.state.startPageSettings=old;
+      control.state.startPageRuntimeState=normalizeRuntimeState(control.state.startPageRuntimeState,old);
+      control.state.startPageRuntimeState.notes[note.id]="private unsaved-to-backup text";
+      btn(section("backup"),"syncUpload").click();
+      await until(()=>busyDone()&&[...section("blocks").querySelectorAll(".instance-row__title")].some(n=>n.textContent==="Private note"));
+      let confirmations=[];
+      window.confirm=text=>{confirmations.push(text);return false};
+      const n=control.messages.length;
+      value(option("layoutPreset"),"minimal","change");
+      generalSubmit();await delay(30);
+      assert.ok(confirmations.includes(t.t("applyPresetWithDataConfirm")));
+      assert.equal(control.messages.length,n);
+      assert.equal(control.state.startPageRuntimeState.notes[note.id],"private unsaved-to-backup text");
+      window.confirm=()=>true;
+      btn(section("general"),"cancel").click();
+      await until(()=>busyDone());
+    }
     console.log("Options: invalid form, failed save, committed refresh failure, recovery, preset and locale paths");
     console.log("Options: general draft, save, add/edit/duplicate/disable/clear/delete blocks, create/select/delete theme, blocker and reset");
   } finally { dom.window.close(); }
