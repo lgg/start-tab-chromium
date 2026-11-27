@@ -66,8 +66,10 @@ export function oneOf<T extends string>(value: unknown, allowed: readonly T[], f
   return typeof value === "string" && (allowed as readonly string[]).includes(value) ? value as T : fallback;
 }
 
-export function safeWebUrl(value: string): string | null {
-  const trimmed = value.trim();
+export function safeWebUrl(value: unknown, fallback = ""): string | null {
+  // URLs are atomic values: truncating a valid URL can silently change
+  // its destination, query parameters or signed authentication data.
+  const trimmed = (typeof value === "string" ? value : fallback).trim();
   if (!trimmed) return null;
   try {
     const parsed = new URL(trimmed);
@@ -77,8 +79,8 @@ export function safeWebUrl(value: string): string | null {
   }
 }
 
-export function safeWebUrlTemplate(value: string): string | null {
-  const trimmed = value.trim();
+export function safeWebUrlTemplate(value: unknown): string | null {
+  const trimmed = typeof value === "string" ? value.trim() : "";
   if (!trimmed.includes("{query}")) return null;
   return safeWebUrl(trimmed.split("{query}").join("start-tab-query")) ? trimmed : null;
 }
@@ -90,7 +92,7 @@ export function buildSearchUrl(template: string, query: string): string | null {
   try {
     // TextEncoder replaces lone UTF-16 surrogates, matching the browser's
     // URL string conversion instead of throwing on malformed pasted text.
-    const wellFormed = new TextDecoder().decode(new TextEncoder().encode(query));
+    const wellFormed = new TextDecoder("utf-8", { ignoreBOM: true }).decode(new TextEncoder().encode(query));
     const substituted = template.trim().split("{query}").join(encodeURIComponent(wellFormed));
     const safe = safeWebUrl(substituted);
     return safe ? new URL(safe).href : null;
@@ -130,7 +132,7 @@ export function normalizeStartLinks(value: unknown, fallback: readonly StartLink
       issues.push({ path: `${path}[${index}]`, messageKey: "validationInvalidLink" });
       continue;
     }
-    const url = safeWebUrl(stringValue(item.url, ""));
+    const url = safeWebUrl(item.url);
     const title = trimmedString(item.title, "", 100);
     if (!url || !title) {
       issues.push({ path: `${path}[${index}]`, messageKey: "validationInvalidLink" });
@@ -150,6 +152,7 @@ export function normalizeSearchProviders(value: unknown, fallback: readonly Sear
   const source = Array.isArray(value) ? value : fallback;
   const result: SearchProvider[] = [];
   const seen = new Set<string>();
+  const candidates: Array<{ provider: SearchProvider; explicit: boolean; index: number; fallbackTitle: boolean }> = [];
   for (const [index, item] of source.entries()) {
     if (!isRecord(item)) {
       issues.push({ path: `${path}[${index}]`, messageKey: "validationInvalidSearchProvider" });
@@ -160,13 +163,24 @@ export function normalizeSearchProviders(value: unknown, fallback: readonly Sear
     const titleSeed = typeof item.title === "string" ? item.title : "provider";
     const id = trimmedString(item.id, stableItemId("provider", index, titleSeed), 100);
     const title = trimmedString(item.title, id, 100);
-    const urlTemplate = safeWebUrlTemplate(stringValue(item.urlTemplate, ""));
-    if (!id || !title || !urlTemplate || seen.has(id)) {
+    const urlTemplate = safeWebUrlTemplate(item.urlTemplate);
+    if (!id || !title || !urlTemplate) {
       issues.push({ path: `${path}[${index}]`, messageKey: "validationInvalidSearchProvider" });
       continue;
     }
+    candidates.push({ provider: { id, title, urlTemplate }, explicit: typeof item.id === "string", index, fallbackTitle: typeof item.title !== "string" });
+  }
+  const reserved = new Set(candidates.map(({ provider }) => provider.id));
+  const explicitIds = new Set(candidates.filter(({ explicit }) => explicit).map(({ provider }) => provider.id));
+  for (const { provider, explicit, index, fallbackTitle } of candidates) {
+    if (explicit && seen.has(provider.id)) {
+      issues.push({ path: `${path}[${index}]`, messageKey: "validationInvalidSearchProvider" });
+      continue;
+    }
+    const occupied = !explicit && explicitIds.has(provider.id) ? new Set([...seen, provider.id]) : seen;
+    const id = uniqueEntityId(provider.id, occupied, reserved);
     seen.add(id);
-    result.push({ id, title, urlTemplate });
+    result.push({ ...provider, id, title: fallbackTitle ? id : provider.title });
   }
   return result.length > 0 ? result : fallback.map((provider) => ({ ...provider }));
 }
