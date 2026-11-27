@@ -1,4 +1,5 @@
 import { ownValue } from "../lib/dictionary.js";
+import { uniqueEntityId } from "../lib/start-page-validation-primitives.js";
 import { sendMessage, type ClockAction } from "../lib/messages.js";
 import { MAX_LOCAL_TASKS_PER_INSTANCE, MAX_LOCAL_TASK_TITLE_LENGTH, MAX_NOTE_LENGTH } from "../lib/platform-limits.js";
 import {
@@ -363,12 +364,14 @@ function taskRow(
   checkbox.setAttribute("aria-label", context.i18n.t("toggleTask", { title: task.title }));
   const title = element("span", task.done ? "task__title task__title--done" : "task__title", task.title);
   const remove = actionButton("×", () => {
+    if (!row.isConnected) return;
     mutate((tasks) => tasks.filter((candidate) => candidate.id !== task.id));
   }, "icon-button", context.reportError);
   remove.disabled = pending;
   remove.title = context.i18n.t("removeTask");
   remove.setAttribute("aria-label", context.i18n.t("removeTask"));
   checkbox.addEventListener("change", () => {
+    if (!row.isConnected) return;
     const done = checkbox.checked;
     mutate((tasks) => tasks.map((candidate) => candidate.id === task.id
       ? { ...candidate, done, updatedAt: Math.max(Date.now(), candidate.updatedAt) }
@@ -436,12 +439,14 @@ export function renderLocalTasks(
       return;
     }
     submissions.draft = input.value;
-    const title = submissions.draft.trim().slice(0, MAX_LOCAL_TASK_TITLE_LENGTH);
+    const title = submissions.draft.trim().slice(0, MAX_LOCAL_TASK_TITLE_LENGTH).trimEnd();
     if (!title || !submissions.begin()) return;
     const submittedDraft = submissions.snapshotDraft();
     const now = Date.now();
+    const ids = new Set(currentTasks.map((task) => task.id));
+    const generatedId = globalThis.crypto?.randomUUID?.() ?? `task-${now.toString(36)}-${Math.random().toString(36).slice(2)}`;
     const task: LocalTask = {
-      id: globalThis.crypto?.randomUUID?.() ?? `task-${now.toString(36)}-${Math.random().toString(36).slice(2)}`,
+      id: uniqueEntityId(generatedId, ids, ids),
       title,
       done: false,
       createdAt: now,
