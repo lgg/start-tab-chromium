@@ -214,9 +214,10 @@ assert.equal(backup.backupModifiedAt({...beforeBackup,storage:{}}),0);
 assert.equal(backup.backupModifiedAt({...beforeBackup,storage:{startPageSettings:{updatedAt:123}}}),123);
 assert.equal(backup.backupModifiedAt({...beforeBackup,storage:{startPageRuntimeState:{updatedAt:456}}}),456);
 // A real full-format export may not silently become a partial destructive
-// restore. Only legacy/headerless partial imports can omit whole sections.
+// restore. Historical v4 exports did not promise completeness.
 {
   const full=await backup.exportBackup();
+  assert.equal(full.complete,true);
   const stored=await local.get(null);
   const rules=await control.chrome.declarativeNetRequest.getDynamicRules();
   const alarmNames=[...control.alarms.keys()];
@@ -228,10 +229,10 @@ assert.equal(backup.backupModifiedAt({...beforeBackup,storage:{startPageRuntimeS
     await assert.rejects(backup.importBackup(missing),/Invalid Start Tab backup section/,key);
   }
   for(const [parent,field] of [
-    ["startPageSettings","layout"],["startPageSettings","themes"],["startPageSettings","startTab"],
+    ["startPageSettings","schemaVersion"],["startPageSettings","layout"],["startPageSettings","themes"],["startPageSettings","startTab"],
     ["startPageSettings","settingsButton"],["startPageSettings","focusStats"],
     ["startPageSettings.layout","blocks"],["startPageSettings.themes","customThemes"],
-    ["startPageSettings.themes","selectedThemeId"],["startPageRuntimeState","clocks"],
+    ["startPageSettings.themes","selectedThemeId"],["startPageRuntimeState","version"],["startPageRuntimeState","clocks"],
     ["startPageRuntimeState","notes"],["startPageRuntimeState","tasks"],["startPageRuntimeState","linkPages"]
   ]){
     const missing=structuredClone(full);
@@ -253,6 +254,23 @@ assert.equal(backup.backupModifiedAt({...beforeBackup,storage:{startPageRuntimeS
   const optional=structuredClone(full);
   delete optional.storage.localeOverride;delete optional.storage.focusStats;
   assert.doesNotThrow(()=>backup.migrateBackup(optional));
+  // Original July 2026 v4 exports listed every supported key regardless of
+  // presence. Statistics then lacked the completion-token dictionary.
+  const historical=structuredClone(full);
+  delete historical.complete;
+  delete historical.storage.blockedSites;
+  delete historical.storage.lastBlockedUrls;
+  delete historical.storage.startPageOnboarding;
+  historical.storage.focusStats={version:1,totals:{focusSessionsCompleted:7},byDay:{},byDomain:{}};
+  const upgraded=backup.migrateBackup(historical);
+  assert.equal(upgraded.complete,true);
+  assert.equal(upgraded.storage.focusStats.totals.focusSessionsCompleted,7);
+  assert.deepEqual(Object.keys(upgraded.storage.focusStats.processedClockCompletions),[]);
+  assert.deepEqual(upgraded.storage.blockedSites,[]);
+  assert.equal(upgraded.storage.startPageOnboarding.onboarded,false);
+  // Old pre-import recovery envelopes could contain raw partial storage.
+  const oldRecovery={...historical,storage:{blockedSites:["legacy-recovery.example"]}};
+  assert.deepEqual(backup.migrateBackup(oldRecovery).storage.blockedSites,["legacy-recovery.example"]);
 }
 console.log("Deep audit: declared backup truncation rejected without modifying local storage, rules or alarms");
 
