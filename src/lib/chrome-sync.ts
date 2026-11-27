@@ -207,7 +207,7 @@ function isSyncMeta(value: unknown): value is SyncMeta {
     && Number.isInteger(value.backupVersion) && (value.backupVersion as number) >= 1 && (value.backupVersion as number) <= BACKUP_VERSION;
 }
 function normalizeLegacyMeta(meta: LegacySyncMeta): SyncMeta {
-  return { version: SYNC_META_VERSION, updatedAt: meta.updatedAt, contentUpdatedAt: Date.parse(meta.updatedAt), deviceId: meta.deviceId,
+  return { version: SYNC_META_VERSION, updatedAt: meta.updatedAt, contentUpdatedAt: Math.max(0, Date.parse(meta.updatedAt)), deviceId: meta.deviceId,
     snapshotId: `legacy-${meta.checksum.slice(0, 16)}`, checksum: meta.checksum, contentChecksum: "0".repeat(64),
     chunks: meta.chunks, backupVersion: 3 };
 }
@@ -257,7 +257,7 @@ async function writeLocalMeta(meta: SyncMeta): Promise<void> { await chrome.stor
 export async function getChromeSyncBackupMeta(): Promise<SyncMeta | null> { return (await readRemoteMeta())?.meta ?? null; }
 
 async function prepareSnapshot(): Promise<{
-  bundle: BackupBundle; json: string; chunks: string[]; checksum: string; contentChecksum: string; contentUpdatedAt: number;
+  bundle: BackupBundle; json: string; checksum: string; contentChecksum: string; contentUpdatedAt: number;
   dataRevisionFallback: number; storedDataRevision: number | null;
 }> {
   const captured = await exportBackupSnapshot();
@@ -265,9 +265,9 @@ async function prepareSnapshot(): Promise<{
   // Keep the revision invariant in its allocator/reader, not in every consumer.
   const bundle = captured.bundle;
   const json = JSON.stringify(bundle);
-  const chunks = chunkForChromeSync(json, syncItemQuotaBytes());
-  if (chunks.length > MAX_SYNC_CHUNKS) throw new Error("Start Tab backup is too large for browser sync. Use JSON export or Google Drive backup instead.");
-  return { bundle, json, chunks, checksum: await checksum(json), contentChecksum: await checksum(canonicalBackupContent(bundle)),
+  // Reading/comparing/restoring a snapshot does not require that it fits
+  // the upload quota. Enforce the limit only after selecting an upload.
+  return { bundle, json, checksum: await checksum(json), contentChecksum: await checksum(canonicalBackupContent(bundle)),
     contentUpdatedAt: captured.dataRevision, dataRevisionFallback: captured.dataRevisionFallback, storedDataRevision: captured.storedDataRevision };
 }
 
@@ -326,10 +326,12 @@ async function writeRemoteSnapshot(
     throw new ChromeSyncRemoteConflictError();
   }
   if (expectedRemote === null) assertEmptyRemoteFrame(existing);
+  const chunks = chunkForChromeSync(snapshot.json, syncItemQuotaBytes());
+  if (chunks.length > MAX_SYNC_CHUNKS) throw new Error("Start Tab backup is too large for browser sync. Use JSON export or Google Drive backup instead.");
   const meta: SyncMeta = { version: SYNC_META_VERSION, updatedAt: new Date().toISOString(), contentUpdatedAt: snapshot.contentUpdatedAt,
     deviceId: await deviceId(), snapshotId: snapshot.bundle.snapshotId, checksum: snapshot.checksum,
-    contentChecksum: snapshot.contentChecksum, chunks: snapshot.chunks.length, backupVersion: snapshot.bundle.version };
-  const payload = completeChromeSyncPayload(meta, snapshot.chunks);
+    contentChecksum: snapshot.contentChecksum, chunks: chunks.length, backupVersion: snapshot.bundle.version };
+  const payload = completeChromeSyncPayload(meta, chunks);
   const finalState = { ...existing, ...payload };
   const totalQuota = syncTotalQuotaBytes();
   if (chromeSyncStorageBytes(finalState) > totalQuota) {
