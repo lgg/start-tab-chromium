@@ -252,3 +252,37 @@ assert.throws(
 );
 
 console.log("Round 31 fixtures passed");
+
+
+ // Repeated www aliases must not change across storage, rule generation,
+ // navigation, and backup normalization. Reclaim only exact marked rules
+ // that were stranded by the previous one-label-per-pass normalizer.
+{
+  resetDnrState();
+  const host="www.www.example.com";
+  const canonical="example.com";
+  assert.equal(blocklist.normalizeHost("WWW.www.Example.COM."),canonical);
+  assert.equal(blocklist.hostFromUrl("https://WWW.www.Example.COM./path"),canonical);
+  assert.deepEqual(blocklist.normalizeBlockedSites([host,canonical]),[canonical]);
+  assert.deepEqual(blocklist.normalizeBlockedSites(blocklist.normalizeBlockedSites([host])),[canonical]);
+  localStorage={blockedSites:[host],lastBlockedUrls:{[host]:"https://"+host+"/path"},startTabDataRevision:{version:1,updatedAt:1}};
+  const stranded=foreignRule(1,"chrome-extension://round31/blocked.html?site="+host+"&owner=start-tab-blocklist-v1",host);
+  const lookalike=foreignRule(2,"chrome-extension://round31/blocked.html?site="+host+"&owner=another-feature",host);
+  const unmarked=legacyBlocklistRule(3,host);
+  dynamicRules=[stranded,lookalike,unmarked];
+  assert.deepEqual(await blocklist.readDynamicRulesSnapshot(),[stranded]);
+  await blocklist.syncRules();
+  assert.deepEqual(await blocklist.getBlockedSites(),[canonical]);
+  assert.equal(await blocklist.blockedSiteForUrl("https://"+host+"/path"),canonical);
+  assert.equal(await blocklist.getLastBlockedUrl(canonical),"https://"+host+"/path");
+  const owned=await blocklist.readDynamicRulesSnapshot();
+  assert.equal(owned.length,1);
+  assert.deepEqual(owned[0]?.condition.requestDomains,[canonical]);
+  assert.equal(owned[0]?.priority,2);
+  assert.deepEqual(dynamicRules.find(rule=>rule.id===2),lookalike);
+  assert.deepEqual(dynamicRules.find(rule=>rule.id===3),unmarked);
+  assert.equal(await blocklist.unblockHost(host),true);
+  assert.deepEqual(await blocklist.getBlockedSites(),[]);
+  assert.deepEqual(await blocklist.readDynamicRulesSnapshot(),[]);
+  assert.deepEqual(dynamicRules,[lookalike,unmarked]);
+}
