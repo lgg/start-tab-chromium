@@ -95,9 +95,19 @@ export function defaultClockForBlock(block: Extract<BlockInstance, { type: Clock
   }
 }
 
+/** Runtime tokens cross the worker-message and URI-encoded alarm boundaries.
+ * Preserve every valid existing token, but repair malformed imports with the
+ * deterministic legacy token rather than leaving a countdown unfinishable. */
+function validClockToken(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 256
+    && !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(value);
+}
+
 function normalizeClock(block: Extract<BlockInstance, { type: ClockBlockType }>, value: unknown): ClockRuntimeState {
   const fallback = defaultClockForBlock(block);
   if (!isRecord(value)) return fallback;
+  // An explicitly different clock kind cannot own this block\'s state.
+  if (typeof value.type === "string" && value.type !== block.type) return fallback;
   const phase: PomodoroPhase | null = block.type === "pomodoro" && value.phase === "break" ? "break" : block.type === "pomodoro" ? "work" : null;
   const configuredDuration = block.type === "timer"
     ? block.config.durationSeconds * 1000
@@ -112,7 +122,7 @@ function normalizeClock(block: Extract<BlockInstance, { type: ClockBlockType }>,
   const durationMs = block.type === "stopwatch" ? 0 : running || hasProgress ? storedDuration : configuredDuration;
   const accumulatedMs = finiteInteger(storedAccumulated, 0, 0, block.type === "stopwatch" ? MAX_CLOCK_MS : durationMs);
   const targetAt = block.type === "stopwatch" ? null : running ? timestamp(value.targetAt, startedAt + Math.max(0, durationMs - accumulatedMs)) : null;
-  const storedCompletionToken = typeof value.completionToken === "string" && value.completionToken ? value.completionToken : null;
+  const storedCompletionToken = validClockToken(value.completionToken) ? value.completionToken : null;
   const completionToken = block.type === "stopwatch" || !running || targetAt === null
     ? null
     : storedCompletionToken ?? legacyClockToken(block, startedAt, targetAt, durationMs);
@@ -126,7 +136,7 @@ function normalizeClock(block: Extract<BlockInstance, { type: ClockBlockType }>,
     phase,
     focusSessionStartedAt: block.type === "pomodoro" ? timestamp(value.focusSessionStartedAt) : null,
     completionToken,
-    lastCompletedToken: typeof value.lastCompletedToken === "string" && value.lastCompletedToken ? value.lastCompletedToken : null,
+    lastCompletedToken: validClockToken(value.lastCompletedToken) ? value.lastCompletedToken : null,
   };
 }
 
@@ -242,14 +252,14 @@ export function normalizeRuntimeState(value: unknown, settings: StartPageSetting
   return { version: RUNTIME_SCHEMA_VERSION, updatedAt: finiteInteger(source.updatedAt, 0, 0, Number.MAX_SAFE_INTEGER), clocks, notes, tasks, linkPages };
 }
 
-async function readRuntimeSettingsSnapshot(requireCompatible: boolean): Promise<{ settings: StartPageSettings; future: boolean }> {
+async function readRuntimeSettingsSnapshot(requireCompatible: boolean): Promise<{ settings: StartPageSettings; future: boolean; raw: unknown }> {
   const items = await chrome.storage.local.get(START_PAGE_SETTINGS_KEY);
   const raw = items[START_PAGE_SETTINGS_KEY];
   const future = isFutureStartPageSchema(raw);
   if (requireCompatible && future) {
     throw new Error("Start Tab settings were created by a newer extension version and runtime data cannot be modified safely");
   }
-  return { settings: normalizeStartPageSettings(raw), future };
+  return { settings: normalizeStartPageSettings(raw), future, raw };
 }
 
 /** Only use valid numeric timestamps as revision floors, including during an
@@ -272,7 +282,7 @@ async function persistRuntimeInTransaction(
   settings: StartPageSettings,
   expectedUpdatedAt: number | null = null,
   removeLegacy = false,
-  repairSource?: Record<string, unknown>,
+  expectedSource?: Record<string, unknown>,
 ): Promise<StartPageRuntimeState> {
   const keys = [START_PAGE_RUNTIME_KEY, DATA_REVISION_KEY, START_PAGE_SETTINGS_KEY, LEGACY_INSTANCE_RUNTIME_KEY];
   const items = await chrome.storage.local.get(keys);
@@ -283,10 +293,10 @@ async function persistRuntimeInTransaction(
   if (isFutureStartPageSchema(items[START_PAGE_SETTINGS_KEY])) {
     throw new Error("Start Tab settings were created by a newer extension version and runtime data cannot be modified safely");
   }
-  // A read-triggered repair must not prune a newer layout or overwrite a
-  // newer runtime/legacy value, even if an older context bypassed our lock.
-  if (repairSource && [START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY].some(key =>
-    !jsonContentEqual(repairSource[key], items[key]))) {
+  // A repair or mutation must not overwrite a newer layout, runtime or
+  // legacy value even if an older context bypassed our lock.
+  const guardKeys = [START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY];
+  if (expectedSource && guardKeys.some(key => !jsonContentEqual(expectedSource[key], items[key]))) {
     throw new Error("Start Tab data changed during runtime normalization; reload before saving");
   }
   const currentUpdatedAt = normalizeRuntimeState(raw, settings).updatedAt;
@@ -311,6 +321,7 @@ async function persistRuntimeInTransaction(
       if (removeLegacy) await chrome.storage.local.remove(LEGACY_INSTANCE_RUNTIME_KEY);
     },
     stamped.updatedAt,
+    { expectedStorage: Object.fromEntries(guardKeys.map(key => [key, items[key]])), conflictMessage: "Start Tab data changed during runtime normalization; reload before saving" },
   );
   return stamped;
 }
@@ -353,8 +364,9 @@ export async function getStartPageRuntimeState(inputSettings?: StartPageSettings
 
 export async function setStartPageRuntimeState(state: StartPageRuntimeState): Promise<void> {
   await withStorageLock("data-write", async () => {
-    const { settings } = await readRuntimeSettingsSnapshot(true);
-    await persistRuntimeInTransaction(normalizeRuntimeState(state, settings), settings, state.updatedAt);
+    const { settings, raw } = await readRuntimeSettingsSnapshot(true);
+    const items = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
+    await persistRuntimeInTransaction(normalizeRuntimeState(state, settings), settings, state.updatedAt, false, { ...items, [START_PAGE_SETTINGS_KEY]: raw });
   });
 }
 
@@ -388,7 +400,7 @@ async function runRuntimeMutation<T>(
   storageEffect: RuntimeStorageEffect<T> | null = null,
 ): Promise<{ result: T; state: StartPageRuntimeState }> {
   return withStorageLock("data-write", async () => {
-    const { settings } = await readRuntimeSettingsSnapshot(true);
+    const { settings, raw: rawSettings } = await readRuntimeSettingsSnapshot(true);
     const items = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
     const raw = items[START_PAGE_RUNTIME_KEY];
     if (isFutureRuntimeSchema(raw)) {
@@ -412,6 +424,7 @@ async function runRuntimeMutation<T>(
       settings,
       current.updatedAt,
       items[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined,
+      { ...items, [START_PAGE_SETTINGS_KEY]: rawSettings },
     );
     if (needsRollbackSnapshot && previousStorage) {
       try {
@@ -1054,7 +1067,7 @@ export async function deleteInstanceRuntime(
 
     try {
       if (normalizedHasInstance || storedHasInstance) {
-        await persistRuntimeInTransaction(runtime, settings, runtime.updatedAt, rawLegacy !== undefined);
+        await persistRuntimeInTransaction(runtime, settings, runtime.updatedAt, rawLegacy !== undefined, stored);
       }
       await clearClockAlarm(instanceId);
     } catch (error) {
