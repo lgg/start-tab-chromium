@@ -38,7 +38,7 @@ function normalizeBackground(value: unknown, fallback: BackgroundTile, path: str
   if (kind === "solid") return { kind, color: safeCssToken(value.color, fallback.kind === kind ? fallback.color : "#08111f", 100) };
   if (kind === "gradient") return { kind, css: safeGradient(value.css, fallback.kind === kind ? fallback.css : "linear-gradient(145deg, #08111f, #1e293b)") };
   if (kind === "image") {
-    const url = safeWebUrl(stringValue(value.url, fallback.kind === kind ? fallback.url : ""));
+    const url = safeWebUrl(value.url, fallback.kind === kind ? fallback.url : "");
     if (!url) issues.push({ path: `${path}.url`, messageKey: "validationInvalidUrl" });
     if (!url && fallback.kind !== kind) return structuredClone(fallback);
     return { kind, url: url ?? (fallback.kind === kind ? fallback.url : ""), fit: oneOf(value.fit, ["cover", "contain"] as const, fallback.kind === kind ? fallback.fit : "cover"), position: safeCssToken(value.position, fallback.kind === kind ? fallback.position : "center", 100) };
@@ -97,7 +97,7 @@ export function migrateLegacyTheme(root: Record<string, unknown>, _issues: Valid
   fallback.name = "Migrated theme";
   fallback.builtIn = false;
   const color = safeCssToken(appearance.backgroundColor, "#08111f", 100);
-  const image = safeWebUrl(stringValue(appearance.backgroundImage, ""));
+  const image = safeWebUrl(appearance.backgroundImage);
   const effect = stringValue(appearance.backgroundEffect, "none");
   if (image) fallback.background = { kind: "image", url: image, fit: "cover", position: "center" };
   else if (["gradient", "aurora", "mesh", "spotlight", "noise"].includes(effect)) {
