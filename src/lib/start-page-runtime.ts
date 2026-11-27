@@ -360,10 +360,13 @@ export async function getStartPageViewSnapshot(): Promise<{ settings: StartPageS
     const rawRuntime = stored[START_PAGE_RUNTIME_KEY];
     const settings = normalizeStartPageSettings(rawSettings);
     const normalized = normalizeRuntimeState(rawRuntime, settings, stored[LEGACY_INSTANCE_RUNTIME_KEY]);
+    const hasLegacy = Object.hasOwn(stored, LEGACY_INSTANCE_RUNTIME_KEY);
+    // Canonical equality does not mean migration is complete. An unused
+    // legacy entry can otherwise reappear after a later layout change.
     const runtime = isFutureStartPageSchema(rawSettings) || isFutureRuntimeSchema(rawRuntime)
-      || jsonContentEqual(rawRuntime, normalized)
+      || (!hasLegacy && jsonContentEqual(rawRuntime, normalized))
       ? normalized
-      : await persistRuntimeInTransaction(normalized, settings, null, stored[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined, stored);
+      : await persistRuntimeInTransaction(normalized, settings, null, hasLegacy, stored);
     return { settings, runtime, localePreference: localePreferenceFromStored(stored[LOCALE_OVERRIDE_KEY]) };
   });
 }
@@ -377,9 +380,11 @@ export async function getStartPageRuntimeState(inputSettings?: StartPageSettings
     const raw = items[START_PAGE_RUNTIME_KEY];
     const settings = normalizeStartPageSettings(rawSettings);
     const normalized = normalizeRuntimeState(raw, settings, items[LEGACY_INSTANCE_RUNTIME_KEY]);
-    const canonical = isFutureStartPageSchema(rawSettings) || isFutureRuntimeSchema(raw) || jsonContentEqual(raw, normalized)
+    const hasLegacy = Object.hasOwn(items, LEGACY_INSTANCE_RUNTIME_KEY);
+    const canonical = isFutureStartPageSchema(rawSettings) || isFutureRuntimeSchema(raw)
+      || (!hasLegacy && jsonContentEqual(raw, normalized))
       ? normalized
-      : await persistRuntimeInTransaction(normalized, settings, null, items[LEGACY_INSTANCE_RUNTIME_KEY] !== undefined, items);
+      : await persistRuntimeInTransaction(normalized, settings, null, hasLegacy, items);
     // An editor layout is a projection, not authority to prune stored data.
     return inputSettings ? normalizeRuntimeState(canonical, inputSettings) : canonical;
   });
@@ -389,7 +394,9 @@ export async function setStartPageRuntimeState(state: StartPageRuntimeState): Pr
   await withStorageLock("data-write", async () => {
     const { settings, raw } = await readRuntimeSettingsSnapshot(true);
     const items = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
-    await persistRuntimeInTransaction(normalizeRuntimeState(state, settings), settings, state.updatedAt, false, { ...items, [START_PAGE_SETTINGS_KEY]: raw });
+    // A complete runtime replacement supersedes legacy values as well.
+    await persistRuntimeInTransaction(normalizeRuntimeState(state, settings), settings, state.updatedAt,
+      Object.hasOwn(items, LEGACY_INSTANCE_RUNTIME_KEY), { ...items, [START_PAGE_SETTINGS_KEY]: raw });
   });
 }
 
