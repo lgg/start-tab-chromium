@@ -908,7 +908,7 @@ export async function completeClockInstance(instanceId: string, expectedToken: s
     }
     const current = ownValue(runtime.clocks, instanceId) ?? defaultClockForBlock(block);
     const token = current.completionToken;
-    if (!current.running || current.type === "stopwatch" || current.targetAt === null || current.targetAt > now + 1000) {
+    if (!current.running || block.type === "stopwatch" || current.targetAt === null || current.targetAt > now + 1000) {
       return { state: null, result: { completed: false, block, clock: current, notify: false, focusTimeMs: 0, startedWork: false, completedToken: null } };
     }
     if (expectedToken && token !== expectedToken) {
@@ -922,7 +922,7 @@ export async function completeClockInstance(instanceId: string, expectedToken: s
     let focusTimeMs = 0;
     if (block.type === "timer") {
       next = { ...current, running: false, startedAt: null, accumulatedMs: current.durationMs, targetAt: null, lastCompletedToken: token, completionToken: null };
-    } else if (block.type === "pomodoro") {
+    } else {
       const completedPhase = current.phase ?? "work";
       if (completedPhase === "work" && current.focusSessionStartedAt !== null) {
         focusTimeMs = pomodoroFocusElapsedMs(current, now);
@@ -942,8 +942,6 @@ export async function completeClockInstance(instanceId: string, expectedToken: s
         lastCompletedToken: token,
         completionToken: autoStart ? clockToken() : null,
       };
-    } else {
-      return { state: null, result: { completed: false, block, clock: current, notify: false, focusTimeMs: 0, startedWork: false, completedToken: null } };
     }
 
     runtime.clocks[instanceId] = next;

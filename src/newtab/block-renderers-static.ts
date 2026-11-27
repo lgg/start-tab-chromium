@@ -138,7 +138,7 @@ export function renderIp(
   void requestCache.get(`ip:${block.config.endpoint}`, 5 * 60_000, () => fetchIp(block.config.endpoint)).then((result) => {
     if (!detail.isConnected) return;
     detail.textContent = context.i18n.t("ipResult", {
-      ip: result.ip || context.i18n.t("ipUnknown"),
+      ip: result.ip, // parseIpPayload only returns a validated, nonempty address.
       country: result.country || context.i18n.t("ipUnknownCountry"),
     });
   }).catch(() => {

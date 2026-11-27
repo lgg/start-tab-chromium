@@ -82,9 +82,8 @@ export function validatedWeatherCoordinates(
 }
 
 async function geocodeCity(endpoint: string, city: string): Promise<{ latitude: number; longitude: number } | null> {
-  if (!city.trim()) return null;
   const url = new URL(endpoint);
-  url.searchParams.set("name", city.trim());
+  url.searchParams.set("name", city);
   url.searchParams.set("count", "1");
   url.searchParams.set("language", "en");
   url.searchParams.set("format", "json");
@@ -94,8 +93,9 @@ async function geocodeCity(endpoint: string, city: string): Promise<{ latitude: 
 }
 
 async function weatherCoordinates(block: Extract<BlockInstance, { type: "weather" }>): Promise<{ latitude: number; longitude: number }> {
-  if (!block.config.city.trim()) return { latitude: block.config.latitude, longitude: block.config.longitude };
-  const geocoded = await geocodeCity(block.config.geocodingEndpoint, block.config.city);
+  const city = block.config.city.trim();
+  if (!city) return { latitude: block.config.latitude, longitude: block.config.longitude };
+  const geocoded = await geocodeCity(block.config.geocodingEndpoint, city);
   if (!geocoded) throw new Error("The configured weather city could not be geocoded");
   return geocoded;
 }

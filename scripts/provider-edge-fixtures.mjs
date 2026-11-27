@@ -196,6 +196,22 @@ try {
     }finally{globalThis.TextEncoder=encoder}
     assert.equal(buildSearchUrl(template,"тест 😀"),"https://example.com/search?q=%D1%82%D0%B5%D1%81%D1%82%20%F0%9F%98%80");
   }
+  // Both a successfully cancelled and a rejected body reader must release
+  // its lock and preserve the original transport failure.
+  {
+    const {fetchWidgetJson}=await import("../src/newtab/widget-network.js");
+    const failure=Error("widget transport interrupted");
+    for(const rejectCancel of [false,true]){
+      let cancelled=0,released=0;
+      globalThis.fetch=async()=>({ok:true,body:{getReader:()=>({
+        read:async()=>{throw failure},
+        cancel:async()=>{cancelled++;if(rejectCancel)throw Error("cancel denied")},
+        releaseLock:()=>{released++}
+      })}});
+      await assert.rejects(fetchWidgetJson("https://widget.example/"),e=>e===failure);
+      assert.equal(cancelled,1);assert.equal(released,1);
+    }
+  }
   console.log("Google: absent items, timed event precedence, bounded pagination and successful media restore");
   console.log("Locale and Google failure matrix: auto detection, fallback, CAS, malformed responses, invalid tokens, retry, size limit, calendar dates and Drive listing");
 } finally {restoreFetch();dom.window.close();}
