@@ -424,6 +424,54 @@ try{
       assert.equal(control.state.startPageRuntimeState.linkPages[id],undefined);
     }finally{write=previousWrite}
   }
+
+  // A transient save rejection with no competing edit must retry without an
+  // overwrite confirmation. A deliberate discard must prompt, and only the
+  // accepted confirmation may replace the private draft with stored text.
+  {
+    const b={...note,id:"note-explicit-recovery"};
+    settings.layout.blocks.push(b);
+    control.state.startPageSettings=structuredClone(settings);
+    context.runtime.notes[b.id]="committed baseline";
+    context.runtime.updatedAt=++revision;
+    control.state.startPageRuntimeState=structuredClone(context.runtime);
+    const originalWrite=write, originalConfirm=window.confirm;
+    const view=mount(b);
+    const input=one(view.root,"textarea"),status=one(view.root,".note-save-status");
+    const retry=button(view.root,"noteDraftRetry"),discard=button(view.root,"noteDraftDiscard");
+    let prompts=0;
+    try{
+      write=async()=>{throw Error("temporarily offline")};
+      value(input,"retry without conflict");
+      await until(()=>!status.hidden);
+      const beforeRetry=writes.length;
+      window.confirm=()=>{prompts++;return false};
+      write=async m=>{commit(m);return {ok:true,runtimeUpdatedAt:revision}};
+      retry.click();
+      await until(()=>status.hidden&&context.runtime.notes[b.id]==="retry without conflict");
+      assert.equal(prompts,0);
+      assert.equal(writes.length,beforeRetry+1);
+      assert.equal(writes.at(-1).expectedValue,"committed baseline");
+      write=async()=>{throw Error("temporarily offline again")};
+      value(input,"private rejected draft");
+      await until(()=>!status.hidden);
+      const beforeDiscard=writes.length;
+      discard.click();
+      await until(()=>prompts===1&&!discard.disabled);
+      assert.equal(input.value,"private rejected draft");
+      assert.equal(status.hidden,false);
+      assert.equal(writes.length,beforeDiscard);
+      window.confirm=()=>{prompts++;return true};
+      discard.click();
+      await until(()=>status.hidden&&!discard.disabled);
+      assert.equal(prompts,2);
+      assert.equal(input.value,"retry without conflict");
+      assert.equal(context.runtime.notes[b.id],"retry without conflict");
+      assert.equal(writes.length,beforeDiscard);
+    }finally{
+      view.dispose();write=originalWrite;window.confirm=originalConfirm;
+    }
+  }
   console.log("Widgets: fallback search, disconnected controls, hidden search drafts, absent IP country and pinned failure");
   console.log("Widget races: pending notes, explicit overwrite, hidden drafts, legacy ACKs, failed refresh and timer completion");
 }finally{dom.window.close()}
