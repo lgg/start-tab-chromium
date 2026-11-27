@@ -3,6 +3,7 @@ import { placeGridBlock, placeGridBlocks } from "../lib/grid-layout.js";
 import type { I18n } from "../lib/i18n.js";
 import { sendMessage } from "../lib/messages.js";
 import { MAX_START_PAGE_BLOCKS } from "../lib/platform-limits.js";
+import { uniqueEntityId } from "../lib/start-page-validation-primitives.js";
 import { clampFreeGeometry, LayoutDraftVersion, chooseAcknowledgedSettings, pointerDraftChanged } from "./layout-draft-version.js";
 import { getStartPageViewSnapshot } from "../lib/start-page-runtime.js";
 import { jsonContentEqual } from "../lib/json-content.js";
@@ -15,6 +16,7 @@ import {
   cloneBlock,
   cloneSettings,
   createBlockInstance,
+  createBlockId,
   blockDeletionRequiresDataConfirmation,
   isSingletonBlockType,
   type BlockInstance,
@@ -302,12 +304,19 @@ export class LayoutEditor {
       : clampFreeGeometry(configured));
   }
 
+  private allocateDraftBlockId(type: BlockType): string {
+    // Keep saved IDs reserved even after removing their blocks from this
+    // draft; a new block must not inherit the removed block\'s runtime.
+    const used = new Set([...this.saved.layout.blocks, ...this.draft.layout.blocks].map((block) => block.id));
+    return uniqueEntityId(createBlockId(type), used, used);
+  }
+
   private duplicate(id: string): void {
     const source = this.draft.layout.blocks.find((block) => block.id === id);
     if (!source || isSingletonBlockType(source.type) || this.draft.layout.blocks.length >= MAX_START_PAGE_BLOCKS) return;
     const copy = createBlockInstance(source.type, {
       ...cloneBlock(source),
-      id: undefined,
+      id: this.allocateDraftBlockId(source.type),
       title: `${this.displayTitle(source)} ${this.options.i18n.t("copySuffix")}`,
       column: source.column + 1,
       row: source.row + 1,
@@ -346,6 +355,7 @@ export class LayoutEditor {
     const descriptor = blockDescriptor(type);
     const row = maxGridRow(this.draft.layout.blocks) + 1;
     let block = createBlockInstance(type, {
+      id: this.allocateDraftBlockId(type),
       title: blockTitleKey(type),
       zone: this.draft.layout.zone,
       row,
