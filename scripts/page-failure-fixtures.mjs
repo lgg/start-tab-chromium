@@ -336,6 +336,21 @@ try{
     await until(()=>one(document,"#note").textContent.includes("block refused"));
     assert.equal(control.messages.at(-1).type,"block");
   },control=>{control.tab={id:1,url:"https://new.example/"}}); 
+  // A transport failure that invalidated the blocklist must keep the
+  // mutation lease closed even when a synthetic click reaches the handler.
+  await popup(async control=>{
+    control.handler=async()=>{control.chrome.tabs.query=async()=>{throw Error("refresh denied")};return {ok:true}};
+    one(document,"#clear").click();
+    await until(()=>one(document,"#note").textContent.includes("refresh denied"));
+    const before=control.messages.length;
+    let prompts=0;
+    window.confirm=()=>{prompts++;return true};
+    one(document,"#clear").dispatchEvent(new window.MouseEvent("click",{bubbles:true}));
+    one(document,"#primary").dispatchEvent(new window.MouseEvent("click",{bubbles:true}));
+    await delay(30);
+    assert.equal(control.messages.length,before);
+    assert.equal(prompts,0);
+  });
   console.log("Popup: unblock stale tab, committed/failed refresh, locale CAS and catalog failures");
   // Gate starts in the browser's split context even when discovered through
   // an opener rather than window.name. Failure to list tabs must keep the
@@ -748,6 +763,36 @@ try{
       release({id:1,url:"https://extension.example/newtab.html"});
       await until(()=>!overlay());
     }finally{control.chrome.tabs.getCurrent=get;dom.window.close()}
+  }
+
+  // The standalone native-tab button can fail while there is no overlay.
+  // The early gate must also remove an orphan onboarding modal even when
+  // the main application has not attached its dismissal listener yet.
+  {
+    const dom=await installDom("newtab/newtab.html","https://extension.example/newtab.html");
+    const control=installChrome(seed());
+    try{
+      await import("../src/newtab/newtab-gate.js?case="+(++serial));
+      await window.startTabGateReady;
+      const native=one(document,"#nativeNewTab");
+      control.handler=async()=>({ok:false,error:"browser denied native tab"});
+      native.click();
+      await until(()=>[...document.querySelectorAll('[role="alert"]')].some(el=>!el.hidden&&el.textContent));
+      assert.equal(native.hasAttribute("aria-busy"),false);
+      const orphan=document.createElement("section");orphan.id="onboarding";document.body.append(orphan);
+      const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");
+      svg.setAttribute("tabindex","0");document.body.append(svg);svg.focus();
+      assert.equal(document.activeElement,svg);
+      control.state.startPageSettings.startTab.enabled=false;
+      control.chrome.storage.onChanged.emit({startPageSettings:{newValue:control.state.startPageSettings}},"local");
+      await until(()=>document.getElementById("startTabGateOverlay"));
+      assert.equal(orphan.isConnected,false);
+      assert.equal(one(document,"#startPage").hasAttribute("inert"),true);
+      control.state.startPageSettings.startTab.enabled=true;
+      control.chrome.storage.onChanged.emit({startPageSettings:{newValue:control.state.startPageSettings}},"local");
+      await until(()=>!document.getElementById("startTabGateOverlay"));
+      assert.equal(one(document,"#startPage").hasAttribute("inert"),false);
+    }finally{dom.window.close()}
   }
   console.log("Page initialization: blocked subframe, stale settings and picker generations, fatal startup reads");
 }finally{restoreFetch()}
