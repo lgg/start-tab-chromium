@@ -65,6 +65,8 @@ export interface BackupBundle {
   version: number;
   exportedAt: string;
   snapshotId: string;
+  /** Explicit completeness marker; historical v4 exports could omit sections. */
+  complete?: true;
   schema: {
     version: number;
     storageKeys: string[];
@@ -101,6 +103,7 @@ interface BackupLike {
   version: number;
   exportedAt: string;
   snapshotId?: string;
+  complete?: true;
   schema?: BackupBundle["schema"];
   storage: Record<string, unknown>;
 }
@@ -220,6 +223,7 @@ function currentSchema(storage: Record<string, unknown>, exportedAt: string, sna
     version: BACKUP_VERSION,
     exportedAt,
     snapshotId,
+    complete: true,
     schema: { version: BACKUP_VERSION, storageKeys: [...STORAGE_KEYS] },
     storage,
   };
@@ -286,18 +290,20 @@ function assertBackupPayload(storage: Record<string, unknown>): void {
   requireShape(stats, "processedClockCompletions", FOCUS_STATS_KEY, isRecord);
 }
 
-/** A current-format export declares its full schema. Missing collections in
- * such a file indicate truncation, not permission to erase local data.
- * Headerless legacy/partial imports remain supported for compatibility. */
+/** Only marked exports promise completeness. The original v4 exporter
+ * listed all supported storage keys even when some were absent; its recovery
+ * snapshots could be partial as well. Do not mistake these for truncation.
+ * Keep the marker outside the semantic sync checksum's schema/storage fields. */
 function assertDeclaredBackupShape(value: BackupLike): void {
-  if (value.version !== BACKUP_VERSION || value.schema === undefined) return;
+  if (value.complete === undefined) return;
   const schema = value.schema;
-  if (!isRecord(schema) || schema.version !== BACKUP_VERSION || !Array.isArray(schema.storageKeys)
+  if (value.complete !== true || value.version !== BACKUP_VERSION
+    || !isRecord(schema) || schema.version !== BACKUP_VERSION || !Array.isArray(schema.storageKeys)
     || !schema.storageKeys.every((key) => typeof key === "string")) {
     throw new Error("Invalid Start Tab backup schema");
   }
   const storage = value.storage;
-  const required = ["blockedSites", START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY];
+  const required = ["blockedSites", START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY, "lastBlockedUrls", "startPageOnboarding"];
   for (const key of required) {
     if (!schema.storageKeys.includes(key) || !Object.hasOwn(storage, key)) {
       throw new Error(`Invalid Start Tab backup section: missing ${key}`);
@@ -309,35 +315,34 @@ function assertDeclaredBackupShape(value: BackupLike): void {
       if (!Object.hasOwn(parent, field)) throw new Error(`Invalid Start Tab backup section: missing ${path}.${field}`);
     }
   };
-  // Older nested schemas are intentionally migrated. Current-schema
-  // collections must be present even if empty.
   const settings = storage[START_PAGE_SETTINGS_KEY];
-  if (isRecord(settings) && settings.schemaVersion === START_PAGE_SCHEMA_VERSION) {
-    requireFields(settings, ["layout", "themes", "startTab", "settingsButton", "focusStats"], START_PAGE_SETTINGS_KEY);
-    requireFields(settings.layout, ["blocks"], START_PAGE_SETTINGS_KEY + ".layout");
-    requireFields(settings.themes, ["customThemes", "selectedThemeId"], START_PAGE_SETTINGS_KEY + ".themes");
+  if (!isRecord(settings) || settings.schemaVersion !== START_PAGE_SCHEMA_VERSION) {
+    throw new Error(`Invalid Start Tab backup section: ${START_PAGE_SETTINGS_KEY}.schemaVersion`);
   }
+  requireFields(settings, ["layout", "themes", "startTab", "settingsButton", "focusStats"], START_PAGE_SETTINGS_KEY);
+  requireFields(settings.layout, ["blocks"], START_PAGE_SETTINGS_KEY + ".layout");
+  requireFields(settings.themes, ["customThemes", "selectedThemeId"], START_PAGE_SETTINGS_KEY + ".themes");
   const runtime = storage[START_PAGE_RUNTIME_KEY];
-  if (isRecord(runtime) && runtime.version === RUNTIME_SCHEMA_VERSION) {
-    requireFields(runtime, ["clocks", "notes", "tasks", "linkPages"], START_PAGE_RUNTIME_KEY);
+  if (!isRecord(runtime) || runtime.version !== RUNTIME_SCHEMA_VERSION) {
+    throw new Error(`Invalid Start Tab backup section: ${START_PAGE_RUNTIME_KEY}.version`);
   }
-  // These were optional in historical envelopes. When declared by a
-  // full export they must not disappear or be silently normalized away.
-  if (schema.storageKeys.includes("lastBlockedUrls") &&
-    (!isRecord(storage.lastBlockedUrls) || !Object.values(storage.lastBlockedUrls).every(url => typeof url === "string"))) {
+  requireFields(runtime, ["clocks", "notes", "tasks", "linkPages"], START_PAGE_RUNTIME_KEY);
+  if (!isRecord(storage.lastBlockedUrls) || !Object.values(storage.lastBlockedUrls).every(url => typeof url === "string")) {
     throw new Error("Invalid Start Tab backup section: lastBlockedUrls");
   }
-  if (schema.storageKeys.includes("startPageOnboarding") &&
-    (!isRecord(storage.startPageOnboarding) || typeof storage.startPageOnboarding.onboarded !== "boolean")) {
+  if (!isRecord(storage.startPageOnboarding) || typeof storage.startPageOnboarding.onboarded !== "boolean") {
     throw new Error("Invalid Start Tab backup section: startPageOnboarding");
   }
   // Automatic locale and never-initialized statistics legitimately have
-  // no storage key even though the schema lists them as supported.
+  // no storage key even in a complete export.
   if (Object.hasOwn(storage, "localeOverride") && storage.localeOverride !== "en" && storage.localeOverride !== "ru") {
     throw new Error("Invalid Start Tab backup section: localeOverride");
   }
   const stats = storage[FOCUS_STATS_KEY];
-  if (isRecord(stats) && stats.version === FOCUS_STATS_SCHEMA_VERSION) {
+  if (Object.hasOwn(storage, FOCUS_STATS_KEY)) {
+    if (!isRecord(stats) || stats.version !== FOCUS_STATS_SCHEMA_VERSION) {
+      throw new Error(`Invalid Start Tab backup section: ${FOCUS_STATS_KEY}.version`);
+    }
     requireFields(stats, ["totals", "byDay", "byDomain", "processedClockCompletions"], FOCUS_STATS_KEY);
   }
 }
