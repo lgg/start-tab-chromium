@@ -450,6 +450,51 @@ try {
       btn(section("general"),"cancel").click();
       await until(()=>busyDone());
     }
+
+    // Saving a custom layout after selecting a standard preset must not
+    // falsely retain the preset badge when its geometry has been changed.
+    {
+      const initial=control.state.startPageSettings;
+      value(option("layoutPreset"),"focus","change");
+      value(option("layoutMode"),"free","change");
+      assert.equal(option("layoutPreset").value,"custom");
+      const previous=control.messages.length;
+      generalSubmit();
+      await until(()=>busyDone()&&control.state.startPageSettings.layout.mode==="free");
+      assert.equal(control.state.startPageSettings.layout.profile,"custom");
+      assert.equal(control.messages.length,previous+1);
+      assert.equal(control.messages.at(-1).settings.layout.profile,"custom");
+      // Select an already-current option: no destructive preset replacement.
+      value(option("layoutPreset"),"custom","change");
+      const saved=control.messages.length;
+      generalSubmit();await until(()=>busyDone());
+      assert.equal(control.messages.length,saved);
+      assert.equal(control.state.startPageSettings.layout.blocks.length,initial.layout.blocks.length);
+    }
+    // Confirmation uses the actual runtime data and custom block title.
+    {
+      const note=createBlockInstance("note",{id:"options-delete-note",title:"Keep this note"});
+      const next=structuredClone(control.state.startPageSettings);
+      next.layout.blocks.push(note);
+      control.state.startPageSettings=next;
+      control.state.startPageRuntimeState=normalizeRuntimeState(control.state.startPageRuntimeState,next);
+      control.state.startPageRuntimeState.notes[note.id]="private text";
+      btn(section("backup"),"syncUpload").click();
+      const row=()=>[...section("blocks").querySelectorAll(".instance-row")].find(el=>el.querySelector(".instance-row__title")?.textContent===note.title);
+      await until(()=>busyDone()&&row());
+      let message;
+      window.confirm=text=>{message=text;return false};
+      const count=control.messages.length;
+      btn(row(),"delete").click();await delay(20);
+      assert.equal(message,t.t("deleteBlockWithDataConfirm",{title:note.title}));
+      assert.equal(control.messages.length,count);
+      assert.equal(control.state.startPageRuntimeState.notes[note.id],"private text");
+      window.confirm=()=>true;
+      btn(row(),"delete").click();
+      await until(()=>busyDone()&&!row());
+      assert.equal(control.state.startPageRuntimeState.notes[note.id],undefined);
+      assert.equal(control.messages.at(-1).type,"replace-start-page-settings");
+    }
     console.log("Options: invalid form, failed save, committed refresh failure, recovery, preset and locale paths");
     console.log("Options: general draft, save, add/edit/duplicate/disable/clear/delete blocks, create/select/delete theme, blocker and reset");
   } finally { dom.window.close(); }
