@@ -63,6 +63,9 @@ assert.ok(work.clock.focusSessionStartedAt>0);
 
 const prior=await local.get(null);
 const savedAlarms=await rt.readClockAlarmSnapshot();
+// Force a real reconciliation need; a healthy existing alarm is no
+// longer needlessly replaced just to exercise the create-error path.
+for(const alarm of savedAlarms)control.alarms.set(alarm.name,{...alarm,periodInMinutes:1});
 let failures=0;
 alarms.create=async()=>{failures++;throw Error("alarm create unavailable")};
 try{
@@ -134,7 +137,8 @@ assert.equal((await rt.getStartPageRuntimeState()).notes[note.id],undefined);
   await rt.updateStartPageRuntimeState(r=>{r.clocks[timer.id]=duplicateClock;return r});
   const duplicateResult=await rt.completeClockInstance(timer.id,duplicateClock.completionToken);
   assert.equal(duplicateResult.completed,false);
-  assert.equal((await rt.getStartPageRuntimeState()).clocks[timer.id].running,true);
+  assert.equal((await rt.getStartPageRuntimeState()).clocks[timer.id].running,false);
+  assert.equal((await rt.getStartPageRuntimeState()).clocks[timer.id].accumulatedMs,duplicateClock.durationMs);
   await rt.resetAllClockRuntimeWithAlarms();
 
   // Reset failures must preserve old state and report a failed rollback as
@@ -495,3 +499,78 @@ for(const reader of ["getStartPageRuntimeState","getStartPageViewSnapshot"]){
   }
 }
 console.log("Pomodoro: legacy missing focus start, work/break, auto-start, exact stats and duplicate token matrix");
+
+// Deadline precision, duplicate persisted completion, and alarm reuse.
+// Repeated unrelated reconciliation must not move the alarm into the future.
+{
+  const previous=globalThis.chrome;
+  const realNow=Date.now;
+  let now=1_800_000_000_000;
+  Date.now=()=>now;
+  const s=api.normalizeStartPageSettings(settings);
+  const initialRuntime=rt.normalizeRuntimeState(undefined,s);
+  const running=rt.startClockState(rt.defaultClockForBlock(timer),now);
+  initialRuntime.clocks[timer.id]=running;
+  const fresh=installChrome({startPageSettings:s,startPageRuntimeState:initialRuntime});
+  try{
+    const name=rt.clockAlarmName(timer.id,running.completionToken);
+    await rt.reconcileStoredClockAlarms();
+    assert.equal(fresh.alarms.get(name).scheduledTime,running.targetAt);
+    const originalCreate=fresh.chrome.alarms.create;
+    let creates=0;
+    fresh.chrome.alarms.create=async (...args)=>{creates++;return originalCreate(...args)};
+    now=running.targetAt-500;
+    const before=structuredClone(fresh.state);
+    const early=await rt.completeClockInstance(timer.id,running.completionToken,now);
+    assert.equal(early.completed,false);
+    assert.deepEqual(fresh.state,before);
+    await rt.reconcileStoredClockAlarms();
+    assert.equal(creates,0);
+    // Simulate Chrome rounding a short alarm or a retry into the future.
+    now=running.targetAt+100;
+    const retryAt=now+30000;
+    fresh.alarms.set(name,{name,scheduledTime:retryAt});
+    for(let index=0;index<5;index++){
+      now+=500;
+      await rt.reconcileStoredClockAlarms();
+      assert.equal(fresh.alarms.get(name).scheduledTime,retryAt);
+    }
+    assert.equal(creates,0);
+    // Periodic or incorrectly scheduled alarms are repaired.
+    fresh.alarms.set(name,{name,scheduledTime:retryAt,periodInMinutes:1});
+    await rt.reconcileStoredClockAlarms();
+    assert.equal(creates,1);
+    assert.equal(fresh.alarms.get(name).periodInMinutes,undefined);
+    fresh.alarms.set(name,{name,scheduledTime:now+120000});
+    await rt.reconcileStoredClockAlarms();
+    assert.equal(creates,2);
+    fresh.alarms.delete(name);
+    await rt.reconcileStoredClockAlarms();
+    assert.equal(creates,3);
+    const done=await rt.completeClockInstance(timer.id,running.completionToken,now);
+    assert.equal(done.completed,true);
+    assert.equal(fresh.alarms.has(name),false);
+    // Imported inconsistent phases are never replayed. The next deliberate
+    // Start allocates a new token and can finish normally.
+    for(const b of [timer,pomodoro]){
+      const malformed={...rt.startClockState(rt.defaultClockForBlock(b),now),phase:b.type==="pomodoro"?"break":null};
+      malformed.lastCompletedToken=malformed.completionToken;
+      const raw={...initialRuntime,clocks:{[b.id]:malformed}};
+      await fresh.chrome.storage.local.set({[rt.START_PAGE_RUNTIME_KEY]:raw});
+      const repaired=await rt.getStartPageRuntimeState();
+      const clock=repaired.clocks[b.id];
+      assert.equal(clock.running,false);
+      assert.equal(clock.completionToken,null);
+      assert.equal(clock.lastCompletedToken,malformed.lastCompletedToken);
+      assert.equal(clock.phase,malformed.phase);
+      assert.equal(clock.accumulatedMs,clock.durationMs);
+      assert.equal((await rt.completeClockInstance(b.id,malformed.completionToken,now)).completed,false);
+      const started=rt.startClockState(clock,now);
+      assert.notEqual(started.completionToken,malformed.completionToken);
+      assert.equal(started.accumulatedMs,0);
+      await rt.updateStartPageRuntimeState(r=>{r.clocks[b.id]=started;return r});
+      assert.equal((await rt.completeClockInstance(b.id,started.completionToken,started.targetAt)).completed,true);
+    }
+  }finally{Date.now=realNow;globalThis.chrome=previous}
+}
+console.log("Deep audit: exact deadlines, non-replayed completed tokens and stable one-shot alarms");
