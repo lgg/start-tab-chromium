@@ -746,5 +746,20 @@ try {
     submit(one(next,"form"));
     assert.deepEqual((await noisePending).background.config,{effect:"noise",speed:1.75,intensity:.55,animated:false});
   }
+  // Valid fractional sizes from imported settings must remain editable.
+  for(const type of ["dateTime","links","startPinned"]){
+    const block=createBlockInstance(type);
+    if(type==="dateTime")block.config.timeFontSize=31.5;
+    else {block.config.fontSize=13.25;block.config.iconSize=28.75;}
+    const editing=editBlockInstance(block,i18n);
+    const dialog=one(document,"dialog[open]");
+    const inputs=type==="dateTime"?[field(dialog,"dateTimeFontSize")]:[field(dialog,"linkFontSize"),field(dialog,"linkIconSize")];
+    for(const input of inputs)assert.equal(input.checkValidity(),true,type);
+    submit(one(dialog,"form"));
+    const saved=await editing;
+    assert.ok(saved,type);
+    if(type==="dateTime")assert.equal(saved.config.timeFontSize,31.5);
+    else {assert.equal(saved.config.fontSize,13.25);assert.equal(saved.config.iconSize,28.75);}
+  }
   console.log("Theme editor: 4 background kinds, 7 effects, panel preservation, DOM CSS application, cancel");
 } finally { dom.window.close(); }
