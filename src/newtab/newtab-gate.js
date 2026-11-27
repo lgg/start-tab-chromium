@@ -198,7 +198,7 @@
     for (const tab of tabs) {
       const button = document.createElement("button");
       button.type = "button";
-      button.textContent = tab.title;
+      button.textContent = tab.title || tab.url || text("gateUntitledTab", "Untitled tab");
       button.style.cssText = "display:block;width:100%;margin:8px 0;padding:10px;text-align:left";
       button.addEventListener("click", () => run(async () => {
         if (!button.isConnected) return;
