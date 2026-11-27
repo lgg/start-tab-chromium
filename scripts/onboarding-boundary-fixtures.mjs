@@ -193,7 +193,7 @@ try{
       await delay(40);
       assert.equal(control.messages.length,0);
       assert.equal(control.state.startPageOnboarding.onboarded,false);
-      assert.deepEqual(control.state.startPageSettings,s);
+      assert.deepEqual(control.state.startPageSettings,structuredClone(s));
       window.dispatchEvent(new window.Event("pagehide"));
     }finally{store.get=get;dom.window.close()}
   }
