@@ -74,7 +74,7 @@ assert.match(round16Fixtures, /assert\.equal\(await consumeNativeBypass\(tabId\)
   "Round 16 must no longer model deletion of the bypass key as successful consumption");
 assert.doesNotMatch(round16Fixtures, /if \(consumeBypassOnUpdate\) delete localState\.startTabNativeNewTabBypass/,
   "Historical fixtures must not preserve the removed false-success contract");
-assert.match(round38Static, /Automatic locale selection must resolve the supported browser UI language/,
+assert.match(round38Static, /Automatic locale selection must resolve the first supported browser language/,
   "Round 38 must retain the evolved Auto-locale contract instead of requiring a null catalog");
 assert.doesNotMatch(round38Static, /Returning to automatic locale selection must publish a null catalog/,
   "Historical validation must not reintroduce the broken Auto-locale behavior");
