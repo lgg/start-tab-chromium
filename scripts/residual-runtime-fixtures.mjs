@@ -197,6 +197,29 @@ assert.equal((await rt.getStartPageRuntimeState()).notes[note.id],undefined);
   console.log("Runtime transaction: incomplete alarm rollback, durable data preservation, platform recovery and no-op statistics");
 }
 
+
+ // A fresh profile can have settings but no persisted runtime revision.
+ // The first layout mutation must advance beyond the stored data revision
+ // rather than issuing a stale token derived only from wall-clock time.
+{
+  const previous=await local.get(null);
+  const initial=api.createDefaultStartPageSettings(100);
+  const future=Date.now()+300000;
+  await local.set({startPageSettings:initial,startTabDataRevision:{version:1,updatedAt:future}});
+  await local.remove([rt.START_PAGE_RUNTIME_KEY,"startPageInstanceRuntime"]);
+  try{
+    const next=structuredClone(initial);next.layout.gap=18;
+    const saved=await rt.replaceStartPageSettingsWithRuntime(next,initial.updatedAt,0);
+    const result=await rt.getStartPageViewSnapshot();
+    assert.equal(saved.layout.gap,18);
+    assert.ok(result.runtime.updatedAt>future);
+    assert.equal(result.settings.updatedAt,saved.updatedAt);
+  }finally{
+    const current=await local.get(null);
+    await local.remove(Object.keys(current).filter(key=>!Object.hasOwn(previous,key)));
+    await local.set(previous);
+  }
+}
 // Public settings APIs must refuse additions/duplications at the real cap.
 const full={...settings,layout:{...settings.layout,mode:"free",blocks:Array.from({length:MAX_START_PAGE_BLOCKS},(_,i)=>api.createBlockInstance("note",{id:"capacity-"+i,createdAt:100,updatedAt:100}))}};
 await local.set({startPageSettings:api.normalizeStartPageSettings(full)});
