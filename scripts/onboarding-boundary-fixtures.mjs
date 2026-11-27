@@ -53,6 +53,8 @@ try{
     assert.equal(one(dragging,".card__title").textContent,"Private onboarding note");
     const before=Number.parseFloat(dragging.style.left);
     pointer(one(dragging,".card__drag-handle"),"pointerdown",10,10);
+    pointer(dragging,"pointerup",35,30,2);
+    assert.equal(card(),dragging);
     pointer(dragging,"pointermove",35,30);
     assert.equal(Number.parseFloat(dragging.style.left),before+25);
     window.dispatchEvent(new window.Event("resize"));await delay(40);
@@ -66,5 +68,40 @@ try{
     assert.equal(control.state.startPageRuntimeState.notes[note.id],"private data");
     window.dispatchEvent(new window.Event("pagehide"));
   }finally{dom.window.close()}
+
+  // A preset command remains single-flight while the service worker commits.
+  {
+    const dom=await installDom("newtab/newtab.html","https://extension.example/newtab.html");
+    const settings=createDefaultStartPageSettings(100);
+    const control=installChrome({startPageSettings:settings,startPageRuntimeState:normalizeRuntimeState(undefined,settings),localeOverride:"en",startPageOnboarding:{onboarded:false}});
+    try{
+      const t=await loadI18n();
+      await import("../src/newtab/newtab.ts?onboarding="+(++serial));
+      const modal=()=>document.getElementById("onboarding");
+      await until(()=>modal());
+      let release;
+      control.handler=m=>new Promise(resolve=>{
+        release=()=>{
+          assert.equal(m.completeOnboarding,true);
+          control.state.startPageSettings={...structuredClone(m.settings),updatedAt:Date.now()};
+          control.state.startPageRuntimeState=normalizeRuntimeState(control.state.startPageRuntimeState,control.state.startPageSettings);
+          control.state.startPageOnboarding={onboarded:true};
+          resolve({ok:true,savedSettings:control.state.startPageSettings});
+        };
+      });
+      const presets=[...modal().querySelectorAll(".onboarding__presets button")];
+      const skip=button(modal(),t.t("onboardingSkip"));
+      presets[0].click();await until(()=>release);
+      assert.ok([...modal().querySelectorAll("button")].every(b=>b.disabled));
+      for(const action of [presets[0],presets.at(-1),skip])action.dispatchEvent(new window.MouseEvent("click",{bubbles:true}));
+      await delay(20);
+      assert.equal(control.messages.length,1);
+      assert.equal(control.state.startPageOnboarding.onboarded,false);
+      release();await until(()=>!modal());
+      assert.equal(control.state.startPageOnboarding.onboarded,true);
+      assert.equal(control.messages.length,1);
+      window.dispatchEvent(new window.Event("pagehide"));
+    }finally{dom.window.close()}
+  }
   console.log("Onboarding: destructive preset cancelled, cross-tab completion and no duplicate writes");
 }finally{restoreFetch()}
