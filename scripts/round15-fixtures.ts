@@ -101,7 +101,9 @@ await runtimeApi.setStartPageRuntimeState(runtime);
 const persistedRuntime = await runtimeApi.getStartPageRuntimeState(current);
 alarmState.set(runtimeApi.clockAlarmName(timer.id, token), {
   name: runtimeApi.clockAlarmName(timer.id, token),
-  scheduledTime: now + 60_000,
+  // Force a real repair: the alarm belongs to the right token but is
+  // scheduled before the persisted deadline. A healthy alarm is reused.
+  scheduledTime: now + 30_000,
 });
 
 const beforeFailureStorage = structuredClone(localState);
