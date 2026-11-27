@@ -155,6 +155,48 @@ assert.equal((await rt.getStartPageRuntimeState()).notes[note.id],undefined);
   await local.set(beforeReset);
   console.log("Runtime: completed timer restart, manual pomodoro phase transition, duplicate completion token and reset rollback");
 
+
+// A failed layout replacement can have committed alarm cleanup before a
+// later storage write fails. Report both errors, preserve the durable data,
+// and allow the original alarm set to be restored when the platform recovers.
+{
+  const s=api.normalizeStartPageSettings(settings);
+  await local.set({startPageSettings:s,startPageRuntimeState:rt.normalizeRuntimeState(undefined,s)});
+  await local.remove("startPageOnboarding");
+  const active=rt.startClockState(rt.defaultClockForBlock(timer),Date.now());
+  await rt.updateStartPageRuntimeState(r=>{r.clocks[timer.id]=active;return r});
+  await rt.scheduleClockAlarm(timer.id,active);
+  const before=await rt.getStartPageViewSnapshot();
+  const durable=await local.get(null), snapshot=await rt.readClockAlarmSnapshot();
+  const name=rt.clockAlarmName(timer.id,active.completionToken);
+  assert.ok(snapshot.some(a=>a.name===name));
+  const next={...before.settings,layout:{...before.settings.layout,blocks:before.settings.layout.blocks.filter(b=>b.id!==timer.id)}};
+  local.set=async items=>{if(Object.hasOwn(items,"startPageOnboarding"))throw Error("onboarding write unavailable");return set(items)};
+  alarms.create=async (id,options)=>{if(id===name)throw Error("old alarm restoration unavailable");return create(id,options)};
+  try{
+    await assert.rejects(rt.replaceStartPageSettingsWithRuntime(next,before.settings.updatedAt,before.runtime.updatedAt,undefined,true),error=>
+      error instanceof AggregateError&&/alarm rollback was incomplete/.test(error.message)&&error.errors[0].message==="onboarding write unavailable"&&error.errors[1].message==="old alarm restoration unavailable");
+    assert.deepEqual(await local.get(null),durable);
+    assert.equal(control.alarms.has(name),false);
+  }finally{local.set=set;alarms.create=create}
+  await rt.restoreClockAlarmSnapshot(snapshot);
+  assert.deepEqual(await rt.readClockAlarmSnapshot(),snapshot);
+  const paused=await rt.resetAllClockRuntimeWithAlarms(Date.now());
+  assert.deepEqual(paused,[]);
+  assert.equal(control.alarms.has(name),false);
+  // A duplicate or empty statistics effect must not publish a write.
+  const stats=await import("../src/lib/focus-stats.js");
+  const state=await local.get(null);
+  let writes=0;
+  local.set=async values=>{writes++;return set(values)};
+  try{
+    await stats.applyFocusClockStatsPatchInExistingTransaction({});
+    assert.equal(writes,0);
+    assert.deepEqual(await local.get(null),state);
+  }finally{local.set=set}
+  console.log("Runtime transaction: incomplete alarm rollback, durable data preservation, platform recovery and no-op statistics");
+}
+
 // Public settings APIs must refuse additions/duplications at the real cap.
 const full={...settings,layout:{...settings.layout,mode:"free",blocks:Array.from({length:MAX_START_PAGE_BLOCKS},(_,i)=>api.createBlockInstance("note",{id:"capacity-"+i,createdAt:100,updatedAt:100}))}};
 await local.set({startPageSettings:api.normalizeStartPageSettings(full)});

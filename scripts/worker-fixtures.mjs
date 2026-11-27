@@ -210,6 +210,61 @@ try {
   }
   console.log("Worker: ignored events, early alarm and failed alarm retry, queue recovery and browser URL matrix");
   }
+
+  // Failure in both the alarm completion transaction and its fallback
+  // rearm must not poison the serialized worker queue. A later valid
+  // request can finish the same token exactly once.
+  {
+    const runtimeApi=await import("../src/lib/start-page-runtime.js");
+    const id="worker-timer";
+    await ok({type:"clock-action",instanceId:id,action:"reset"});
+    await ok({type:"clock-action",instanceId:id,action:"start"});
+    const clock=control.state.startPageRuntimeState.clocks[id];
+    clock.startedAt=Date.now()-5000;clock.targetAt=Date.now()-4000;
+    const token=clock.completionToken,name=runtimeApi.clockAlarmName(id,token);
+    control.alarms.delete(name);
+    const store=chrome.storage.local,previousGet=store.get;
+    let rejected=0;
+    store.get=async keys=>{if(rejected<2){rejected++;throw Error("storage unavailable twice")}return previousGet(keys)};
+    try{
+      chrome.alarms.onAlarm.emit({name});
+      await until(()=>rejected===2,"completion and rearm failure");
+      assert.equal(control.state.startPageRuntimeState.clocks[id].running,true);
+      assert.equal(control.alarms.has(name),false);
+    }finally{store.get=previousGet}
+    await ok({type:"complete-clock",instanceId:id,token});
+    assert.equal(control.state.startPageRuntimeState.clocks[id].running,false);
+    assert.equal(control.state.startPageRuntimeState.clocks[id].lastCompletedToken,token);
+  }
+  // Refuse to redirect a native page when Start Tab is disabled or a
+  // bypass lease belongs to the same tab, while leaving unrelated tabs alone.
+  {
+    const nativeApi=await import("../src/lib/native-new-tab.js");
+    const oldEnabled=control.state.startPageSettings.startTab.enabled;
+    const oldGrant=control.state[nativeApi.NATIVE_NEW_TAB_BYPASS_KEY];
+    const updates=()=>control.calls.filter(c=>c[0]==="update").length;
+    const before=updates();
+    try{
+      control.state.startPageSettings.startTab.enabled=false;
+      control.tab={id:1,url:"vivaldi://newtab/"};
+      chrome.tabs.onUpdated.emit(1,{url:control.tab.url});
+      await new Promise(resolve=>setTimeout(resolve,40));
+      assert.equal(updates(),before);
+      control.state.startPageSettings.startTab.enabled=true;
+      control.state[nativeApi.NATIVE_NEW_TAB_BYPASS_KEY]={tabId:1,expiresAt:Date.now()+10000};
+      control.tab={id:1,url:"opera://new-tab/"};
+      chrome.tabs.onCreated.emit(control.tab);
+      await until(()=>typeof control.state[nativeApi.NATIVE_NEW_TAB_BYPASS_KEY]?.consumedAt==="number");
+      assert.equal(updates(),before);
+      control.tab={id:2,url:"comet://newtab/"};
+      chrome.tabs.onUpdated.emit(2,{url:control.tab.url});
+      await until(()=>updates()===before+1);
+      assert.deepEqual(control.calls.at(-1),["update",2,{url:"https://extension.example/newtab.html"}]);
+    }finally{
+      control.state.startPageSettings.startTab.enabled=oldEnabled;
+      if(oldGrant===undefined)delete control.state[nativeApi.NATIVE_NEW_TAB_BYPASS_KEY];else control.state[nativeApi.NATIVE_NEW_TAB_BYPASS_KEY]=oldGrant;
+    }
+  }
   await ok({ type: "reset-clocks" });
   await ok({ type: "reset-stats" });
   assert.equal((await getFocusStats()).totals.unblocksAfterCountdown, 0);
