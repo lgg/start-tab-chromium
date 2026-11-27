@@ -34,7 +34,7 @@ assert.match(blocklist, /class DynamicRuleCollisionError extends Error/,
   "Transient foreign-ID collisions must have a dedicated retryable error");
 assert.match(blocklist, /const MAX_DNR_RECONCILE_ATTEMPTS = 4;/,
   "DNR collision reconciliation must be explicitly bounded");
-assert.match(blocklist, /for \(let attempt = 0; attempt < MAX_DNR_RECONCILE_ATTEMPTS; attempt \+= 1\)/,
+assert.match(blocklist, /for \(let attempt = 1; ; attempt \+= 1\)[\s\S]*if \(attempt >= MAX_DNR_RECONCILE_ATTEMPTS\) throw error;/,
   "DNR replacement must retry allocation after a transient collision");
 assert.match(blocklist, /error instanceof DynamicRuleCollisionError/,
   "Only ownership collisions may trigger the bounded retry path");
