@@ -371,5 +371,49 @@ console.log("Navigation: failed session lookup, DNR repair, native grant cleanup
     delete candidate.layout.blocks[1];
     assert.equal(api.layoutMatchesPreset(candidate,"focus"),false);
   }
+
+  // A newer observed navigation supersedes an old redirect even if the
+  // Chrome API's last read still returns the old new-tab URL.
+  {
+    const {NewTabRedirectGuard}=await import("../src/lib/tab-navigation-change.js");
+    const redirects=[];
+    let release,reads=0;
+    const guard=new NewTabRedirectGuard({
+      isEligible:url=>url==="chrome://newtab/",
+      getTab:async()=>{reads++;return {url:"chrome://newtab/"}},
+      shouldBypass:()=>new Promise(resolve=>{release=resolve}),
+      isEnabled:async()=>true,
+      redirect:async id=>{redirects.push(id)}
+    });
+    const first=guard.observe(1,"chrome://newtab/");
+    while(!release)await Promise.resolve();
+    await guard.observe(1,"https://user-chosen.example/");
+    release(false);
+    await first;
+    assert.equal(reads,1);
+    assert.deepEqual(redirects,[]);
+    release=undefined;
+    const next=guard.observe(1,"chrome://newtab/");
+    while(!release)await Promise.resolve();
+    release(false);
+    await next;
+    assert.deepEqual(redirects,[1]);
+  }
+  // Malformed historical storage must be removed without touching the
+  // current DNR rules or leaking URLs from a previously blocked profile.
+  {
+    const bl=await import("../src/lib/blocklist.js");
+    const priorChrome=globalThis.chrome;
+    const fresh=installChrome({blockedSites:["blocked.example"],lastBlockedUrls:["https://blocked.example/old"]});
+    try{
+      await bl.syncRules();
+      const rules=await fresh.chrome.declarativeNetRequest.getDynamicRules();
+      await bl.clearLastBlockedUrl("blocked.example");
+      assert.equal(Object.hasOwn(fresh.state,"lastBlockedUrls"),false);
+      assert.deepEqual(await fresh.chrome.declarativeNetRequest.getDynamicRules(),rules);
+      assert.equal(await bl.rememberBlockedNavigation("https://blocked.example/new"),"blocked.example");
+      assert.equal(await bl.getLastBlockedUrl("blocked.example"),"https://blocked.example/new");
+    }finally{globalThis.chrome=priorChrome}
+  }
 console.log("Residual helpers: effect aggregation, canonical data, split-view markers, tab lifecycle and draft acknowledgement");
 }
