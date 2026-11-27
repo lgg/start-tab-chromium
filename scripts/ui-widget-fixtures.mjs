@@ -73,6 +73,22 @@ try {
       await until(()=>noCity.root.textContent.includes("weatherUnavailable"));
     }finally{globalThis.fetch=oldFetch}
   }
+
+  // Locale canonicalization is a platform boundary: even if a Chromium
+  // derivative cannot canonicalize any of the requested locales, date
+  // rendering falls back to English rather than making the card unusable.
+  {
+    const original=Intl.getCanonicalLocales;
+    try{
+      Intl.getCanonicalLocales=()=>[];
+      const empty=widget("dateTime",{mode:"date",locale:"en-GB",dateFormat:"MMMM",timeZone:"UTC"},"locale-empty-canonical");
+      const expected=new Intl.DateTimeFormat("en",{month:"long",timeZone:"UTC"}).format(new Date());
+      assert.equal(one(empty.root,".date-time__date").textContent,expected);
+      Intl.getCanonicalLocales=()=>{throw RangeError("platform locale canonicalization unavailable")};
+      const fallback=widget("dateTime",{mode:"date",locale:"en-GB",dateFormat:"MMMM",timeZone:"UTC"},"locale-no-canonical");
+      assert.equal(one(fallback.root,".date-time__date").textContent,expected);
+    }finally{Intl.getCanonicalLocales=original}
+  }
   const search = widget("search");
   const searchInput = one(search.root, "input");
   submit(one(search.root, "form"));
