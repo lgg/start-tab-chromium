@@ -181,6 +181,21 @@ try {
     globalThis.fetch=async()=>Response.json({items:[]});
     assert.deepEqual(await google.listCalendarEvents(),[]);
   }
+
+  // Search construction must fail closed if the browser cannot encode a
+  // pasted query. An unavailable platform encoder must not navigate to an
+  // unvalidated template, and recovery must not lose valid Unicode input.
+  {
+    const {buildSearchUrl}=await import("../src/lib/start-page-validation-primitives.js");
+    const template="https://example.com/search?q={query}";
+    const encoder=globalThis.TextEncoder;
+    try{
+      globalThis.TextEncoder=class {encode(){throw Error("encoding unavailable")}};
+      assert.equal(buildSearchUrl(template,"test query"),null);
+      assert.equal(buildSearchUrl("javascript:{query}","test"),null);
+    }finally{globalThis.TextEncoder=encoder}
+    assert.equal(buildSearchUrl(template,"тест 😀"),"https://example.com/search?q=%D1%82%D0%B5%D1%81%D1%82%20%F0%9F%98%80");
+  }
   console.log("Google: absent items, timed event precedence, bounded pagination and successful media restore");
   console.log("Locale and Google failure matrix: auto detection, fallback, CAS, malformed responses, invalid tokens, retry, size limit, calendar dates and Drive listing");
 } finally {restoreFetch();dom.window.close();}
