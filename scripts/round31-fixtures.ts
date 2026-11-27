@@ -286,3 +286,30 @@ console.log("Round 31 fixtures passed");
   assert.deepEqual(await blocklist.readDynamicRulesSnapshot(),[]);
   assert.deepEqual(dynamicRules,[lookalike,unmarked]);
 }
+
+
+// Invalid literal hosts must not poison a whole DNR transaction. Historic
+// exact owned rules remain removable, but foreign lookalikes stay intact.
+{
+  resetDnrState();
+  const invalid=["*.example.com","example..com","example.com!","user@actual.example","https://bad..example/"];
+  assert.deepEqual(blocklist.normalizeBlockedSites([...invalid,"https://www.example.com/path","https://bücher.example/","192.0.2.1","localhost","_internal.example"]),["192.0.2.1","_internal.example","example.com","localhost","xn--bcher-kva.example"].sort());
+  for(const host of invalid)await assert.rejects(blocklist.blockHost(host),/Invalid host/);
+  assert.equal(blocklist.hostFromUrl("https://*.example.com/"),null);
+  assert.equal(blocklist.hostFromUrl("https://example..com/"),null);
+  assert.equal(blocklist.hostFromUrl("https://www.bücher.example/"),"xn--bcher-kva.example");
+  const bad="example..com";
+  const historical=foreignRule(1,"chrome-extension://round31/blocked.html?site="+bad+"&owner=start-tab-blocklist-v1",bad);
+  const foreign=foreignRule(2,"chrome-extension://round31/blocked.html?site="+bad+"&owner=another-feature",bad);
+  const fake="user@actual.example";
+  const fakeOwned=foreignRule(3,"chrome-extension://round31/blocked.html?site="+encodeURIComponent(fake)+"&owner=start-tab-blocklist-v1",fake);
+  localStorage={blockedSites:[bad,"valid.example"],startTabDataRevision:{version:1,updatedAt:1}};
+  dynamicRules=[historical,foreign,fakeOwned];
+  assert.deepEqual(await blocklist.readDynamicRulesSnapshot(),[historical]);
+  await blocklist.syncRules();
+  assert.deepEqual(await blocklist.getBlockedSites(),["valid.example"]);
+  assert.deepEqual((await blocklist.readDynamicRulesSnapshot()).map(rule=>rule.condition.requestDomains),[["valid.example"]]);
+  await blocklist.clearAll();
+  assert.deepEqual(dynamicRules,[foreign,fakeOwned]);
+}
+console.log("Blocklist: invalid domains rejected, historical owned rules removed and lookalikes preserved");

@@ -810,12 +810,20 @@ export function elapsedClockMs(clock: ClockRuntimeState, now = Date.now()): numb
   if (!clock.running || clock.startedAt === null) return clock.accumulatedMs;
   const delta = Math.max(0, now - clock.startedAt);
   if (clock.type === "stopwatch") return Math.min(MAX_CLOCK_MS, clock.accumulatedMs + delta);
+  // Running countdowns are displayed and completed using their deadline.
+  // Pausing must preserve that same progress, including imported deadlines
+  // that disagree with the historical start timestamp.
+  if (clock.targetAt !== null) return clock.durationMs - remainingClockMs(clock, now);
   return Math.min(clock.durationMs, clock.accumulatedMs + delta);
 }
 
 export function remainingClockMs(clock: ClockRuntimeState, now = Date.now()): number {
   if (clock.type === "stopwatch") return 0;
-  if (clock.running && clock.targetAt !== null) return Math.max(0, clock.targetAt - now);
+  if (clock.running && clock.targetAt !== null) {
+    // A backward wall-clock adjustment cannot undo an already committed
+    // paused segment or make the countdown exceed its configured duration.
+    return Math.min(Math.max(0, clock.durationMs - clock.accumulatedMs), Math.max(0, clock.targetAt - now));
+  }
   return Math.max(0, clock.durationMs - clock.accumulatedMs);
 }
 
