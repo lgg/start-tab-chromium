@@ -789,15 +789,50 @@ try {
     const prior = control.messages.length;
     native.click(); native.click();
     assert.equal(native.getAttribute("aria-busy"), "true");
+    assert.equal(actions[0].getAttribute("aria-busy"), "true");
     assert.equal(control.messages.length, prior + 1);
+    const updatesBeforeNative = control.calls.filter(c => c[0] === "update").length;
+    actions[0].click();
+    await delay(25);
+    assert.equal(control.calls.filter(c => c[0] === "update").length, updatesBeforeNative,
+      "A native-tab request must exclude split picker navigation");
     release({ ok: false, error: "Rejected" });
     await until(() => overlay.querySelector('[role="alert"]:not([hidden])'), "native error");
     control.handler = oldHandler;
     native.click();
     await until(() => !native.hasAttribute("aria-busy"));
     assert.equal(one(overlay, '[role="alert"]').hidden, true);
-    actions.at(-1).click();
-    await until(() => control.calls.filter(c => c === "options").length >= 2);
+    // Reverse race: a pending split navigation must exclude native-tab
+    // commands even after a settings event rebuilds the entire overlay.
+    const originalUpdate = control.chrome.tabs.update;
+    let rejectNavigation;
+    try {
+      control.chrome.tabs.update = async () => new Promise((_, reject) => { rejectNavigation = reject; });
+      actions[0].click();
+      await until(() => rejectNavigation);
+      assert.equal(native.getAttribute("aria-busy"), "true");
+      const messagesBeforeChoice = control.messages.length;
+      native.click();
+      assert.equal(control.messages.length, messagesBeforeChoice);
+      control.chrome.storage.onChanged.emit({ startPageSettings: { newValue: control.state.startPageSettings } }, "local");
+      await until(() => document.getElementById("startTabGateOverlay") !== overlay);
+      const replacement = one(document, "#startTabGateOverlay");
+      const replacementNative = one(replacement, "[data-native-new-tab]");
+      const replacementChoice = one(replacement, "[data-split-choice]");
+      assert.equal(replacementNative.getAttribute("aria-busy"), "true");
+      assert.equal(replacementChoice.getAttribute("aria-busy"), "true");
+      replacementNative.click();
+      replacementChoice.click();
+      assert.equal(control.messages.length, messagesBeforeChoice);
+      rejectNavigation(Error("navigation failed"));
+      await until(() => replacement.querySelector('[data-split-choice-status]:not([hidden])'));
+      assert.equal(replacementNative.hasAttribute("aria-busy"), false);
+      assert.equal(replacementChoice.getAttribute("aria-busy"), "false");
+      replacementNative.click();
+      await until(() => control.messages.length === messagesBeforeChoice + 1 && !replacementNative.hasAttribute("aria-busy"));
+      replacement.querySelectorAll("button").item(2).click();
+      await until(() => control.calls.filter(c => c === "options").length >= 2);
+    } finally { control.chrome.tabs.update = originalUpdate; }
     window.name = "";
     control.chrome.storage.onChanged.emit({ startPageSettings: { newValue: control.state.startPageSettings } }, "local");
     await until(() => !document.getElementById("startTabGateOverlay"), "split picker closed");
