@@ -51,6 +51,28 @@ try {
   assert.ok(one(d.root, ".date-time__date").textContent);
   assert.equal(widget("dateTime", { mode: "time", locale: "not_a_locale" }, "time-only").root.querySelector(".date-time__date"), null);
   assert.equal(widget("dateTime", { mode: "date" }, "date-only").root.querySelector(".date-time__time"), null);
+
+  // An unknown but valid WMO code must render the localized unknown label;
+  // a payload usable for daily mode is not necessarily usable for current mode.
+  {
+    const oldFetch=globalThis.fetch;
+    const payload={current:{temperature_2m:12,weather_code:4},daily:{time:["2027-01-01"],temperature_2m_min:[4],temperature_2m_max:[15],weather_code:[4]}};
+    try{
+      globalThis.fetch=async()=>Response.json(payload);
+      const unknown=widget("weather",{city:"",displayMode:"current",forecastEndpoint:"https://weather-unknown.example/"},"unknown-weather");
+      await until(()=>unknown.root.textContent.includes("weatherUnknown"));
+      assert.ok(unknown.root.textContent.includes("12"));
+      globalThis.fetch=async()=>Response.json({daily:payload.daily});
+      const missing=widget("weather",{city:"",displayMode:"current",forecastEndpoint:"https://weather-daily-only.example/"},"missing-current");
+      await until(()=>missing.root.textContent.includes("weatherUnavailable"));
+      globalThis.fetch=async()=>Response.json({current:payload.current});
+      const noDaily=widget("weather",{city:"",displayMode:"week",forecastEndpoint:"https://weather-current-only.example/"},"missing-daily");
+      await until(()=>noDaily.root.textContent.includes("weatherUnavailable"));
+      globalThis.fetch=async()=>Response.json({results:null});
+      const noCity=widget("weather",{city:"Unknown city",geocodingEndpoint:"https://missing-city.example/"},"missing-city");
+      await until(()=>noCity.root.textContent.includes("weatherUnavailable"));
+    }finally{globalThis.fetch=oldFetch}
+  }
   const search = widget("search");
   const searchInput = one(search.root, "input");
   submit(one(search.root, "form"));
