@@ -1,3 +1,4 @@
+import { jsonContentEqual } from "./json-content.js";
 import { runIndependentEffects } from "./independent-effects.js";
 import { withStorageLock } from "./storage-lock.js";
 
@@ -11,6 +12,13 @@ interface DataRevision {
 
 export interface DataRevisionWriteOptions {
   allowFutureOverwrite?: boolean;
+}
+
+/** Optional compare-and-swap against the snapshot used to prepare a write.
+ * Guard-only keys are read but are never included in the rollback payload. */
+export interface StorageMutationWriteOptions extends DataRevisionWriteOptions {
+  expectedStorage?: Readonly<Record<string, unknown>>;
+  conflictMessage?: string;
 }
 
 export class StartTabDataRevisionConflictError extends Error {
@@ -139,10 +147,16 @@ export async function commitStorageMutationWithRevision<T>(
   storageKeys: readonly string[],
   mutation: () => Promise<T>,
   at = Date.now(),
-  options: DataRevisionWriteOptions = {},
+  options: StorageMutationWriteOptions = {},
 ): Promise<T> {
   const keys = uniqueStorageKeys(storageKeys);
-  const previous = await chrome.storage.local.get(keys);
+  const expected = Object.entries(options.expectedStorage ?? {});
+  const captured = await chrome.storage.local.get([...new Set([...keys, ...expected.map(([key]) => key)])]);
+  if (expected.some(([key, value]) => !jsonContentEqual(captured[key], value))) {
+    // No mutation has begun. Do not roll back another context\'s write.
+    throw new StartTabDataRevisionConflictError(options.conflictMessage);
+  }
+  const previous = Object.fromEntries(keys.filter(key => Object.hasOwn(captured, key)).map(key => [key, captured[key]]));
   try {
     const result = await mutation();
     await markStartTabDataChanged(at, options);
