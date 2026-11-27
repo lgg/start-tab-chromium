@@ -95,7 +95,7 @@ const blockedNavigations = new BlockedNavigationRegistry(() => chrome.storage.se
 const blockedPageUrl = (): string => chrome.runtime.getURL("blocked.html");
 
 const newTabRedirectGuard = new NewTabRedirectGuard({
-  isEligible: (url) => !isStartTabUrl(url) && isBrowserNewTabUrl(url) && !isNativeSplitViewPickerUrl(url),
+  isEligible: (url) => !isStartTabUrl(url) && isBrowserNewTabUrl(url),
   getTab: (tabId) => chrome.tabs.get(tabId),
   shouldBypass: shouldBypassNativeNewTab,
   isEnabled: shouldRedirectBrowserNewTabs,
@@ -416,18 +416,12 @@ function isBrowserNewTabUrl(url: string): boolean {
     const protocol = parsed.protocol.toLowerCase();
     const marker = `${parsed.hostname}${parsed.pathname}`.toLowerCase();
     if (!NEW_TAB_INTERNAL_SCHEMES.has(protocol)) return false;
-    return marker === "newtab/" || marker.includes("newtab") || marker.includes("new-tab") || marker.includes("new_tab") || marker.includes("local-ntp");
-  } catch {
-    return false;
-  }
-}
-
-function isNativeSplitViewPickerUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    if (!NEW_TAB_INTERNAL_SCHEMES.has(parsed.protocol.toLowerCase())) return false;
-    const haystack = `${parsed.protocol}//${parsed.hostname}${parsed.pathname}${parsed.search}${parsed.hash}`.toLowerCase();
-    return containsSplitViewMarker(haystack);
+    const isNewTab = marker === "newtab/" || marker.includes("newtab") || marker.includes("new-tab") || marker.includes("new_tab") || marker.includes("local-ntp");
+    if (!isNewTab) return false;
+    // Parse once and apply the same validated URL to both eligibility and
+    // split-picker exclusion. Query/hash markers still forbid redirects.
+    const haystack = `${parsed.protocol}//${parsed.hostname}${parsed.pathname}${parsed.search}${parsed.hash}`;
+    return !containsSplitViewMarker(haystack);
   } catch {
     return false;
   }

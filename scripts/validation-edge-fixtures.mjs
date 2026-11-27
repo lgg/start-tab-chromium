@@ -247,4 +247,18 @@ check(normalizeThemeBundle(null).issues.some(x=>x.messageKey==="validationInvali
   same(canonicalJsonValue(reinserted),canonicalJsonValue(original));
   check(!jsonContentEqual([original,reinserted],[{...original,"я":3},reinserted]));
 }
+{
+  // Large collision sets must terminate at the first free bounded ID, not
+  // reuse a later explicitly reserved suffix or discard the base prefix.
+  const base="x".repeat(160);
+  const used=new Set([base]),reserved=new Set();
+  for(let i=2;i<=2000;i++){
+    const ending="-"+i;
+    (i%2?used:reserved).add(base.slice(0,160-ending.length)+ending);
+  }
+  const candidate=v.uniqueEntityId(base,used,reserved);
+  same(candidate,base.slice(0,155)+"-2001");
+  same(candidate.length,160);
+  check(!used.has(candidate)&&!reserved.has(candidate));
+}
 console.log("Validation matrix:",checks,"assertions — message boundaries, all widget configs, URL sanitization, legacy and theme fallback branches");

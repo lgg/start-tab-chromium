@@ -721,5 +721,20 @@ try {
       assert.ok(control.state.blockedSites.includes("post-malformed-url.example"));
     }finally{control.tab=previousTab}
   }
+  // Split markers in query and fragment are part of eligibility, not only
+  // the path. A valid internal URL still redirects after those observations.
+  {
+    const oldManifest=chrome.runtime.getManifest,oldTab=control.tab;
+    try{
+      chrome.runtime.getManifest=()=>({chrome_url_overrides:{newtab:"newtab.html"}});
+      const before=control.calls.filter(c=>c[0]==="update").length;
+      for(const url of ["chrome://newtab/?mode=split-view","edge://new-tab/#tab_picker","brave://new_tab/?layout=side-by-side"]){
+        control.tab={id:1,url};
+        chrome.tabs.onUpdated.emit(1,{url},control.tab);
+        await new Promise(resolve=>setTimeout(resolve,20));
+      }
+      assert.equal(control.calls.filter(c=>c[0]==="update").length,before);
+    }finally{chrome.runtime.getManifest=oldManifest;control.tab=oldTab}
+  }
   console.log("Worker: real message router, blocklist, document validation, runtime CAS, clocks, notifications, redirect and startup");
 } finally { restoreFetch(); }
