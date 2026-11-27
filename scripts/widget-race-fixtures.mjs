@@ -320,6 +320,45 @@ try{
       view.dispose();
     }finally{control.chrome.storage.local.get=previousGet;write=async m=>{commit(m);return {ok:true}}}
   }
+
+  // A hidden note must remain recoverable while a detached renderer's
+  // write is pending, and a stale discard button must not erase its successor.
+  {
+    const b={...note,id:"hidden-pending-note"};
+    settings.layout.blocks.push(b);
+    control.state.startPageSettings=structuredClone(settings);
+    let release;
+    const previous=write;
+    write=m=>new Promise(resolve=>{release=()=>{commit(m);resolve({ok:true,runtimeUpdatedAt:revision})}});
+    try{
+      const view=mount(b);
+      value(one(view.root,"textarea"),"pending note");
+      await until(()=>release);
+      view.dispose();
+      const h=host();
+      renderHiddenNoteDrafts(h,new Set(),new Set([b.id]),context);
+      const discard=button(h,"hiddenNoteDiscard");
+      assert.equal(discard.disabled,true);
+      event(discard,"click");await delay(20);
+      assert.equal(hasUnsavedNoteDrafts(),true);
+      assert.equal(one(h,"textarea").value,"pending note");
+      const prior=refreshes;
+      release();
+      await until(()=>context.runtime.notes[b.id]==="pending note"&&!hasUnsavedNoteDrafts());
+      assert.ok(refreshes>prior);
+      renderHiddenNoteDrafts(h,new Set(),new Set(),context);
+      assert.equal(h.hidden,true);
+      const newView=mount(b);
+      value(one(newView.root,"textarea"),"new note");
+      event(discard,"click");
+      assert.equal(one(newView.root,"textarea").value,"new note");
+      newView.dispose();
+      await until(()=>writes.at(-1)?.value==="new note");
+      release();
+      await until(()=>!hasUnsavedNoteDrafts());
+      assert.equal(context.runtime.notes[b.id],"new note");
+    }finally{write=previous}
+  }
   console.log("Widgets: fallback search, disconnected controls, hidden search drafts, absent IP country and pinned failure");
   console.log("Widget races: pending notes, explicit overwrite, hidden drafts, legacy ACKs, failed refresh and timer completion");
 }finally{dom.window.close()}
