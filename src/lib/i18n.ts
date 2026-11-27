@@ -77,12 +77,20 @@ function detectLocale(preference: LocalePreference): SupportedLocale {
 }
 
 async function fetchCatalog(path: string, required: boolean): Promise<LocaleCatalog> {
-  const response = await fetch(chrome.runtime.getURL(path));
-  if (!response.ok) {
-    if (required) throw new Error(`Unable to load locale catalog: ${path}`);
+  try {
+    const response = await fetch(chrome.runtime.getURL(path));
+    if (!response.ok) throw new Error(`Unable to load locale catalog: ${path}`);
+    const catalog: unknown = await response.json();
+    if (!catalog || typeof catalog !== "object" || Array.isArray(catalog)) {
+      throw new Error(`Invalid locale catalog: ${path}`);
+    }
+    return catalog as LocaleCatalog;
+  } catch (error) {
+    // Optional catalog failures (including network/JSON errors) must not
+    // disable the entire extension page or discard a valid base locale.
+    if (required) throw error;
     return {};
   }
-  return (await response.json()) as LocaleCatalog;
 }
 
 async function loadCatalog(locale: SupportedLocale): Promise<LocaleCatalog> {
