@@ -90,12 +90,15 @@ export class LayoutEditor {
   private destructiveRuntimeUpdatedAt: number | null = null;
   private pointerSession: PointerSession | null = null;
   private readonly draftVersion: LayoutDraftVersion;
+  // Text draft recovery is page-local and can outlive an edit session.
+  private readonly reservedBlockIds = new Set<string>();
   private readonly options: LayoutEditorOptions;
 
   constructor(settings: StartPageSettings, options: LayoutEditorOptions) {
     this.saved = cloneSettings(settings);
     this.draft = cloneSettings(settings);
     this.draftVersion = new LayoutDraftVersion(settings.updatedAt);
+    for (const block of settings.layout.blocks) this.reservedBlockIds.add(block.id);
     this.options = options;
     this.renderControls();
   }
@@ -124,6 +127,7 @@ export class LayoutEditor {
     if (jsonContentEqual(this.saved, settings)) return;
     const refreshDraft = shouldRefreshLayoutDraft(this.active, this.dirty, this.savePending) && !this.isPointerActive;
     this.saved = cloneSettings(settings);
+    for (const block of settings.layout.blocks) this.reservedBlockIds.add(block.id);
     if (refreshDraft) {
       this.draft = cloneSettings(settings);
       this.draftVersion.reset(settings.updatedAt);
@@ -165,6 +169,7 @@ export class LayoutEditor {
       }
       persisted = chooseAcknowledgedSettings(this.saved, persisted);
       this.saved = cloneSettings(persisted);
+      for (const block of persisted.layout.blocks) this.reservedBlockIds.add(block.id);
       this.draft = cloneSettings(persisted);
       this.draftVersion.reset(persisted.updatedAt);
       this.active = false;
@@ -305,10 +310,12 @@ export class LayoutEditor {
   }
 
   private allocateDraftBlockId(type: BlockType): string {
-    // Keep saved IDs reserved even after removing their blocks from this
-    // draft; a new block must not inherit the removed block\'s runtime.
-    const used = new Set([...this.saved.layout.blocks, ...this.draft.layout.blocks].map((block) => block.id));
-    return uniqueEntityId(createBlockId(type), used, used);
+    // Never reuse IDs retired during this page lifetime, including blocks
+    // created only in a canceled draft: hidden notes/tasks/search input may
+    // still be recoverable under those IDs.
+    const id = uniqueEntityId(createBlockId(type), this.reservedBlockIds, this.reservedBlockIds);
+    this.reservedBlockIds.add(id);
+    return id;
   }
 
   private duplicate(id: string): void {
