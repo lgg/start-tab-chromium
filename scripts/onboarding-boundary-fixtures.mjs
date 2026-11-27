@@ -37,6 +37,33 @@ try{
     presets[index].click();await until(()=>!modal());
     assert.equal(control.messages.length,0);
     assert.equal(control.state.startPageRuntimeState.notes[note.id],"private data");
+
+    // Real page integration: free-position preview is wired through
+    // LayoutEditor, and a resize event cannot replace a card mid-drag.
+    const {value,pointer}=await import("./ui-fixture-dom.mjs");
+    button(one(document,"#editorToolbar"),t.t("editLayout")).click();
+    await until(()=>one(document,"#startPage").dataset.editorActive==="true");
+    value(one(document,"#editorToolbar select"),"free","change");
+    await until(()=>one(document,"#startPage").dataset.layoutMode==="free");
+    const zone=one(document,'#editorToolbar select[aria-label="'+t.t("layoutZone")+'"]');
+    value(zone,"full","change");
+    await until(()=>one(document,"#startPage").dataset.layoutZone==="full");
+    const card=()=>one(document,'[data-block-id="'+note.id+'"]');
+    const dragging=card();
+    assert.equal(one(dragging,".card__title").textContent,"Private onboarding note");
+    const before=Number.parseFloat(dragging.style.left);
+    pointer(one(dragging,".card__drag-handle"),"pointerdown",10,10);
+    pointer(dragging,"pointermove",35,30);
+    assert.equal(Number.parseFloat(dragging.style.left),before+25);
+    window.dispatchEvent(new window.Event("resize"));await delay(40);
+    assert.equal(card(),dragging);
+    pointer(dragging,"pointerup",35,30);
+    await until(()=>card()!==dragging);
+    assert.equal(Number.parseFloat(card().style.left),before+25);
+    window.confirm=()=>true;
+    button(one(document,"#editorToolbar"),t.t("cancel")).click();
+    await until(()=>one(document,"#startPage").dataset.editorActive==="false");
+    assert.equal(control.state.startPageRuntimeState.notes[note.id],"private data");
     window.dispatchEvent(new window.Event("pagehide"));
   }finally{dom.window.close()}
   console.log("Onboarding: destructive preset cancelled, cross-tab completion and no duplicate writes");
