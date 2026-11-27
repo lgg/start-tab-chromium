@@ -53,9 +53,9 @@ assert.match(gate, /let nativeActionPending = false/,
 assert.match(gate, /async function runNative\(button\)/);
 assert.match(gate, /status\.setAttribute\("role", "alert"\)/,
   "Native-tab failures must be exposed as an accessible visible alert");
-assert.match(gate, /if \(nativeActionPending \|\| !button\.isConnected\) return/,
+assert.match(gate, /if \(!pageActive \|\| nativeActionPending \|\| !button\.isConnected\) return/,
   "Rapid activation and replaced buttons cannot start a second request");
-assert.match(gate, /finally \{\s*nativeActionPending = false;\s*syncNativeButtons\(\)/);
+assert.match(gate, /finally \{\s*nativeActionPending = false;\s*if \(pageActive\) syncNativeButtons\(\)/);
 assert.match(gate, /native\.setAttribute\("data-native-new-tab", ""\);\s*syncNativeButton\(native\)/,
   "Replacement overlay buttons must reflect an existing native request");
 assert.match(gate, /const target = replacement \|\| \(button\.isConnected \? button : document\.getElementById\("nativeNewTab"\)\)/,
