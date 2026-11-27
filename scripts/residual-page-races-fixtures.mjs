@@ -196,7 +196,7 @@ try{
       await import("../src/newtab/newtab.ts?nonerror="+(++serial));
       await until(()=>document.querySelector("#grid [data-block-id]"));
       control.chrome.runtime.openOptionsPage=async()=>{throw "options transport refused"};
-      one(document,"#settingsButton").click();
+      one(document,"#settings").click();
       await until(()=>[...document.querySelectorAll('[role="status"],[aria-live]')].some(el=>el.textContent==="options transport refused"));
       assert.equal(control.messages.length,0);
       window.dispatchEvent(new window.Event("pagehide"));
