@@ -111,7 +111,10 @@ export function normalizeThemeBundle(value: unknown): ValidationResult<ThemeBund
   fallback.id = "imported-theme";
   fallback.name = "Imported theme";
   fallback.builtIn = false;
-  const source = isRecord(value) && value.app === "Start Tab Theme" && value.version === 1 ? value : null;
+  // A valid envelope without a theme payload is not a theme export.
+  // Do not silently create and select a default theme for truncated files.
+  const source = isRecord(value) && value.app === "Start Tab Theme" && value.version === 1
+    && isRecord(value.theme) && Object.keys(value.theme).length > 0 ? value : null;
   if (!source) issues.push({ path: "theme", messageKey: "validationInvalidThemeFile" });
   const theme = normalizeTheme(source?.theme, fallback, "theme", issues);
   theme.builtIn = false;

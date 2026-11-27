@@ -129,6 +129,22 @@ for(const effect of ["animated-gradient","aurora","mesh","spotlight","noise","ma
 same(normalizeThemeBundle(themeBundle(image)).issues.length,0);
 check(normalizeThemeBundle(null).issues.some(x=>x.messageKey==="validationInvalidThemeFile"));
 
+ // An envelope alone is not a theme. Failed imports must not create a
+ // fallback theme, select it, or touch any stored settings/revision.
+{
+  const {importCustomTheme}=await import("../src/lib/start-page-settings.js");
+  const before=structuredClone(control.state);
+  for(const theme of [undefined,null,false,0,"theme",[],{}]){
+    const envelope={app:"Start Tab Theme",version:1,theme};
+    check(normalizeThemeBundle(envelope).issues.some(x=>x.messageKey==="validationInvalidThemeFile"));
+    await assert.rejects(importCustomTheme(envelope),/Invalid Start Tab theme file/);
+    same(control.state,before);
+  }
+  const exported=themeBundle(image);
+  same(normalizeThemeBundle(exported).value.theme,exported.theme);
+}
+
+
  // Destructive layout changes must protect actual data, not merely block type.
 {
   const api=await import("../src/lib/start-page-settings.js");
