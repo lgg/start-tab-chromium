@@ -200,3 +200,61 @@ for (const updatedAt of [1.25, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER+
   assert.deepEqual(await remote.get(null),original);
   assert.deepEqual(fresh.state,before);
 }
+
+
+// Upload capacity is not a condition for comparing or restoring a remote
+// backup. A large local note is valid local data and the user can still
+// accept a newer remote snapshot, with the old note retained in recovery.
+{
+  const largeText="large local note ".repeat(8000);
+  for(const remoteNewer of [true,false]){
+    const runtime=structuredClone(pristineRuntime);
+    runtime.notes[noteId]=largeText;
+    const fresh=installChrome({startPageSettings:pristine,startPageRuntimeState:runtime,
+      blockedSites:["local-large.example"],startTabDataRevision:{version:1,updatedAt:1000}});
+    const storage=fresh.chrome.storage.sync;
+    await storage.set({...remoteSeedFrame,[metaKey]:{...remoteSeedFrame[metaKey],contentUpdatedAt:remoteNewer?2000:1}});
+    const before=structuredClone(fresh.state),frame=await storage.get(null);
+    if(remoteNewer){
+      assert.equal(await sync.syncChromeSyncBackup(),"restored");
+      assert.deepEqual(fresh.state.blockedSites,["remote-only.example"]);
+      assert.equal(fresh.state.startTabPreImportBackup.storage.startPageRuntimeState.notes[noteId],largeText);
+    }else{
+      await assert.rejects(sync.syncChromeSyncBackup(),/too large for browser sync/);
+      assert.deepEqual(fresh.state,before);
+    }
+    assert.deepEqual(await storage.get(null),frame);
+  }
+  const fresh=installChrome({startPageSettings:pristine,startPageRuntimeState:pristineRuntime,blockedSites:["remote-only.example"]});
+  const storage=fresh.chrome.storage.sync;
+  await storage.set(remoteSeedFrame);
+  storage.QUOTA_BYTES_PER_ITEM=30;
+  storage.QUOTA_BYTES=1;
+  assert.equal(await sync.syncChromeSyncBackup(),"unchanged");
+  assert.deepEqual(await storage.get(null),remoteSeedFrame);
+  await assert.rejects(sync.uploadChromeSyncBackup(),/too large|cannot fit/);
+  assert.deepEqual(await storage.get(null),remoteSeedFrame);
+}
+console.log("Browser Sync: upload quotas never prevent remote restore or unchanged confirmation");
+
+// A legacy backup generated with a misconfigured clock may have a date
+// before 1970. Its normalized baseline must still be valid v3 metadata,
+// including when the optional remote upgrade cannot be written.
+{
+  const fresh=installChrome({startPageSettings:pristine,startPageRuntimeState:pristineRuntime,blockedSites:["local-before-epoch.example"]});
+  const storage=fresh.chrome.storage.sync;
+  const meta=remoteSeedFrame[metaKey];
+  const legacy={version:2,updatedAt:"1969-12-31T23:59:59.000Z",deviceId:meta.deviceId,checksum:meta.checksum,chunks:meta.chunks};
+  await storage.set({...remoteSeedFrame,[metaKey]:legacy});
+  assert.equal((await sync.getChromeSyncBackupMeta()).contentUpdatedAt,0);
+  const originalSet=storage.set;
+  storage.set=async()=>{throw Error("upgrade offline")};
+  try{
+    await assert.rejects(sync.restoreChromeSyncBackup(),/restore committed, but legacy metadata upgrade failed/);
+    assert.deepEqual(fresh.state.blockedSites,["remote-only.example"]);
+    assert.equal(fresh.state[localMetaKey].contentUpdatedAt,0);
+  }finally{storage.set=originalSet}
+  assert.equal(await sync.syncChromeSyncBackup(),"unchanged");
+  assert.equal((await sync.getChromeSyncBackupMeta()).version,3);
+}
+console.log("Browser Sync: pre-epoch legacy timestamps retain a valid baseline after partial upgrade failure");
