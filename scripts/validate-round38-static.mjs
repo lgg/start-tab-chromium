@@ -46,10 +46,10 @@ for (const catalog of [en, ru]) {
 
 assert.match(runtimeTarget, /export function assertRuntimeMutationTarget/);
 for (const [kind, type] of [["note", "note"], ["tasks", "localTasks"]]) {
-  assert.ok(runtimeTarget.includes(`case "${kind}"`));
-  assert.ok(runtimeTarget.includes(`block.type === "${type}"`));
+  assert.ok(runtimeTarget.includes(`${kind}: ["${type}"]`));
 }
-assert.match(runtimeTarget, /block\.type === "links" \|\| block\.type === "startPinned"/);
+assert.match(runtimeTarget, /linkPage: \["links", "startPinned"\]/);
+assert.match(runtimeTarget, /candidate\.id === instanceId[\s\S]*allowed\.includes\(block\.type\)/);
 assert.ok((worker.match(/assertRuntimeMutationTarget\(settings, instanceId,/g) ?? []).length >= 3,
   "Every Round 38 non-clock per-instance runtime mutation must validate the current block target");
 assert.match(worker, /assertRuntimeMutationTarget\(settings, instanceId, "note"\)/);
