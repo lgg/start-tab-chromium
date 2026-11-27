@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { installDom, installChrome, installFetch, one, button, value, event, key, submit, until, delay } from "./ui-fixture-dom.mjs";
 import { createDefaultStartPageSettings, createBlockInstance } from "../src/lib/start-page-settings.js";
 import { normalizeRuntimeState } from "../src/lib/start-page-runtime.js";
-import { loadI18n, loadI18nForPreference as loadI18nForPreferenceForFixture } from "../src/lib/i18n.js";
+import { loadI18n, loadI18nForPreference } from "../src/lib/i18n.js";
 
 const restoreFetch = installFetch();
 const settings = createDefaultStartPageSettings(100);
@@ -617,12 +617,21 @@ try {
           return localFetch(input);
         };
         for(const [preference,expected] of [["en-US",en],["ru-RU",ru]]){
-          const loaded=await loadI18nForPreferenceForFixture(preference.slice(0,2));
+          const loaded=await loadI18nForPreference(preference.slice(0,2));
           assert.equal(loaded.locale,expected.locale);
           assert.equal(loaded.t("appName"),expected.t("appName"));
           const gate=await refreshGate(preference);
-          assert.ok(gate.querySelector("h1").textContent.length>0);
+          assert.equal([...gate.querySelectorAll("button")].at(-1).textContent,expected.t("openSettings"));
         }
+        // Missing optional Russian strings inherit the English catalog,
+        // while available Russian base strings retain their language.
+        globalThis.fetch=async input=>{
+          if(String(input).includes("/_locales/ru/")&&!String(input).endsWith("/messages.json"))throw Error("Russian optional unavailable");
+          return localFetch(input);
+        };
+        const partial=await refreshGate("ru-RU");
+        assert.equal(one(partial,"h1").textContent,en.t("startTabDisabledTitle"));
+        assert.equal([...partial.querySelectorAll("button")].at(-1).textContent,ru.t("openSettings"));
         // Failure of the selected base catalog falls back to English.
         globalThis.fetch=async input=>{
           if(String(input).includes("/_locales/ru/messages.json"))throw Error("Russian base unavailable");
