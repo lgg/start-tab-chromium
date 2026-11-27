@@ -72,7 +72,9 @@ function stringValue(value: unknown, fallback: string): string {
 }
 
 function timestamp(value: unknown, fallback: number | null = null): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return fallback;
+  // Reject values that round to zero, not only raw zero. A normalized
+  // timestamp must remain valid when the persisted state is read again.
+  if (typeof value !== "number" || !Number.isFinite(value) || Math.round(value) <= 0) return fallback;
   return Math.min(Number.MAX_SAFE_INTEGER, Math.round(value));
 }
 
@@ -121,7 +123,7 @@ function normalizeClock(block: Extract<BlockInstance, { type: ClockBlockType }>,
   const hasProgress = typeof storedAccumulated === "number" && Number.isFinite(storedAccumulated) && storedAccumulated > 0;
   const durationMs = block.type === "stopwatch" ? 0 : running || hasProgress ? storedDuration : configuredDuration;
   const accumulatedMs = finiteInteger(storedAccumulated, 0, 0, block.type === "stopwatch" ? MAX_CLOCK_MS : durationMs);
-  const targetAt = block.type === "stopwatch" ? null : running ? timestamp(value.targetAt, startedAt + Math.max(0, durationMs - accumulatedMs)) : null;
+  const targetAt = block.type === "stopwatch" ? null : running ? timestamp(value.targetAt, Math.min(Number.MAX_SAFE_INTEGER, startedAt + Math.max(0, durationMs - accumulatedMs))) : null;
   const storedCompletionToken = validClockToken(value.completionToken) ? value.completionToken : null;
   const completionToken = block.type === "stopwatch" || !running || targetAt === null
     ? null
