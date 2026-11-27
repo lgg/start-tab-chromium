@@ -106,7 +106,7 @@ function validClockToken(value: unknown): value is string {
 function normalizeClock(block: Extract<BlockInstance, { type: ClockBlockType }>, value: unknown): ClockRuntimeState {
   const fallback = defaultClockForBlock(block);
   if (!isRecord(value)) return fallback;
-  // An explicitly different clock kind cannot own this block\'s state.
+  // An explicitly different clock kind cannot own this block's state.
   if (typeof value.type === "string" && value.type !== block.type) return fallback;
   const phase: PomodoroPhase | null = block.type === "pomodoro" && value.phase === "break" ? "break" : block.type === "pomodoro" ? "work" : null;
   const configuredDuration = block.type === "timer"
@@ -646,23 +646,28 @@ export async function replaceStartPageSettingsWithRuntime(
         : previousRuntime.updatedAt),
     };
     const previousAlarms = await readClockAlarmSnapshot();
+    const storageKeys = [START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY, ...(localeChange ? [LOCALE_OVERRIDE_KEY] : []), ...(completeOnboarding ? [ONBOARDING_KEY] : [])];
+    let alarmMutationStarted = false;
     try {
       await commitStorageMutationWithRevision(
-        [START_PAGE_SETTINGS_KEY, START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY, ...(localeChange ? [LOCALE_OVERRIDE_KEY] : []), ...(completeOnboarding ? [ONBOARDING_KEY] : [])],
+        storageKeys,
         async () => {
           await chrome.storage.local.set({
             [START_PAGE_SETTINGS_KEY]: prepared.settings,
             [START_PAGE_RUNTIME_KEY]: runtime,
           });
           await chrome.storage.local.remove(LEGACY_INSTANCE_RUNTIME_KEY);
+          alarmMutationStarted = true;
           await reconcileClockAlarmsForRuntime(runtime);
           if (localeChange) await writeLocalePreferenceInExistingTransaction(localeChange.preference);
           if (completeOnboarding) await chrome.storage.local.set({ [ONBOARDING_KEY]: { onboarded: true } });
         },
         Math.max(prepared.settings.updatedAt, runtime.updatedAt),
+        { expectedStorage: Object.fromEntries(storageKeys.map(key => [key, items[key]])), conflictMessage: "Start Tab data changed before replacing the layout; reload before saving" },
       );
       return prepared.settings;
     } catch (error) {
+      if (!alarmMutationStarted) throw error;
       try {
         await restoreClockAlarmSnapshot(previousAlarms);
       } catch (rollbackError) {
@@ -1065,10 +1070,12 @@ export async function deleteInstanceRuntime(
     delete runtime.tasks[instanceId];
     delete runtime.linkPages[instanceId];
 
+    // The persistence helper already rolls back its own failed write. A
+    // rejected snapshot guard has not mutated storage or alarms at all.
+    if (normalizedHasInstance || storedHasInstance) {
+      await persistRuntimeInTransaction(runtime, settings, runtime.updatedAt, rawLegacy !== undefined, stored);
+    }
     try {
-      if (normalizedHasInstance || storedHasInstance) {
-        await persistRuntimeInTransaction(runtime, settings, runtime.updatedAt, rawLegacy !== undefined, stored);
-      }
       await clearClockAlarm(instanceId);
     } catch (error) {
       try {
