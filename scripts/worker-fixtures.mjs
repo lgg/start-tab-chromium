@@ -218,7 +218,11 @@ try {
   {
     const oldSettings=structuredClone(control.state.startPageSettings);
     const oldRuntime=structuredClone(control.state.startPageRuntimeState);
-    const t=await (await import("../src/lib/i18n.js")).loadI18n();
+    const oldLocale=control.state.localeOverride;
+    control.state.localeOverride="en";
+    const catalog=await (await fetch(chrome.runtime.getURL("_locales/en/messages.json"))).json();
+    const expectedMessage=catalog.pomodoroDone.message;
+    assert.ok(expectedMessage);
     try {
       for(const autoStart of [false,true]){
         const s=structuredClone(oldSettings);
@@ -242,7 +246,7 @@ try {
           await ok({type:"complete-clock",instanceId:b.id,token});
           const notices=control.calls.filter(c=>c[0]==="notification");
           assert.equal(notices.length,count+1);
-          assert.equal(notices.at(-1)[2].message,t.t("pomodoroDone"));
+          assert.equal(notices.at(-1)[2].message,expectedMessage);
           const after=await view();
           assert.equal(after.runtime.clocks[b.id].phase,phase==="work"?"break":"work");
           assert.equal(after.runtime.clocks[b.id].running,autoStart);
@@ -256,6 +260,7 @@ try {
     }finally{
       control.state.startPageSettings=oldSettings;
       control.state.startPageRuntimeState=oldRuntime;
+      if(oldLocale===undefined)delete control.state.localeOverride;else control.state.localeOverride=oldLocale;
     }
   }
   console.log("Worker residual: translation fallbacks, interrupted pomodoro, rejected browser redirect and blocker-only manifest");
