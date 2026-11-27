@@ -224,6 +224,32 @@ try{
   assert.deepEqual(removedTabs,[9]);
 }finally{tabs.create=originalCreateTab;tabs.get=originalGetTab;tabs.update=originalUpdateTab;tabs.remove=originalRemoveTab;local.remove=originalRemoveStorage}
 await local.remove(native.NATIVE_NEW_TAB_BYPASS_KEY);
+
+ // The asynchronous bypass read can finish after the grant's deadline.
+ // Do not sleep for a negative delay or retry against an already expired
+ // lease; continue the browser fallback sequence and clean up the tab.
+{
+  const originalNow=Date.now, originalGet=local.get;
+  const originalCreate=tabs.create, originalTabGet=tabs.get, originalTabUpdate=tabs.update, originalTabRemove=tabs.remove;
+  let now=100000,attempts=0,removed=[];
+  Date.now=()=>now;
+  tabs.create=async options=>{control.tab={id:73,...options};return {...control.tab}};
+  tabs.get=async()=>({...control.tab});
+  tabs.update=async(id,options)=>{attempts++;control.tab={id,...options};return {...control.tab}};
+  tabs.remove=async id=>{removed.push(id)};
+  local.get=async keys=>{
+    const result=await originalGet(keys);
+    if(keys===native.NATIVE_NEW_TAB_BYPASS_KEY&&result[keys]?.tabId===73&&!result[keys].consumedAt)now+=100;
+    return result;
+  };
+  try{
+    await assert.rejects(native.openNativeNewTab({consumptionTimeoutMs:10,pollIntervalMs:1}),e=>e instanceof AggregateError&&e.errors.length===3);
+    assert.equal(attempts,3);
+    assert.deepEqual(removed,[73]);
+    assert.equal(control.state[native.NATIVE_NEW_TAB_BYPASS_KEY],undefined);
+  }finally{Date.now=originalNow;local.get=originalGet;tabs.create=originalCreate;tabs.get=originalTabGet;tabs.update=originalTabUpdate;tabs.remove=originalTabRemove}
+}
+
 const {installDom}=await import("./ui-fixture-dom.mjs");
 const dom=await installDom();
 try{
