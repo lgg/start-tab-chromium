@@ -73,15 +73,20 @@ export function normalizeCustomThemes(value: unknown, issues: ValidationIssue[])
     fallback.builtIn = false;
     const theme = normalizeTheme(item, fallback, `themes.customThemes[${index}]`, issues);
     theme.builtIn = false;
+    const explicit = isRecord(item) && typeof item.id === "string" && item.id.trim().length > 0;
+    return { theme, explicit };
+  });
+  const reserved = new Set(candidates.map(({ theme }) => theme.id));
+  const explicitIds = new Set(candidates.filter(({ explicit }) => explicit).map(({ theme }) => theme.id));
+  const seen = new Set(BUILT_IN_THEMES.map((theme) => theme.id));
+  return candidates.map(({ theme, explicit }) => {
+    // Keep a real custom theme's ID (and its selected-theme reference)
+    // even if an earlier malformed entry would generate the same ID.
+    const occupied = !explicit && explicitIds.has(theme.id) ? new Set([...seen, theme.id]) : seen;
+    theme.id = uniqueEntityId(theme.id, occupied, reserved);
+    seen.add(theme.id);
     return theme;
   });
-  const reserved = new Set(candidates.map((theme) => theme.id));
-  const seen = new Set(BUILT_IN_THEMES.map((theme) => theme.id));
-  for (const theme of candidates) {
-    theme.id = uniqueEntityId(theme.id, seen, reserved);
-    seen.add(theme.id);
-  }
-  return candidates;
 }
 
 export function migrateLegacyTheme(root: Record<string, unknown>, _issues: ValidationIssue[]): StartPageTheme | null {
