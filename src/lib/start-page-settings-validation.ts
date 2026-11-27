@@ -151,7 +151,7 @@ export function normalizeStartPageSettingsWithReport(value: unknown): { settings
     layout: { columns, rowHeight: finiteNumber(layout.rowHeight, DEFAULT_SETTINGS.layout.rowHeight, 40, 240), gap: finiteNumber(layout.gap, DEFAULT_SETTINGS.layout.gap, 0, 60), profile: trimmedString(layout.profile, DEFAULT_SETTINGS.layout.profile, 100) || "custom", mode, zone, showBlockTitles: booleanValue(layout.showBlockTitles, DEFAULT_SETTINGS.layout.showBlockTitles), containedMaxWidth: finiteNumber(layout.containedMaxWidth, DEFAULT_SETTINGS.layout.containedMaxWidth, 640, 3840), blocks },
     themes: { selectedThemeId, customThemes },
   };
-  return { settings, report: { fromVersion, toVersion: START_PAGE_SCHEMA_VERSION, migratedBlocks: blocks.length, skippedBlocks: migrationIssues.length, issues: migrationIssues }, validation: issues };
+  return { settings, report: { fromVersion, toVersion: START_PAGE_SCHEMA_VERSION, migratedBlocks: blocks.length, skippedBlocks: migrationIssues.filter((issue) => issue.path.startsWith("layout.blocks[")).length, issues: migrationIssues }, validation: issues };
 }
 
 export function normalizeStartPageSettings(value: unknown): StartPageSettings {
