@@ -284,10 +284,12 @@
 
   async function splitContext() {
     const current = await chrome.tabs.getCurrent().catch(() => null);
+    if (!pageActive) return false;
     const marked = [location.href, document.referrer, window.name].some(containsSplitMarker);
     let openerMarked = false;
     if (!marked && typeof current?.openerTabId === "number") {
       const opener = await chrome.tabs.get(current.openerTabId).catch(() => null);
+      if (!pageActive) return false;
       openerMarked = [opener?.url, opener?.pendingUrl, opener?.title].some(containsSplitMarker);
     }
     const split = marked || openerMarked;
@@ -303,8 +305,11 @@
     if (!pageActive) return;
     const generation = ++applyGeneration;
     try {
-      if (await splitContext()) {
+      const split = await splitContext();
+      if (!pageActive || generation !== applyGeneration) return;
+      if (split) {
         const current = await chrome.tabs.getCurrent().catch(() => null);
+        if (!pageActive || generation !== applyGeneration) return;
         const tabs = (await chrome.tabs.query({ currentWindow: true }).catch(() => []))
           .filter((tab) => tab.id !== current?.id)
           .map(webTab)
@@ -332,7 +337,10 @@
     if (!pageActive || area !== "local") return;
     if (changes[LOCALE_OVERRIDE_KEY]) {
       void loadGateCatalog().then((current) => current ? apply() : undefined).catch(ignore);
-    } else if (changes[SETTINGS_KEY]) {
+    }
+    if (changes[SETTINGS_KEY]) {
+      // A combined settings/locale transaction must invalidate stale choices
+      // immediately, rather than wait for a possibly slow locale catalog.
       void apply().catch(ignore);
     }
   }
