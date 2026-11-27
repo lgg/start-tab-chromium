@@ -44,8 +44,10 @@ export function normalizeHost(host: string): string {
 function normalizeHostCandidate(host: string): string | null {
   const candidate = normalizeHost(host);
   if (!candidate) return null;
-  if (candidate.startsWith(".") || candidate.endsWith(".")) return null;
-  if (/[\s/:]/.test(candidate)) return null;
+  // URL accepts opaque DNS-like hosts such as "*.example.com" and
+  // "example..com". DNR requestDomains expects literal ASCII domains,
+  // not wildcard patterns or empty labels.
+  if (!/^[a-z0-9_-]+(?:\.[a-z0-9_-]+)*$/.test(candidate)) return null;
   return candidate;
 }
 
@@ -65,6 +67,8 @@ function normalizeStoredHost(value: string): string | null {
   if (fromUrl) return fromUrl;
   if (/^[a-z][a-z\d+.-]*:\/\//i.test(trimmed)) return null;
   const rawHost = trimmed.replace(/\/.*$/, "");
+  // Bare host input must not be silently reinterpreted as userinfo.
+  if (rawHost.includes("@") || rawHost.includes("\\")) return null;
   return hostFromUrl(`https://${rawHost}/`);
 }
 
@@ -364,7 +368,13 @@ function parseBlocklistDynamicRule(rule: chrome.declarativeNetRequest.Rule): Par
   const siteValues = url.searchParams.getAll("site");
   if (siteValues.length !== 1) return null;
   const rawSite = siteValues[0]!;
-  const site = normalizeStoredHost(rawSite);
+  const normalizedSite = normalizeStoredHost(rawSite);
+  // Keep recognizing exact previously owned literal rules even if a newer
+  // validator rejects that hostname. Otherwise Clear could strand a rule.
+  const legacyInvalidSite = !normalizedSite && rawSite === normalizeHost(rawSite)
+    && rawSite.length > 0 && !rawSite.startsWith(".") && !rawSite.endsWith(".")
+    && !/[\s/:]/.test(rawSite);
+  const site = normalizedSite ?? (legacyInvalidSite ? rawSite : null);
   if (!site) return null;
   // Older normalization removed only one www label per pass. Explicitly
   // marked rules could therefore contain a noncanonical www-prefixed site
