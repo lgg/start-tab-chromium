@@ -204,6 +204,22 @@ assert.equal(containsSplitViewMarker(""),false);
 const backup=await import("../src/lib/backup.js");
 const defaults=await import("../src/lib/start-page-defaults.js");
 const primitives=await import("../src/lib/start-page-validation-primitives.js");
+// A legacy locale accepted by the UI must survive export and legacy import.
+{
+  const before=await local.get("localeOverride");
+  try {
+    for(const [stored,canonical] of [["ru-RU","ru"],["EN_us","en"],["fr-FR",undefined]]){
+      await local.set({localeOverride:stored});
+      const exported=await backup.exportBackup();
+      assert.equal(exported.storage.localeOverride,canonical);
+      const legacy={...exported,complete:undefined,storage:{...exported.storage,localeOverride:stored}};
+      assert.equal(backup.migrateBackup(legacy).storage.localeOverride,canonical);
+    }
+  } finally {
+    if(Object.hasOwn(before,"localeOverride"))await local.set(before);
+    else await local.remove("localeOverride");
+  }
+}
 const beforeBackup=await backup.exportBackup();
 for(const [key,future] of [["startPageSettings",{schemaVersion:999}],["startPageRuntimeState",{version:999}],["focusStats",{version:999}]]){
   assert.throws(()=>backup.migrateBackup({...beforeBackup,storage:{...beforeBackup.storage,[key]:future}}),/newer extension version/);

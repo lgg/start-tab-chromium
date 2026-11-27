@@ -13,6 +13,7 @@ import {
   readStartTabDataRevisionSnapshot,
 } from "./data-revision.js";
 import { runIndependentEffects } from "./independent-effects.js";
+import { localePreferenceFromStored } from "./i18n.js";
 import { restampRestoredState } from "./backup-restore-revisions.js";
 import type { SyncMeta } from "./chrome-sync.js";
 import { START_PAGE_SCHEMA_VERSION, RUNTIME_SCHEMA_VERSION, type StartPageSettings, type StartPageRuntimeState } from "./start-page-types.js";
@@ -132,7 +133,8 @@ function normalizeOnboarding(value: unknown): Record<string, boolean> {
 }
 
 function normalizeLocale(value: unknown): "en" | "ru" | null {
-  return value === "en" || value === "ru" ? value : null;
+  const preference = localePreferenceFromStored(value);
+  return preference === "auto" ? null : preference;
 }
 
 type StorageNormalizationMode = BackupCollectionMode;

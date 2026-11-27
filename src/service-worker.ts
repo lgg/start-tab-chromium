@@ -22,6 +22,7 @@ import {
   resetFocusStats,
 } from "./lib/focus-stats.js";
 import { ownValue } from "./lib/dictionary.js";
+import { localePreferenceFromStored, LOCALE_OVERRIDE_KEY } from "./lib/i18n.js";
 import { jsonContentEqual } from "./lib/json-content.js";
 import { MAX_NOTE_LENGTH } from "./lib/platform-limits.js";
 import { runIndependentEffects } from "./lib/independent-effects.js";
@@ -59,7 +60,6 @@ import {
 } from "./lib/start-page-settings.js";
 
 const START_TAB_PAGE = "newtab.html";
-const LOCALE_OVERRIDE_KEY = "localeOverride";
 const NEW_TAB_INTERNAL_SCHEMES = new Set([
   "chrome:",
   "chrome-search:",
@@ -367,10 +367,10 @@ async function finishClockCompletion(instanceId: string, token: string): Promise
 
 async function workerMessage(key: string): Promise<string> {
   const nativeMessage = chrome.i18n.getMessage(key);
-  const items = await chrome.storage.local.get(LOCALE_OVERRIDE_KEY);
-  const override = items[LOCALE_OVERRIDE_KEY];
-  if (override !== "en" && override !== "ru") return nativeMessage || key;
   try {
+    const items = await chrome.storage.local.get(LOCALE_OVERRIDE_KEY);
+    const override = localePreferenceFromStored(items[LOCALE_OVERRIDE_KEY]);
+    if (override === "auto") return nativeMessage || key;
     const response = await fetch(chrome.runtime.getURL(`_locales/${override}/messages.json`));
     if (!response.ok) return nativeMessage || key;
     const catalog = await response.json() as LocaleCatalog;
