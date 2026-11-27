@@ -53,7 +53,8 @@ function firstAvailableRow(
     row = Math.max(row, interval.end);
     if (row > MAX_GRID_ROW) return null;
   }
-  return row <= MAX_GRID_ROW ? row : null;
+  // The starting row is clamped; every advancing interval checks the limit.
+  return row;
 }
 
 /**

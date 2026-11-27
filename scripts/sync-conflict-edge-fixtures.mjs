@@ -187,3 +187,16 @@ console.log("Browser Sync: first-contact pristine/non-pristine decision matrix a
     assert.match(fresh.state[localMetaKey].snapshotId,/^legacy-/);
   }finally{local.set=originalSet;local.get=originalGet}
 }
+
+// An invalid local durable revision must be refused by the shared reader
+// before an upload can replace any remote frame or local sync metadata.
+for (const updatedAt of [1.25, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER+1]) {
+  const fresh=installChrome({startPageSettings:pristine,startPageRuntimeState:pristineRuntime,
+    startTabDataRevision:{version:1,updatedAt}});
+  const remote=fresh.chrome.storage.sync;
+  await remote.set(oldFrame);
+  const original=await remote.get(null), before=structuredClone(fresh.state);
+  await assert.rejects(sync.uploadChromeSyncBackup(),/safe integer range/);
+  assert.deepEqual(await remote.get(null),original);
+  assert.deepEqual(fresh.state,before);
+}

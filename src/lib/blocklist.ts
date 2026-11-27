@@ -124,7 +124,8 @@ function matchingBlockedSite(host: string, sites: readonly string[]): string | n
   let match: string | null = null;
   for (const site of sites) {
     if (!hostMatchesBlockedSite(host, site)) continue;
-    if (match === null || site.length > match.length || (site.length === match.length && site < match)) {
+    // Distinct suffixes of the same host cannot share a length.
+    if (match === null || site.length > match.length) {
       match = site;
     }
   }

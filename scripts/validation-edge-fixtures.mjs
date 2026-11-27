@@ -238,4 +238,13 @@ check(normalizeThemeBundle(null).issues.some(x=>x.messageKey==="validationInvali
   const pinned={items:[{id:"legacy-link",title:"Legacy",url:"https://example.com/",icon:"L"}]};
   same(v.legacyConfigSource("startPinned",{startPinned:pinned}),pinned);
 }
+
+{
+  const {canonicalJsonValue,jsonContentEqual}=await import("../src/lib/json-content.js");
+  const original={"я":2,"a":{z:4,A:1},"__proto__":null,"😀":5,"10":10,"2":2};
+  const reinserted=Object.fromEntries(Object.entries(original).reverse());
+  check(jsonContentEqual(original,reinserted),"canonical key order including Unicode and integer keys");
+  same(canonicalJsonValue(reinserted),canonicalJsonValue(original));
+  check(!jsonContentEqual([original,reinserted],[{...original,"я":3},reinserted]));
+}
 console.log("Validation matrix:",checks,"assertions — message boundaries, all widget configs, URL sanitization, legacy and theme fallback branches");

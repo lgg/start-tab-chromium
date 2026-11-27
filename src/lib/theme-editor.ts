@@ -27,13 +27,13 @@ input.value = value;
 input.autocomplete = "off";
 return input;
 }
-function numberInput(value: number, min: number, max: number, step: number | "any" = 1): HTMLInputElement {
+function numberInput(value: number, min: number, max: number): HTMLInputElement {
 const input = element("input", "input");
 input.type = "number";
 input.value = String(value);
 input.min = String(min);
 input.max = String(max);
-input.step = step === "any" ? "any" : String(step);
+input.step = "any";
 return input;
 }
 function checkbox(value: boolean): HTMLInputElement {
@@ -111,7 +111,7 @@ return () => ({ kind: "image", url: url.value, fit: fit.value as "cover" | "cont
 default: {
 const existing = defaultEffectTile(theme);
 const baseColor = textInput(existing.baseColor, "color");
-const effect = select<AnimatedEffectId>(existing.config.effect, [
+const effectChoices: Array<[AnimatedEffectId, string]> = [
 ["animated-gradient", i18n.t("effectGradient")],
 ["aurora", i18n.t("effectAurora")],
 ["mesh", i18n.t("effectMesh")],
@@ -119,35 +119,38 @@ const effect = select<AnimatedEffectId>(existing.config.effect, [
 ["noise", i18n.t("effectNoise")],
 ["matrix", i18n.t("effectMatrix")],
 ["cyberpunk", i18n.t("effectCyberpunk")],
-]);
+];
+const effect = select<AnimatedEffectId>(existing.config.effect, effectChoices);
+const effectIds = new Set<string>(effectChoices.map(([id]) => id));
 const effectFields = element("div", "settings-grid settings-field--wide");
 dynamic.append(field(i18n.t("backgroundBaseColor"), baseColor), field(i18n.t("backgroundEffect"), effect), effectFields);
 type EffectConfig = Extract<BackgroundTile, { kind: "effect" }>["config"];
 let readEffect: () => EffectConfig;
 const effectPanels = new FormPanelCache<EffectConfig>();
-const createEffectPanel = (): (() => EffectConfig) => {
-const current = existing.config.effect === effect.value ? existing.config : null;
-const speed = numberInput("speed" in existing.config ? existing.config.speed : 1, 0.05, 4, "any");
-const intensity = numberInput(existing.config.intensity, 0, 1, "any");
-switch (effect.value) {
+let lastEffect: AnimatedEffectId = existing.config.effect;
+const createEffectPanel = (selected: AnimatedEffectId): (() => EffectConfig) => {
+const current = existing.config.effect === selected ? existing.config : null;
+const speed = numberInput(existing.config.speed, 0.05, 4);
+const intensity = numberInput(existing.config.intensity, 0, 1);
+switch (selected) {
 case "animated-gradient": {
-const angle = numberInput(current?.effect === "animated-gradient" ? current.angle : 135, 0, 360, "any");
+const angle = numberInput(current?.effect === "animated-gradient" ? current.angle : 135, 0, 360);
 const colors = textInput(current?.effect === "animated-gradient" ? current.colors.join(", ") : "#111827, #312e81, #0f766e, #111827");
 effectFields.append(field(i18n.t("effectSpeed"), speed), field(i18n.t("effectIntensity"), intensity), field(i18n.t("effectAngle"), angle), field(i18n.t("effectColors"), colors, true));
 return () => ({ effect: "animated-gradient", speed: readNumber(speed, 1), intensity: readNumber(intensity, 0.8), angle: readNumber(angle, 135), colors: colors.value.split(",").map((item) => item.trim()).filter(Boolean) });
 }
 case "aurora": {
-const blur = numberInput(current?.effect === "aurora" ? current.blur : 72, 0, 160, "any");
+const blur = numberInput(current?.effect === "aurora" ? current.blur : 72, 0, 160);
 effectFields.append(field(i18n.t("effectSpeed"), speed), field(i18n.t("effectIntensity"), intensity), field(i18n.t("effectBlur"), blur));
 return () => ({ effect: "aurora", speed: readNumber(speed, 1), intensity: readNumber(intensity, 0.65), blur: readNumber(blur, 72) });
 }
 case "mesh": {
-const scale = numberInput(current?.effect === "mesh" ? current.scale : 1, 0.25, 4, "any");
+const scale = numberInput(current?.effect === "mesh" ? current.scale : 1, 0.25, 4);
 effectFields.append(field(i18n.t("effectSpeed"), speed), field(i18n.t("effectIntensity"), intensity), field(i18n.t("effectScale"), scale));
 return () => ({ effect: "mesh", speed: readNumber(speed, 0.7), intensity: readNumber(intensity, 0.75), scale: readNumber(scale, 1) });
 }
 case "spotlight": {
-const size = numberInput(current?.effect === "spotlight" ? current.size : 62, 10, 180, "any");
+const size = numberInput(current?.effect === "spotlight" ? current.size : 62, 10, 180);
 effectFields.append(field(i18n.t("effectSpeed"), speed), field(i18n.t("effectIntensity"), intensity), field(i18n.t("effectSize"), size));
 return () => ({ effect: "spotlight", speed: readNumber(speed, 0.65), intensity: readNumber(intensity, 0.72), size: readNumber(size, 62) });
 }
@@ -157,7 +160,7 @@ effectFields.append(field(i18n.t("effectIntensity"), intensity), field(i18n.t("e
 return () => ({ effect: "noise", intensity: readNumber(intensity, 0.22), animated: animated.checked, speed: readNumber(speed, 0.5) });
 }
 case "matrix": {
-const density = numberInput(current?.effect === "matrix" ? current.density : 0.55, 0.1, 1, "any");
+const density = numberInput(current?.effect === "matrix" ? current.density : 0.55, 0.1, 1);
 effectFields.append(field(i18n.t("effectSpeed"), speed), field(i18n.t("effectIntensity"), intensity), field(i18n.t("effectDensity"), density));
 return () => ({ effect: "matrix", speed: readNumber(speed, 1), intensity: readNumber(intensity, 0.7), density: readNumber(density, 0.55) });
 }
@@ -167,10 +170,13 @@ effectFields.append(field(i18n.t("effectSpeed"), speed), field(i18n.t("effectInt
 return () => ({ effect: "cyberpunk", speed: readNumber(speed, 1.1), intensity: readNumber(intensity, 0.72), scanlines: scanlines.checked });
 }
 }
-throw new Error("Unknown background effect");
 };
 const drawEffect = (): void => {
-readEffect = effectPanels.show(effect.value, effectFields, createEffectPanel);
+  // An empty or unknown selection must not destroy the previous draft
+  // or throw from a browser change listener.
+  if (!effectIds.has(effect.value)) effect.value = lastEffect;
+  else lastEffect = effect.value as AnimatedEffectId;
+  readEffect = effectPanels.show(lastEffect, effectFields, () => createEffectPanel(lastEffect));
 };
 effect.addEventListener("change", drawEffect);
 drawEffect();
@@ -212,18 +218,18 @@ const textPrimary = textInput(tokens.textPrimary, "color");
 const textSecondary = textInput(tokens.textSecondary, "color");
 const cardSurface = textInput(tokens.cardSurface, "color");
 const cardBorder = textInput(tokens.cardBorder);
-const cardOpacity = numberInput(tokens.cardOpacity, 0, 1, "any");
+const cardOpacity = numberInput(tokens.cardOpacity, 0, 1);
 const shadow = textInput(tokens.shadow);
 const accent = textInput(tokens.accent, "color");
 const hover = textInput(tokens.hover);
 const active = textInput(tokens.active);
 const fontFamily = textInput(tokens.fontFamily);
-const baseFontSize = numberInput(tokens.baseFontSize, 10, 32, "any");
+const baseFontSize = numberInput(tokens.baseFontSize, 10, 32);
 // Built-in themes use 1.08 and imported themes may use other fractional
 // values. Match the normalizer instead of rejecting a valid existing value.
-const headingScale = numberInput(tokens.headingScale, 0.8, 2, "any");
-const radius = numberInput(tokens.borderRadius, 0, 48, "any");
-const spacing = numberInput(tokens.spacing, 4, 40, "any");
+const headingScale = numberInput(tokens.headingScale, 0.8, 2);
+const radius = numberInput(tokens.borderRadius, 0, 48);
+const spacing = numberInput(tokens.spacing, 4, 40);
 grid.append(
 field(i18n.t("themeName"), name, true),
 background.root,

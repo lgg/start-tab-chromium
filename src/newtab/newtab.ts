@@ -244,13 +244,10 @@ function updateLayoutMetrics(settings: StartPageSettings, blocks: readonly Block
     : viewportWidth;
 
   if (layout.mode === "grid") {
-    const maxColumn = blocks.reduce((maximum, block) => Math.max(maximum, block.column + block.width - 1), layout.columns);
+    // Grid normalization and every editor placement clamp each block to
+    // the configured columns. Only free layout can extend horizontally.
     const maxRow = blocks.reduce((maximum, block) => Math.max(maximum, block.row + block.height - 1), 1);
-    const columnWidth = Math.max(48, (standardWidth - layout.gap * (layout.columns - 1)) / layout.columns);
-    const neededWidth = maxColumn <= layout.columns
-      ? standardWidth
-      : maxColumn * columnWidth + Math.max(0, maxColumn - 1) * layout.gap;
-    grid.style.width = `${Math.ceil(neededWidth)}px`;
+    grid.style.width = `${Math.ceil(standardWidth)}px`;
     grid.style.minHeight = `${Math.max(1, maxRow) * layout.rowHeight + Math.max(0, maxRow - 1) * layout.gap}px`;
   } else {
     const contentWidth = blocks.reduce((maximum, block) => Math.max(maximum, block.free.x + block.free.width), 0);
