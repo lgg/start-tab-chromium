@@ -679,5 +679,22 @@ try {
     submit(one(dialog,"form"));
     assert.equal((await pending).background.config.blur,37);
   }
+  // A non-Aurora source must receive the Aurora default blur on the
+  // first transition, while returning to the original panel preserves it.
+  {
+    const source={...theme,background:{kind:"effect",baseColor:"#08111f",config:{effect:"mesh",speed:0.7,intensity:0.75,scale:2}}};
+    const pending=editTheme(source,i18n);
+    const dialog=one(document,"dialog[open]");
+    const effect=field(dialog,"backgroundEffect");
+    value(effect,"aurora","change");
+    assert.equal(field(dialog,"effectBlur").value,"72");
+    value(field(dialog,"effectBlur"),43);
+    value(effect,"mesh","change");
+    assert.equal(field(dialog,"effectScale").value,"2");
+    value(effect,"aurora","change");
+    assert.equal(field(dialog,"effectBlur").value,"43");
+    submit(one(dialog,"form"));
+    assert.equal((await pending).background.config.blur,43);
+  }
   console.log("Theme editor: 4 background kinds, 7 effects, panel preservation, DOM CSS application, cancel");
 } finally { dom.window.close(); }

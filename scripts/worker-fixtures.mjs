@@ -212,6 +212,57 @@ try {
       control.state.startPageRuntimeState=previousRuntime;
     }
   }
+
+  // A real Pomodoro completion through the worker must use the localized
+  // Pomodoro notification, advance phases and never double-count a token.
+  {
+    const oldSettings=structuredClone(control.state.startPageSettings);
+    const oldRuntime=structuredClone(control.state.startPageRuntimeState);
+    const oldLocale=control.state.localeOverride;
+    control.state.localeOverride="en";
+    const catalog=await (await fetch(chrome.runtime.getURL("_locales/en/messages.json"))).json();
+    const expectedMessage=catalog.pomodoroDone.message;
+    assert.ok(expectedMessage);
+    try {
+      for(const autoStart of [false,true]){
+        const s=structuredClone(oldSettings);
+        const b=s.layout.blocks.find(b=>b.id==="worker-pomodoro");
+        b.config={...b.config,workSeconds:60,breakSeconds:30,notifyOnComplete:true,autoStartNextPhase:autoStart};
+        control.state.startPageSettings=s;
+        await ok({type:"clock-action",instanceId:b.id,action:"reset"});
+        await ok({type:"clock-action",instanceId:b.id,action:"start"});
+        for(const phase of ["work","break"]){
+          let clock=control.state.startPageRuntimeState.clocks[b.id];
+          if(!clock.running){
+            await ok({type:"clock-action",instanceId:b.id,action:"start"});
+            clock=control.state.startPageRuntimeState.clocks[b.id];
+          }
+          assert.equal(clock.phase,phase);
+          clock.startedAt=Date.now()-clock.durationMs-1000;
+          clock.targetAt=clock.startedAt+clock.durationMs;
+          clock.focusSessionStartedAt=phase==="work"?clock.startedAt:null;
+          const token=clock.completionToken;
+          const count=control.calls.filter(c=>c[0]==="notification").length;
+          await ok({type:"complete-clock",instanceId:b.id,token});
+          const notices=control.calls.filter(c=>c[0]==="notification");
+          assert.equal(notices.length,count+1);
+          assert.equal(notices.at(-1)[2].message,expectedMessage);
+          const after=await view();
+          assert.equal(after.runtime.clocks[b.id].phase,phase==="work"?"break":"work");
+          assert.equal(after.runtime.clocks[b.id].running,autoStart);
+          const totals=(await getFocusStats()).totals;
+          await ok({type:"complete-clock",instanceId:b.id,token});
+          assert.equal(control.calls.filter(c=>c[0]==="notification").length,count+1);
+          assert.deepEqual((await getFocusStats()).totals,totals);
+        }
+        await ok({type:"clock-action",instanceId:b.id,action:"reset"});
+      }
+    }finally{
+      control.state.startPageSettings=oldSettings;
+      control.state.startPageRuntimeState=oldRuntime;
+      if(oldLocale===undefined)delete control.state.localeOverride;else control.state.localeOverride=oldLocale;
+    }
+  }
   console.log("Worker residual: translation fallbacks, interrupted pomodoro, rejected browser redirect and blocker-only manifest");
 
   {

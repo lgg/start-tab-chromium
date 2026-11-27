@@ -103,5 +103,70 @@ try{
       window.dispatchEvent(new window.Event("pagehide"));
     }finally{dom.window.close()}
   }
+  // Another tab can complete onboarding after the first committed-state
+  // read, but before the final skip transaction takes the data-write lock.
+  {
+    const dom=await installDom("newtab/newtab.html","https://extension.example/newtab.html");
+    const s=createDefaultStartPageSettings(100);
+    s.layout.blocks=s.layout.blocks.filter(b=>b.type==="note");
+    const control=installChrome({startPageSettings:s,startPageRuntimeState:normalizeRuntimeState(undefined,s),localeOverride:"en",startPageOnboarding:{onboarded:false}});
+    try{
+      const t=await loadI18n();
+      await import("../src/newtab/newtab.ts?onboarding="+(++serial));
+      const modal=()=>document.getElementById("onboarding");
+      await until(()=>modal());
+      const store=control.chrome.storage.local, get=store.get,set=store.set;
+      let reads=0,writes=0;
+      store.get=async keys=>{
+        const snapshot=await get(keys);
+        if(keys==="startPageOnboarding"&&++reads===1)control.state.startPageOnboarding={onboarded:true};
+        return snapshot;
+      };
+      store.set=async items=>{
+        if(Object.hasOwn(items,"startPageOnboarding"))writes++;
+        return set(items);
+      };
+      button(modal(),t.t("onboardingSkip")).click();
+      await until(()=>!modal());
+      assert.ok(reads>=2);
+      assert.equal(writes,0);
+      assert.equal(control.messages.length,0);
+      assert.deepEqual(control.state.startPageOnboarding,{onboarded:true});
+      window.dispatchEvent(new window.Event("pagehide"));
+    }finally{dom.window.close()}
+  }
+
+  // Two gate changes can arrive while the first onboarding opener waits
+  // for the early gate to settle. Exactly one opener may read and mount.
+  {
+    const dom=await installDom("newtab/newtab.html","https://extension.example/newtab.html");
+    const s=createDefaultStartPageSettings(100);
+    s.layout.blocks=s.layout.blocks.filter(b=>b.type==="note");
+    const control=installChrome({startPageSettings:s,startPageRuntimeState:normalizeRuntimeState(undefined,s),localeOverride:"en",startPageOnboarding:{onboarded:false}});
+    let release;
+    window.startTabGateReady=new Promise(resolve=>{release=resolve});
+    const store=control.chrome.storage.local,get=store.get;
+    let reads=0;
+    store.get=async keys=>{if(keys==="startPageOnboarding")reads++;return get(keys)};
+    try{
+      await import("../src/newtab/newtab.ts?onboarding-open="+(++serial));
+      await until(()=>document.querySelector("#grid [data-block-id]"));
+      assert.equal(document.getElementById("onboarding"),null);
+      window.dispatchEvent(new window.Event("start-tab-gate-change"));
+      window.dispatchEvent(new window.Event("start-tab-gate-change"));
+      await delay(40);
+      assert.equal(reads,0);
+      const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");
+      svg.setAttribute("tabindex","0");document.body.append(svg);svg.focus();
+      assert.equal(document.activeElement,svg);
+      release();
+      await until(()=>document.getElementById("onboarding"));
+      await delay(30);
+      assert.equal(reads,1);
+      assert.equal(document.querySelectorAll("#onboarding").length,1);
+      assert.equal(one(document,"#startPage").hasAttribute("inert"),true);
+      window.dispatchEvent(new window.Event("pagehide"));
+    }finally{release();store.get=get;dom.window.close()}
+  }
   console.log("Onboarding: destructive preset cancelled, cross-tab completion and no duplicate writes");
 }finally{restoreFetch()}

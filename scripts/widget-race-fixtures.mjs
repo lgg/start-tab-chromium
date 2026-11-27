@@ -62,9 +62,12 @@ try{
   context.runtime.notes[note.id]="remote note";context.runtime.updatedAt=++revision;
   control.state.startPageRuntimeState=structuredClone(context.runtime);
   const third=mount(note);second.dispose();
-  window.confirm=()=>false;
+  let overwriteDeclines=0;
+  const writesBeforeDecline=writes.length;
+  window.confirm=()=>{overwriteDeclines++;return false};
   button(third.root,"noteDraftRetry").click();
-  await until(()=>!button(third.root,"noteDraftRetry").disabled);
+  await until(()=>overwriteDeclines===1&&!button(third.root,"noteDraftRetry").disabled,"declined overwrite completed");
+  assert.equal(writes.length,writesBeforeDecline);
   assert.equal(one(third.root,"textarea").value,"local draft");
   assert.equal(context.runtime.notes[note.id],"remote note");
   window.confirm=()=>true;
@@ -470,6 +473,83 @@ try{
       assert.equal(writes.length,beforeDiscard);
     }finally{
       view.dispose();write=originalWrite;window.confirm=originalConfirm;
+    }
+  }
+
+  // An unsaved first note has no canonical key at all. Rejection and retry
+  // compare against the empty baseline rather than confusing absence with
+  // a concurrent edit. A detached select control must not steal focus.
+  {
+    const b={...note,id:"note-empty-baseline"};
+    settings.layout.blocks.push(b);
+    control.state.startPageSettings=structuredClone(settings);
+    delete context.runtime.notes[b.id];
+    context.runtime.updatedAt=++revision;
+    control.state.startPageRuntimeState=structuredClone(context.runtime);
+    const previous=write, oldConfirm=window.confirm;
+    const mounted=mount(b);
+    const input=one(mounted.root,"textarea"),status=one(mounted.root,".note-save-status");
+    try{
+      write=async()=>{throw Error("initial save offline")};
+      value(input,"first private note");
+      await until(()=>!status.hidden);
+      const h=host();
+      renderHiddenNoteDrafts(h,new Set(),new Set([b.id]),context);
+      const oldSelect=button(h,"hiddenNoteSelect");
+      renderHiddenNoteDrafts(h,new Set([b.id]),new Set([b.id]),context);
+      input.focus();
+      event(oldSelect,"click");await delay(20);
+      assert.equal(document.activeElement,input);
+      let confirms=0;
+      window.confirm=()=>{confirms++;return false};
+      write=async m=>{commit(m);return {ok:true,runtimeUpdatedAt:revision}};
+      button(mounted.root,"noteDraftRetry").click();
+      await until(()=>status.hidden&&context.runtime.notes[b.id]==="first private note");
+      assert.equal(writes.at(-1).expectedValue,"");
+      assert.equal(confirms,0);
+      h.remove();
+    }finally{mounted.dispose();write=previous;window.confirm=oldConfirm}
+  }
+
+  // A queued interval callback after a renderer is disposed must be a
+  // no-op even when an expired countdown would otherwise dispatch a command.
+  // Two synthetic clicks delivered before disabled state changes share one
+  // lease, including an old control that is still mounted.
+  {
+    const b={...timer,id:"clock-final-lease"};
+    settings.layout.blocks.push(b);
+    control.state.startPageSettings=structuredClone(settings);
+    const oldInterval=window.setInterval,oldClear=window.clearInterval;
+    const callbacks=new Map();let serial=0;
+    window.setInterval=fn=>{const id=++serial;callbacks.set(id,fn);return id};
+    window.clearInterval=()=>{};
+    const originalHandler=control.handler;
+    let release;
+    let first,second;
+    try{
+      context.runtime.clocks[b.id]=defaultClockForBlock(b);
+      control.state.startPageRuntimeState=structuredClone(context.runtime);
+      first=mount(b);second=mount(b);
+      const before=control.messages.length;
+      control.handler=()=>new Promise(resolve=>{release=resolve});
+      event(button(first.root,"clockReset"),"click");
+      event(button(second.root,"clockReset"),"click");
+      await until(()=>release);
+      await delay(20);
+      assert.equal(control.messages.length,before+1);
+      first.dispose();second.dispose();
+      context.runtime.clocks[b.id]=startClockState(defaultClockForBlock(b),Date.now()-10000);
+      for(const callback of callbacks.values())callback();
+      await delay(20);
+      assert.equal(control.messages.length,before+1);
+      release({ok:true});
+      await delay(40);
+      assert.equal(control.messages.length,before+1);
+    }finally{
+      if(release)release({ok:true});
+      first?.dispose();second?.dispose();
+      control.handler=originalHandler;
+      window.setInterval=oldInterval;window.clearInterval=oldClear;
     }
   }
   console.log("Widgets: fallback search, disconnected controls, hidden search drafts, absent IP country and pinned failure");

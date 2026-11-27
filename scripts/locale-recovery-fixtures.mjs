@@ -51,8 +51,22 @@ try{
   window.confirm=()=>true;
   button(notice(),t.t("localeReloadAction")).click();
   await until(()=>reloads===2);
+  // A real user click can be awaiting a locked locale read when the page
+  // closes. A later response must not prompt or navigate a disposed page.
+  const store=control.chrome.storage.local, get=store.get;
+  let release;
+  store.get=keys=>keys==="localeOverride"&&!release
+    ? new Promise(resolve=>{release=async()=>resolve(await get(keys))})
+    : get(keys);
+  let latePrompts=0;
+  window.confirm=()=>{latePrompts++;return true};
+  button(notice(),t.t("localeReloadAction")).click();
+  await until(()=>release);
   window.dispatchEvent(new window.Event("pagehide"));
+  await release();
+  store.get=get;
   locale("en");await delay(30);
+  assert.equal(latePrompts,0);
   assert.equal(reloads,2);
   console.log("Locale page lifecycle: protected search, deferred reload, reverted preference, explicit clean and confirmed reload");
 }finally{globalThis.location=actual;restoreFetch();dom.window.close()}
