@@ -217,7 +217,7 @@ function configFields(
       const timeFormat = textInput(block.config.timeFormat);
       const timeZone = textInput(block.config.timeZone);
       const locale = textInput(block.config.locale);
-      const fontSize = numberInput(block.config.timeFontSize, { min: 12, max: 160, step: 1 });
+      const fontSize = numberInput(block.config.timeFontSize, { min: 12, max: 160, step: "any" });
       return {
         fields: [
           field(i18n.t("dateTimeMode"), mode),
@@ -239,8 +239,8 @@ function configFields(
       const rows = numberInput(block.config.rows, { min: 1, max: 12 });
       const direction = selectInput(block.config.pageDirection, [["horizontal", i18n.t("directionHorizontal")], ["vertical", i18n.t("directionVertical")]]);
       const fontFamily = textInput(block.config.fontFamily);
-      const fontSize = numberInput(block.config.fontSize, { min: 8, max: 48, step: 1 });
-      const iconSize = numberInput(block.config.iconSize, { min: 12, max: 128, step: 1 });
+      const fontSize = numberInput(block.config.fontSize, { min: 8, max: 48, step: "any" });
+      const iconSize = numberInput(block.config.iconSize, { min: 12, max: 128, step: "any" });
       const links = linksEditor(i18n, block.config.items);
       return {
         fields: [field(i18n.t("linkColumns"), columns), field(i18n.t("linkRows"), rows), field(i18n.t("linkDirection"), direction), field(i18n.t("linkFontFamily"), fontFamily), field(i18n.t("linkFontSize"), fontSize), field(i18n.t("linkIconSize"), iconSize), field(i18n.t("links"), links.root, { wide: true })],
@@ -320,8 +320,8 @@ function configFields(
       const rows = numberInput(block.config.rows, { min: 1, max: 12 });
       const direction = selectInput(block.config.pageDirection, [["horizontal", i18n.t("directionHorizontal")], ["vertical", i18n.t("directionVertical")]]);
       const fontFamily = textInput(block.config.fontFamily);
-      const fontSize = numberInput(block.config.fontSize, { min: 8, max: 48, step: 1 });
-      const iconSize = numberInput(block.config.iconSize, { min: 12, max: 128, step: 1 });
+      const fontSize = numberInput(block.config.fontSize, { min: 8, max: 48, step: "any" });
+      const iconSize = numberInput(block.config.iconSize, { min: 12, max: 128, step: "any" });
       const links = linksEditor(i18n, block.config.items);
       return { fields: [field(i18n.t("linkColumns"), columns), field(i18n.t("linkRows"), rows), field(i18n.t("linkDirection"), direction), field(i18n.t("linkFontFamily"), fontFamily), field(i18n.t("linkFontSize"), fontSize), field(i18n.t("linkIconSize"), iconSize), field(i18n.t("links"), links.root, { wide: true })], read: () => ({ type: block.type, columns: readNumber(columns, block.config.columns), rows: readNumber(rows, block.config.rows), pageDirection: direction.value as typeof block.config.pageDirection, fontFamily: fontFamily.value, fontSize: readNumber(fontSize, block.config.fontSize), iconSize: readNumber(iconSize, block.config.iconSize), items: links.read() }) };
     }
