@@ -461,6 +461,7 @@ console.log("Navigation: failed session lookup, DNR repair, native grant cleanup
       const third=await api.saveNewCustomTheme({...theme,name:"Fourth"});
       const legacy=await api.updateCustomTheme({...theme,id:" "+theme.id+" ",name:"Fifth"});
       const blank=await api.saveNewCustomTheme({...theme,id:" ",name:"Normalized"});
+      const migrated=await api.updateCustomTheme({...theme,id:" start-tab-dark ",name:"Legacy built-in collision"});
       const state=await api.getStartPageSettings();
       assert.equal(theme.id,"theme-fixed-uuid");
       assert.equal(duplicate.id,"theme-fixed-uuid-2");
@@ -468,8 +469,9 @@ console.log("Navigation: failed session lookup, DNR repair, native grant cleanup
       assert.equal(third.id,"theme-fixed-uuid-4");
       assert.equal(legacy.id,"theme-fixed-uuid-5");
       assert.equal(blank.id,"custom-theme");
-      assert.equal(state.themes.customThemes.length,6);
-      assert.equal(state.themes.selectedThemeId,blank.id);
+      assert.equal(migrated.id,"theme-fixed-uuid-6");
+      assert.equal(state.themes.customThemes.length,7);
+      assert.equal(state.themes.selectedThemeId,migrated.id);
       assert.equal(state.themes.customThemes.find(t=>t.id===theme.id).name,"First");
       assert.equal(state.layout.blocks.find(b=>b.id===c.id).title,"Copied note");
       assert.equal(state.layout.blocks.length,settings.layout.blocks.length+3);
