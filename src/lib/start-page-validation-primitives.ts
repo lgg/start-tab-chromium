@@ -36,11 +36,13 @@ export function normalizeEntityId(value: unknown, fallback: string): string {
  * explicitly requested ID from a different existing entity. */
 export function uniqueEntityId(base: string, used: ReadonlySet<string>, reserved: ReadonlySet<string>): string {
   if (!used.has(base)) return base;
-  for (let suffix = 2; ; suffix += 1) {
-    const ending = "-" + suffix;
-    const candidate = base.slice(0, ENTITY_ID_LIMIT - ending.length) + ending;
-    if (!used.has(candidate) && !reserved.has(candidate)) return candidate;
-  }
+  let suffix = 2;
+  let candidate: string;
+  do {
+    const ending = "-" + suffix++;
+    candidate = base.slice(0, ENTITY_ID_LIMIT - ending.length) + ending;
+  } while (used.has(candidate) || reserved.has(candidate));
+  return candidate;
 }
 
 export function booleanValue(value: unknown, fallback: boolean): boolean {

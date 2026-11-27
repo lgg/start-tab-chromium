@@ -201,8 +201,11 @@
       button.textContent = tab.title || tab.url || text("gateUntitledTab", "Untitled tab");
       button.style.cssText = "display:block;width:100%;margin:8px 0;padding:10px;text-align:left";
       button.addEventListener("click", () => run(async () => {
+        if (!button.isConnected) return;
         const current = await chrome.tabs.getCurrent();
-        if (current?.id !== undefined && tab.url) await chrome.tabs.update(current.id, { url: tab.url });
+        // The picker may have been replaced while the browser tab lookup
+        // was pending. An obsolete choice must never navigate the new view.
+        if (button.isConnected && typeof current?.id === "number") await chrome.tabs.update(current.id, { url: tab.url });
       }));
       panel.append(button);
       firstAction ??= button;
@@ -216,7 +219,9 @@
     const settings = document.createElement("button");
     settings.type = "button";
     settings.textContent = text("openSettings", "Open settings");
-    settings.addEventListener("click", () => run(() => chrome.runtime.openOptionsPage()));
+    settings.addEventListener("click", () => {
+      if (settings.isConnected) run(() => chrome.runtime.openOptionsPage());
+    });
     panel.append(native, settings);
     overlay.append(panel);
     document.body.append(overlay);

@@ -649,5 +649,37 @@ try{
       await assert.rejects(import("../src/"+page+"/"+page+".ts?case="+(++serial)),new RegExp("Missing required element: "+required));
     }finally{malformedDom.window.close()}
   }
+  // A delayed split-picker choice belongs to the overlay that rendered it.
+  // Changing context before getCurrent resolves must not navigate the tab.
+  {
+    const dom=await installDom("newtab/newtab.html","https://extension.example/newtab.html");
+    const control=installChrome(seed());
+    const overlay=()=>document.getElementById("startTabGateOverlay");
+    const chosen=()=>[...overlay().querySelectorAll("button")].find(b=>b.textContent==="Chosen tab");
+    const originalGet=control.chrome.tabs.getCurrent;
+    window.name="split-view";
+    control.chrome.tabs.query=async()=>[{id:2,url:"https://chosen.example/",title:"Chosen tab"}];
+    try{
+      await import("../src/newtab/newtab-gate.js?case="+(++serial));
+      await window.startTabGateReady;
+      assert.ok(chosen());
+      chosen().click();
+      await until(()=>control.calls.some(c=>c[0]==="update"&&c[2]?.url==="https://chosen.example/"));
+      const before=control.calls.length;
+      let release;
+      control.chrome.tabs.getCurrent=()=>new Promise(resolve=>{release=resolve});
+      const oldChoice=chosen(), oldSettings=[...overlay().querySelectorAll("button")].at(-1);
+      oldChoice.click();await until(()=>release);
+      control.chrome.tabs.getCurrent=originalGet;
+      window.name="";
+      control.chrome.storage.onChanged.emit({startPageSettings:{newValue:control.state.startPageSettings}},"local");
+      await until(()=>!overlay());
+      release({id:1,url:"https://extension.example/newtab.html"});
+      await delay(30);
+      oldChoice.click();oldSettings.click();
+      await delay(20);
+      assert.equal(control.calls.length,before);
+    }finally{control.chrome.tabs.getCurrent=originalGet;dom.window.close()}
+  }
   console.log("Page initialization: blocked subframe and fatal startup reads");
 }finally{restoreFetch()}
