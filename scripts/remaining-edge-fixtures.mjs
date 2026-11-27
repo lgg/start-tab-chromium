@@ -605,6 +605,7 @@ console.log("Residual helpers: effect aggregation, canonical data, split-view ma
     const pendingDiscard = host.querySelectorAll("button")[1];
     assert.equal(pendingDiscard.disabled, true);
     pendingDiscard.click();
+    pendingDiscard.dispatchEvent(new window.Event("click",{bubbles:true}));
     discard.click();
     select.click();
     await flush();
