@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { installDom, installChrome, installFetch, one, until, delay, value, event } from "./ui-fixture-dom.mjs";
 import { createDefaultStartPageSettings } from "../src/lib/start-page-settings.js";
 import { normalizeRuntimeState } from "../src/lib/start-page-runtime.js";
-import { loadI18n } from "../src/lib/i18n.js";
 const restoreFetch=installFetch();
 const catalog=globalThis.fetch;
 const settings=createDefaultStartPageSettings(100);
@@ -33,7 +32,6 @@ try{
       assert.deepEqual(control.state.blockedSites,["blocked.example"]);
       control.chrome.storage.local.get=async()=>{throw null};
       clear.click();
-      const t=await loadI18n().catch(()=>null);
       await until(()=>!clear.disabled);
       assert.ok(one(document,"#note").textContent.length>0);
       assert.equal(control.messages.length,1);
