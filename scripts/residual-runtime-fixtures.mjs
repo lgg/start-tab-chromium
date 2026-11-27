@@ -574,3 +574,25 @@ console.log("Pomodoro: legacy missing focus start, work/break, auto-start, exact
   }finally{Date.now=realNow;globalThis.chrome=previous}
 }
 console.log("Deep audit: exact deadlines, non-replayed completed tokens and stable one-shot alarms");
+
+
+ // Malformed positive sub-millisecond timestamps must never become zero
+ // and make a running clock change state on the next storage read.
+{
+  const seed={...rt.defaultClockForBlock(timer),running:true,startedAt:100,targetAt:5100,completionToken:"timestamp-audit"};
+  for(const [patch,expected] of [
+    [{startedAt:0.1},{running:false,startedAt:null,targetAt:null,completionToken:null}],
+    [{targetAt:0.1},{running:true,startedAt:100,targetAt:5100}],
+    [{startedAt:Number.MAX_SAFE_INTEGER-1,targetAt:null},{running:true,targetAt:Number.MAX_SAFE_INTEGER}],
+    [{startedAt:100.49,targetAt:5100.49},{running:true,startedAt:100,targetAt:5100}],
+  ]){
+    const normalized=rt.normalizeRuntimeState({...initial,clocks:{[timer.id]:{...seed,...patch}}},settings);
+    for(const [key,value] of Object.entries(expected))assert.equal(normalized.clocks[timer.id][key],value,key);
+    assert.deepEqual(rt.normalizeRuntimeState(normalized,settings),normalized);
+  }
+  const raw={...initial,clocks:{[pomodoro.id]:{...rt.defaultClockForBlock(pomodoro),focusSessionStartedAt:0.1}}};
+  const normalized=rt.normalizeRuntimeState(raw,settings);
+  assert.equal(normalized.clocks[pomodoro.id].focusSessionStartedAt,null);
+  assert.deepEqual(rt.normalizeRuntimeState(normalized,settings),normalized);
+}
+console.log("Clock normalization: reject sub-millisecond zero timestamps and bound derived deadlines");
