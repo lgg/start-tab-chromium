@@ -22,8 +22,12 @@ assert.match(blocklist, /url\.protocol !== blockedUrl\.protocol \|\| url\.host !
   "Opaque chrome-extension origins must be disambiguated by protocol and extension host");
 assert.doesNotMatch(blocklist, /url\.origin !== blockedUrl\.origin/,
   "DNR ownership must not compare opaque chrome-extension URL origins");
-assert.match(blocklist, /actionKeys[\s\S]*redirectKeys[\s\S]*rule\.priority !== rulePriorityForHost\(site\)/,
-  "Ownership must require the exact generated action shape and priority");
+assert.match(blocklist, /actionKeys[\s\S]*redirectKeys[\s\S]*rule\.priority !== rulePriorityForHost\(rawSite\)/,
+  "Ownership must require the exact generated action shape and original hostname priority");
+assert.match(blocklist, /requestDomains\[0\] !== rawSite/,
+  "Owned redirects must match the original rule hostname, even for historical aliases");
+assert.match(blocklist, /rawSite === site && parameterCount === 1/,
+  "Only canonical hosts may qualify for unmarked legacy ownership");
 assert.match(blocklist, /conditionKeys[\s\S]*requestDomains[\s\S]*resourceTypes/,
   "Ownership must require the exact generated condition shape");
 assert.match(blocklist, /parameterCount === 1[\s\S]*rule\.id >= 1[\s\S]*rule\.id <= MAX_BLOCKED_SITES/,
