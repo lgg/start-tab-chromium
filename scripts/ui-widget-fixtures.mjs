@@ -216,7 +216,10 @@ try {
       await until(()=>input.value===""&&t.root.querySelectorAll(".task__title").length===2);
       assert.deepEqual(context.runtime.tasks[t.block.id].map(x=>x.id),["task-audit-id","task-audit-id-2"]);
       const count=writes.length;
-      staleRemove.click();staleCheck.checked=true;event(staleCheck,"change");
+      staleRemove.click();
+      await Promise.resolve(); // actionButton dispatches its callback in a microtask.
+      assert.equal(writes.length,count);
+      staleCheck.checked=true;event(staleCheck,"change");
       assert.equal(writes.length,count);
       assert.deepEqual(context.runtime.tasks[t.block.id].map(x=>[x.title,x.done]),[["first",false],["second",false]]);
       button(t.root,"removeTask").click();
