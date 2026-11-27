@@ -184,7 +184,8 @@ async function readRawSettings(): Promise<unknown> {
 
 async function persistSettingsInTransaction(
   settings: StartPageSettings,
-  report?: MigrationReport,
+  report: MigrationReport | undefined,
+  expectedRaw: unknown,
 ): Promise<void> {
   await commitStorageMutationWithRevision(
     [START_PAGE_SETTINGS_KEY, START_PAGE_MIGRATION_REPORT_KEY],
@@ -194,6 +195,7 @@ async function persistSettingsInTransaction(
       await chrome.storage.local.set(payload);
     },
     settings.updatedAt || Date.now(),
+    { expectedStorage: { [START_PAGE_SETTINGS_KEY]: expectedRaw }, conflictMessage: "Start Tab settings changed in another extension context; reload before saving" },
   );
 }
 
@@ -229,7 +231,7 @@ export async function getStartPageSettings(): Promise<StartPageSettings> {
         customThemes: settings.themes.customThemes.map((theme) => ({ ...theme, updatedAt: migratedAt })),
       },
     }, migratedAt);
-    await persistSettingsInTransaction(stamped, report);
+    await persistSettingsInTransaction(stamped, report, currentRaw);
     return stamped;
   });
 }
@@ -269,7 +271,7 @@ export function prepareStartPageSettingsWrite(
   raw: unknown,
   expectedUpdatedAt: number,
 ): { settings: StartPageSettings; issues: ValidationIssue[] } {
-  if (isFutureStartPageSchema(raw)) {
+  if (isFutureStartPageSchema(raw) || isFutureStartPageSchema(value)) {
     throw new Error("Start Tab settings were created by a newer extension version and cannot be modified safely");
   }
   const previous = normalizeStartPageSettings(raw);
@@ -278,6 +280,13 @@ export function prepareStartPageSettingsWrite(
   }
   assertStartPageSettingsCapacity(value);
   const validation = validateStartPageSettings(value);
+  const previousTypes = new Map(previous.layout.blocks.map(block => [block.id, block.type]));
+  for (const block of validation.value.layout.blocks) {
+    const previousType = previousTypes.get(block.id);
+    if (previousType !== undefined && previousType !== block.type) {
+      throw new Error("Block identity and type cannot be changed; allocate a new block ID");
+    }
+  }
   const stamped = withBlockTimestamps(previous, validation.value, nextEntityRevision(previous.updatedAt));
   return { settings: stamped, issues: validation.issues };
 }
@@ -291,7 +300,7 @@ async function validateAndPersistSettingsInTransaction(
     throw new Error("Start Tab settings changed in another extension context; reload before saving");
   }
   const prepared = prepareStartPageSettingsWrite(value, raw, value.updatedAt);
-  await persistSettingsInTransaction(prepared.settings);
+  await persistSettingsInTransaction(prepared.settings, undefined, raw);
   return prepared;
 }
 
@@ -481,8 +490,8 @@ export function layoutReplacementRemovesUserData(
   next: StartPageSettings,
   runtime: StartPageRuntimeState,
 ): boolean {
-  const retainedIds = new Set(next.layout.blocks.map((block) => block.id));
-  return current.layout.blocks.filter((block) => !retainedIds.has(block.id)).some((block) => {
+  const retainedTypes = new Map(next.layout.blocks.map((block) => [block.id, block.type]));
+  return current.layout.blocks.filter((block) => retainedTypes.get(block.id) !== block.type).some((block) => {
     if (block.type === "note" && Boolean(ownValue(runtime.notes, block.id)?.trim())) return true;
     if (block.type === "localTasks" && (ownValue(runtime.tasks, block.id)?.length ?? 0) > 0) return true;
     if (block.type === "timer" || block.type === "stopwatch" || block.type === "pomodoro") {
@@ -514,11 +523,17 @@ export function settingsWithLayoutPreset(current: StartPageSettings, presetId: L
   const preset = LAYOUT_PRESETS.find((item) => item.id === presetId);
   if (!preset) throw new Error(`Unknown layout preset: ${presetId}`);
   const available = current.layout.blocks.map(cloneBlock);
+  // Reserve even the IDs of blocks this preset will remove. A new block
+  // must not inherit runtime data from a differently typed former owner.
+  const used = new Set(current.layout.blocks.map(block => block.id));
   const blocks = preset.blocks.map((spec, order): BlockInstance => {
     const existingIndex = available.findIndex((block) => block.type === spec.type);
     if (existingIndex < 0) {
+      const id = uniqueEntityId(createBlockId(spec.type), used, used);
+      used.add(id);
       return createBlockInstance(spec.type, {
         ...spec,
+        id,
         enabled: spec.enabled ?? true,
         zone: current.layout.zone,
         order,
