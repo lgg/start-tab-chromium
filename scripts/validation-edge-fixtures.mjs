@@ -315,3 +315,26 @@ console.log("Round 158: validation assertions", checks);
   same(formatDateParts("YYYYYYYY-HH-mm-ss",{}),"---");
 }
 console.log("Round 159: canonical UTF-16 ordering and exact date-token substitution",checks);
+
+
+// The checked runtime target is returned to its caller. No second lookup
+// with a different rule set is necessary; every allowed and disallowed
+// block kind is validated against the same identity.
+{
+  const {runtimeMutationTargetExists,assertRuntimeMutationTarget}=await import("../src/lib/runtime-mutation-target.js");
+  const {createBlockInstance}=await import("../src/lib/start-page-settings.js");
+  const types={clock:["timer","stopwatch","pomodoro"],note:["note"],tasks:["localTasks"],linkPage:["links","startPinned"]};
+  const blocks=BLOCK_DESCRIPTORS.map(({type})=>createBlockInstance(type,{id:"target-"+type}));
+  const targetSettings={...settings,layout:{...settings.layout,blocks}};
+  for(const [kind,allowed] of Object.entries(types)){
+    for(const block of blocks){
+      const valid=allowed.includes(block.type);
+      same(runtimeMutationTargetExists(targetSettings,block.id,kind),valid);
+      if(valid)check(assertRuntimeMutationTarget(targetSettings,block.id,kind)===block);
+      else assert.throws(()=>assertRuntimeMutationTarget(targetSettings,block.id,kind),/changed or was removed/);
+    }
+    same(runtimeMutationTargetExists(targetSettings,"missing",kind),false);
+    assert.throws(()=>assertRuntimeMutationTarget(targetSettings,"missing",kind),/changed or was removed/);
+  }
+}
+console.log("Round 160: complete runtime mutation target matrix",checks);
