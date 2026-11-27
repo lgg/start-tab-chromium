@@ -422,3 +422,53 @@ console.log("Round 160: complete runtime mutation target matrix",checks);
   same(rt.normalizeRuntimeState({version:2,notes:{note:"Legacy content"}},dropped).notes.note,"Legacy content");
 }
 console.log("Migration: explicit block and theme identities survive earlier generated defaults");
+
+
+// URLs are atomic user data, not display labels. Preserve complete long
+// query strings, signed URLs, and templates, including a late placeholder.
+{
+  const url="https://example.com/resource?signature="+"a".repeat(700)+"&final=keep";
+  for(const type of ["links","startPinned"]){
+    const config=normalizeBlockConfig(type,{items:[{id:"long-link",title:"Long URL",url}]});
+    same(config.items[0].url,url);
+    same(normalizeBlockConfig(type,config),config);
+  }
+  same(normalizeBlockConfig("ip",{endpoint:url}).endpoint,url);
+  const weather=normalizeBlockConfig("weather",{forecastEndpoint:url,geocodingEndpoint:url});
+  same(weather.forecastEndpoint,url);
+  same(weather.geocodingEndpoint,url);
+  const theme=normalizeTheme({background:{kind:"image",url}},BUILT_IN_THEMES[0]);
+  same(theme.background.url,url);
+  same(normalizeTheme(theme,BUILT_IN_THEMES[0]),theme);
+  const template=url+"&q={query}";
+  const config=normalizeBlockConfig("search",{provider:"long",providers:[{id:"long",title:"Long",urlTemplate:template}]});
+  same(config.providers[0].urlTemplate,template);
+  same(v.buildSearchUrl(template,"\uFEFFx"),url+"&q=%EF%BB%BFx");
+  same(v.buildSearchUrl(template,"\uD800"),url+"&q=%EF%BF%BD");
+  same(normalizeBlockConfig("search",config),config);
+  same(v.safeWebUrl(null,url),url);
+  same(v.safeWebUrlTemplate(null),null);
+}
+// A fallback provider ID must not discard a later valid explicit provider
+// or change the selected engine. Explicit duplicates remain invalid.
+{
+  const template="https://example.com/?q={query}";
+  const generated=v.normalizeSearchProviders([{title:"Legacy",urlTemplate:template}],[],"providers",[])[0].id;
+  const reserved=generated+"-2";
+  const issues=[];
+  const config=normalizeBlockConfig("search",{provider:generated,providers:[
+    {title:"Legacy",urlTemplate:template},
+    {id:generated,title:"Selected engine",urlTemplate:"https://selected.example/?q={query}"},
+    {id:reserved,title:"Reserved engine",urlTemplate:template},
+    {id:generated,title:"Duplicate",urlTemplate:template}
+  ]},{},"search",issues);
+  same(config.providers.map(p=>p.id),[generated+"-3",generated,reserved]);
+  same(config.providers.find(p=>p.id===config.provider).title,"Selected engine");
+  same(issues.length,1);
+  same(normalizeBlockConfig("search",config),config);
+  const untitled=v.normalizeSearchProviders([{urlTemplate:template}],[],"providers",[])[0].id;
+  const recovered=v.normalizeSearchProviders([{urlTemplate:template},{id:untitled,title:"Explicit",urlTemplate:template}],[],"providers",[]);
+  same(recovered[0].title,untitled+"-2");
+  same(recovered[0].id,untitled+"-2");
+}
+console.log("URL and search migration: preserve complete destinations and explicit selected engine IDs");
