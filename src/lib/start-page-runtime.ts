@@ -133,7 +133,8 @@ function normalizeClock(block: Extract<BlockInstance, { type: ClockBlockType }>,
 function stableTaskHash(value: string): string {
   let hash = 2166136261;
   for (const character of value) {
-    hash ^= character.codePointAt(0) ?? 0;
+    // A for-of iteration over a string always yields a nonempty code point.
+    hash ^= character.codePointAt(0)!;
     hash = Math.imul(hash, 16777619);
   }
   return (hash >>> 0).toString(36);
