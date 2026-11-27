@@ -340,5 +340,36 @@ console.log("Navigation: failed session lookup, DNR repair, native grant cleanup
       assert.ok(fresh.state.startTabDataRevision.updatedAt>4000);
     }finally{globalThis.chrome=priorChrome}
   }
+
+  // Starting a new request cleans up expired completion cooldowns but
+  // cannot release a different instance's outstanding request.
+  {
+    const {ClockRequestGate}=await import("../src/newtab/clock-request-gate.js");
+    let time=0;
+    const gate=new ClockRequestGate(()=>time,100);
+    const old=gate.begin("first","token-1");
+    assert.ok(old);gate.finish(old);
+    const live=gate.begin("second","token-2");
+    assert.ok(live);
+    assert.equal(gate.canComplete("first","token-1"),false);
+    assert.equal(gate.begin("first","token-1"),null);
+    time=101;
+    const retry=gate.begin("first","token-1");
+    assert.ok(retry);
+    gate.finish(old);
+    assert.equal(gate.isPending("first"),true);
+    assert.equal(gate.isPending("second"),true);
+    gate.finish(retry);gate.finish(live);
+    assert.equal(gate.canComplete("first","token-1"),false);
+    assert.equal(gate.canComplete("first","new-token"),true);
+  }
+  // A sparse JS layout is not a matching preset merely because it has
+  // the right length and grid geometry. Missing entries must fail safely.
+  {
+    const candidate=api.settingsWithLayoutPreset(settings,"focus");
+    assert.equal(api.layoutMatchesPreset(candidate,"focus"),true);
+    delete candidate.layout.blocks[1];
+    assert.equal(api.layoutMatchesPreset(candidate,"focus"),false);
+  }
 console.log("Residual helpers: effect aggregation, canonical data, split-view markers, tab lifecycle and draft acknowledgement");
 }
