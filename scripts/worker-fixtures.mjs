@@ -184,6 +184,41 @@ try {
     }
   }
 
+  // Regional legacy locale and failed locale storage reads must not
+  // suppress a notification or select an unrelated browser language.
+  {
+    const priorLocale=control.state.localeOverride,priorFetch=globalThis.fetch,priorMessage=chrome.i18n.getMessage,priorGet=chrome.storage.local.get;
+    try {
+      chrome.i18n.getMessage=()=>"native notice";
+      for(const scenario of ["ru-RU","EN_us","read-failure"]){
+        control.state.localeOverride=scenario;
+        const urls=[];
+        globalThis.fetch=async url=>{
+          urls.push(String(url));
+          return Response.json({timerDone:{message:"localized notice"}});
+        };
+        chrome.storage.local.get=async (...args)=>{
+          if(scenario==="read-failure"&&args[0]==="localeOverride")throw Error("locale read failure");
+          return priorGet.apply(chrome.storage.local,args);
+        };
+        await ok({type:"clock-action",instanceId:"worker-timer",action:"reset"});
+        await ok({type:"clock-action",instanceId:"worker-timer",action:"start"});
+        const clock=control.state.startPageRuntimeState.clocks["worker-timer"];
+        clock.startedAt=Date.now()-3000;clock.targetAt=clock.startedAt+clock.durationMs;
+        const count=control.calls.filter(c=>c[0]==="notification").length;
+        await ok({type:"complete-clock",instanceId:"worker-timer",token:clock.completionToken});
+        const notices=control.calls.filter(c=>c[0]==="notification");
+        assert.equal(notices.length,count+1,scenario);
+        assert.equal(notices.at(-1)[2].message,scenario==="read-failure"?"native notice":"localized notice");
+        if(scenario==="read-failure")assert.equal(urls.length,0);
+        else assert.ok(urls.length>0&&urls.every(url=>url.includes("/_locales/"+(scenario==="ru-RU"?"ru":"en")+"/")));
+      }
+    }finally{
+      chrome.storage.local.get=priorGet;globalThis.fetch=priorFetch;chrome.i18n.getMessage=priorMessage;
+      if(priorLocale===undefined)delete control.state.localeOverride;else control.state.localeOverride=priorLocale;
+    }
+  }
+
   // A renamed timer uses its own title, whereas a silent timer commits
   // the completed state without creating a notification at all.
   {
