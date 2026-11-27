@@ -99,6 +99,21 @@ issues=[];
 const search=normalizeBlockConfig("search",{provider:"missing",providers:[null,{id:"",title:"blank",urlTemplate:"https://example.com?q={query}"},{id:"x",title:"X",urlTemplate:"bad"},{id:"y",title:"Y",urlTemplate:"https://example.com?q={query}"},{id:"y",title:"duplicate",urlTemplate:"https://example.com?q={query}"}]},{},"config",issues);
 same(search.provider,"y");same(search.providers.length,1);same(issues.length,4);
 same(normalizeBlockConfig("search",{providers:[]}).providers,defaultBlockConfig("search").providers);
+// Malformed but JSON-compatible provider titles must not crash the whole
+// settings/backup normalization, even when the explicit ID is valid.
+{
+  const providers = JSON.parse('[{"id":"explicit","title":{"toString":null,"valueOf":null},"urlTemplate":"https://example.com/?q={query}"},{"title":{"toString":null,"valueOf":null},"urlTemplate":"https://second.example/?q={query}"},{"id":"valid","title":"Valid","urlTemplate":"https://third.example/?q={query}"}]');
+  const input = {provider:"valid",providers};
+  const result = normalizeBlockConfig("search",input);
+  same(result.provider,"valid");
+  same(result.providers.length,3);
+  same(result.providers[0].title,"explicit");
+  same(result.providers[1].title,result.providers[1].id);
+  same(result.providers[2].title,"Valid");
+  same(normalizeBlockConfig("search",result),result);
+  same(normalizeBlockConfig("search",input),result);
+}
+
 same(v.safeWebUrl(" "),null);same(v.safeWebUrl("https://example.com"),"https://example.com");same(v.safeWebUrl("ftp://example.com"),null);
 same(v.safeWebUrlTemplate("https://example.com"),null);
 same(v.buildSearchUrl("https://example.com/?q={query}","a & b"),"https://example.com/?q=a%20%26%20b");
