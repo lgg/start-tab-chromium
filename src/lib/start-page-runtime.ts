@@ -126,6 +126,16 @@ function normalizeClock(block: Extract<BlockInstance, { type: ClockBlockType }>,
   const completionToken = block.type === "stopwatch" || !running || targetAt === null
     ? null
     : storedCompletionToken ?? legacyClockToken(block, startedAt, targetAt, durationMs);
+  const lastCompletedToken = validClockToken(value.lastCompletedToken) ? value.lastCompletedToken : null;
+  // A completed token cannot also represent an active countdown. Treat
+  // contradictory imported state as finished rather than replaying the
+  // completion or leaving the widget running forever. Keep its phase and
+  // duration so a deliberate subsequent Start remains available.
+  if (completionToken !== null && completionToken === lastCompletedToken) {
+    return {
+      ...fallback, phase, durationMs, accumulatedMs: durationMs, lastCompletedToken,
+    };
+  }
   return {
     type: block.type,
     running,
@@ -136,7 +146,7 @@ function normalizeClock(block: Extract<BlockInstance, { type: ClockBlockType }>,
     phase,
     focusSessionStartedAt: block.type === "pomodoro" ? timestamp(value.focusSessionStartedAt) : null,
     completionToken,
-    lastCompletedToken: validClockToken(value.lastCompletedToken) ? value.lastCompletedToken : null,
+    lastCompletedToken,
   };
 }
 
@@ -549,7 +559,7 @@ export async function reconcileClockAlarmsForRuntime(runtime: StartPageRuntimeSt
   const desired = new Map<string, number>();
   for (const [instanceId, clock] of Object.entries(runtime.clocks)) {
     if (!clock.running || clock.type === "stopwatch" || clock.targetAt === null || !clock.completionToken) continue;
-    desired.set(clockAlarmName(instanceId, clock.completionToken), Math.max(Date.now() + 100, clock.targetAt));
+    desired.set(clockAlarmName(instanceId, clock.completionToken), clock.targetAt);
   }
   try {
     const existing = await chrome.alarms.getAll();
@@ -559,7 +569,19 @@ export async function reconcileClockAlarmsForRuntime(runtime: StartPageRuntimeSt
         .map((alarm) => async () => { await chrome.alarms.clear(alarm.name); }),
       "Clock alarm reconciliation cleanup was incomplete",
     );
-    for (const [name, when] of desired) await chrome.alarms.create(name, { when });
+    const existingByName = new Map(existing.map(alarm => [alarm.name, alarm]));
+    for (const [name, deadline] of desired) {
+      const alarm = existingByName.get(name);
+      const now = Date.now();
+      // Creating an alarm with an existing name replaces it. Preserve an
+      // already usable one-shot alarm, including browser minimum-delay
+      // rounding and the 30-second completion retry backoff. Otherwise an
+      // unrelated clock action can continually postpone a short/expired timer.
+      if (alarm && alarm.periodInMinutes === undefined
+        && alarm.scheduledTime >= deadline
+        && alarm.scheduledTime <= Math.max(deadline, now + 30_000)) continue;
+      await chrome.alarms.create(name, { when: Math.max(now + 100, deadline) });
+    }
   } catch (error) {
     try {
       await restoreClockAlarmSnapshot(previous);
@@ -936,7 +958,7 @@ export async function completeClockInstance(instanceId: string, expectedToken: s
     }
     const current = ownValue(runtime.clocks, instanceId) ?? defaultClockForBlock(block);
     const token = current.completionToken;
-    if (!current.running || block.type === "stopwatch" || current.targetAt === null || current.targetAt > now + 1000) {
+    if (!current.running || block.type === "stopwatch" || current.targetAt === null || current.targetAt > now) {
       return { state: null, result: { completed: false, block, clock: current, notify: false, focusTimeMs: 0, startedWork: false, completedToken: null } };
     }
     if (expectedToken && token !== expectedToken) {
