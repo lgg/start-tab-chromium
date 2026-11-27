@@ -295,7 +295,7 @@ for(const reader of ["getStartPageRuntimeState","getStartPageViewSnapshot"]){
   const future={version:999,updatedAt:100,opaque:{keep:"newer extension data"}};
   let injected=false;
   store.get=async keys=>{
-    if(!injected&&Array.isArray(keys)&&keys.length===2&&keys.includes(rt.START_PAGE_RUNTIME_KEY)&&keys.includes("startTabDataRevision")){
+    if(!injected&&Array.isArray(keys)&&keys.includes(rt.START_PAGE_RUNTIME_KEY)&&keys.includes("startTabDataRevision")){
       injected=true;
       await store.set({[rt.START_PAGE_RUNTIME_KEY]:future});
     }
@@ -308,6 +308,34 @@ for(const reader of ["getStartPageRuntimeState","getStartPageViewSnapshot"]){
   }finally{store.get=read;globalThis.chrome=previous}
 }
 console.log("Runtime: automatic normalization refuses a concurrently published future schema");
+
+// An older context or an external writer can bypass the Web Lock. A read
+// must not persist a stale normalized projection or remove new legacy data.
+for(const reader of ["getStartPageRuntimeState","getStartPageViewSnapshot"]){
+  for(const changedKey of [rt.START_PAGE_RUNTIME_KEY,rt.LEGACY_INSTANCE_RUNTIME_KEY,"startPageSettings","future-settings"]){
+    const previous=globalThis.chrome;
+    const initial=api.normalizeStartPageSettings(settings);
+    const fresh=installChrome({startPageSettings:initial,startPageRuntimeState:{version:0}});
+    const store=fresh.chrome.storage.local,read=store.get;
+    const key=changedKey==="future-settings"?"startPageSettings":changedKey;
+    const changed=changedKey==="future-settings"?{version:999,opaque:"future settings"}:
+      changedKey==="startPageSettings"?{...initial,updatedAt:initial.updatedAt+1,layout:{...initial.layout,blocks:[]}}:
+      changedKey===rt.START_PAGE_RUNTIME_KEY?{version:0,notes:{note:"new private data"}}:{localTasks:{later:[{id:"new",title:"new task"}]}};
+    let injected=false;
+    store.get=async keys=>{
+      if(!injected&&Array.isArray(keys)&&keys.includes(rt.START_PAGE_RUNTIME_KEY)&&keys.includes("startTabDataRevision")){
+        injected=true;await store.set({[key]:changed});
+      }
+      return read(keys);
+    };
+    try{
+      await assert.rejects(rt[reader](),/changed during runtime normalization|newer extension version/);
+      assert.ok(injected);
+      assert.deepEqual(fresh.state[key],changed);
+      if(key!==rt.START_PAGE_RUNTIME_KEY)assert.deepEqual(fresh.state[rt.START_PAGE_RUNTIME_KEY],{version:0});
+    }finally{store.get=read;globalThis.chrome=previous}
+  }
+}
 
 
 // An old persisted countdown can have a valid deadline/token but no focus
