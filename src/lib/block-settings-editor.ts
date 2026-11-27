@@ -121,13 +121,19 @@ function linksEditor(i18n: I18n, initial: readonly StartLink[]): { root: HTMLEle
     const remove = button("×", "icon-button");
     remove.title = i18n.t("removeLink");
     remove.setAttribute("aria-label", i18n.t("removeLink"));
-    remove.addEventListener("click", () => row.remove());
+    remove.addEventListener("click", () => {
+      row.remove();
+      root.dispatchEvent(new Event("change", { bubbles: true }));
+    });
     row.append(icon, title, url, remove);
     list.append(row);
   };
 
   initial.forEach(appendRow);
-  add.addEventListener("click", () => appendRow({ id: makeId("link"), icon: "", title: "", url: "" }));
+  add.addEventListener("click", () => {
+    appendRow({ id: makeId("link"), icon: "", title: "", url: "" });
+    root.dispatchEvent(new Event("change", { bubbles: true }));
+  });
   root.append(list, add);
 
   return {
@@ -190,13 +196,21 @@ function providersEditor(
     remove.title = i18n.t("removeSearchProvider");
     remove.setAttribute("aria-label", i18n.t("removeSearchProvider"));
     for (const input of [id, title, url]) input.addEventListener("input", notify);
-    remove.addEventListener("click", () => { row.remove(); notify(); });
+    remove.addEventListener("click", () => {
+      row.remove();
+      notify();
+      root.dispatchEvent(new Event("change", { bubbles: true }));
+    });
     row.append(id, title, url, remove);
     list.append(row);
   };
 
   initial.forEach(appendRow);
-  add.addEventListener("click", () => { appendRow({ id: "", title: "", urlTemplate: "" }); notify(); });
+  add.addEventListener("click", () => {
+    appendRow({ id: "", title: "", urlTemplate: "" });
+    notify();
+    root.dispatchEvent(new Event("change", { bubbles: true }));
+  });
   root.append(list, add);
 
   return { root, read };
