@@ -42,8 +42,8 @@ assert.match(consumeSource,
   "Expired leases must be removed while the native-bypass lock still protects the stale read");
 
 assert.match(gate, /function resolvedGateLocale\(override\)/);
-assert.match(gate, /chrome\.i18n\.getUILanguage\(\)/,
-  "Automatic locale mode must resolve the browser UI language for fragment-only gate strings");
+assert.match(gate, /navigator\.languages[\s\S]*navigator\.language/,
+  "Automatic locale mode must resolve the browser preferred languages for fragment-only gate strings");
 assert.match(gate, /const languages = Array\.isArray\(navigator\.languages\)[\s\S]*const supported = normalize\(language\);[\s\S]*if \(supported\) return supported;[\s\S]*return "en";/);
 assert.match(gate, /const locale = resolvedGateLocale\(items\[LOCALE_OVERRIDE_KEY\]\)/);
 assert.match(gate, /Promise\.all\(catalogFiles\.map/,
