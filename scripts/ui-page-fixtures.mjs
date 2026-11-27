@@ -469,6 +469,9 @@ try {
       assert.equal(option("layoutColumns").value,oldColumns);
       event(option("layoutColumns"),"input");
       assert.equal(preset.value,"custom");
+      // Further geometry changes must preserve the already-custom preset.
+      event(option("layoutColumns"),"input");
+      assert.equal(preset.value,"custom");
       assert.equal(control.messages.length,before);
     }
     // Saving a custom layout after selecting a standard preset must not
