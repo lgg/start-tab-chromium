@@ -347,10 +347,10 @@ interface ParsedBlocklistDynamicRule {
 
 function parseBlocklistDynamicRule(rule: chrome.declarativeNetRequest.Rule): ParsedBlocklistDynamicRule | null {
   const redirect = rule.action.redirect;
-  const redirectUrl = redirect?.url;
-  if (rule.action.type !== chrome.declarativeNetRequest.RuleActionType.REDIRECT || !redirect || typeof redirectUrl !== "string") {
+  if (rule.action.type !== chrome.declarativeNetRequest.RuleActionType.REDIRECT || typeof redirect?.url !== "string") {
     return null;
   }
+  const redirectUrl = redirect.url;
   let url: URL;
   try {
     url = new URL(redirectUrl);
