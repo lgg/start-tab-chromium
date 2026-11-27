@@ -514,6 +514,48 @@ try {
   limitEditor.cancel();
   console.log("Layout editor: free-mode add/duplicate, no-data delete confirmation, pointer release failure and capacity");
 
+  // Collision handling must reserve the original saved IDs until commit,
+  // even when the user removes a block and adds another of the same type.
+  {
+    const cryptoDescriptor=Object.getOwnPropertyDescriptor(globalThis,"crypto");
+    try {
+      Object.defineProperty(globalThis,"crypto",{configurable:true,value:{randomUUID:()=>"audit-collision"}});
+      for(const layoutMode of ["grid","free"]){
+        const original=createBlockInstance("note",{id:"note-audit-collision"});
+        const s=cloneSettings(settings);
+        s.layout.mode=layoutMode;
+        s.layout.blocks=[original];
+        const r=normalizeRuntimeState(undefined,s);
+        r.notes[original.id]="Original private note";
+        const t=host(),p=host(),g=host();
+        const ed=new LayoutEditor(s,{i18n,toolbarHost:t,paletteHost:p,getRuntime:()=>r,requestRender:()=>{},previewBlock:()=>{},onSaved:()=>{},onError:e=>errors.push(e)});
+        const cardFor=id=>{
+          g.replaceChildren();
+          const card=document.createElement("article");g.append(card);
+          ed.decorateCard(card,ed.settings.layout.blocks.find(b=>b.id===id));
+          return card;
+        };
+        const add=()=>[...p.querySelectorAll("button")].find(b=>b.textContent.includes("blockTitleNote")).click();
+        ed.enter();
+        button(cardFor(original.id),"duplicateBlock").click();
+        add();
+        assert.deepEqual(ed.settings.layout.blocks.map(b=>b.id),[original.id,original.id+"-2",original.id+"-3"]);
+        window.confirm=()=>true;
+        button(cardFor(original.id),"deleteBlock").click();
+        add();
+        assert.deepEqual(ed.settings.layout.blocks.map(b=>b.id),[original.id+"-2",original.id+"-3",original.id+"-4"]);
+        const next=normalizeRuntimeState(r,ed.settings);
+        assert.equal(Object.keys(next.notes).length,0);
+        ed.cancel();
+      }
+    } finally {
+      if(cryptoDescriptor)Object.defineProperty(globalThis,"crypto",cryptoDescriptor);
+      else delete globalThis.crypto;
+    }
+  }
+  console.log("Layout editor: duplicate and add reserve saved IDs even after draft deletion");
+
+
   // A saved layout may change while old cards are still mounted. Every old
   // card action must be harmless when the target no longer exists.
   {
