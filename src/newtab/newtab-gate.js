@@ -22,12 +22,22 @@
     try { void Promise.resolve(action()).catch(ignore); } catch { ignore(); }
   };
 
+  // Keep this early classic-script gate consistent with i18n.ts, including
+  // regional legacy preferences and the ordered browser language list.
   function resolvedGateLocale(override) {
-    if (override === "en" || override === "ru") return override;
-    const browserLocale = typeof chrome.i18n.getUILanguage === "function"
-      ? String(chrome.i18n.getUILanguage() || "").toLowerCase()
-      : "";
-    return browserLocale.startsWith("ru") ? "ru" : "en";
+    const normalize = (value) => {
+      const language = typeof value === "string" ? value.toLowerCase().replace("_", "-").split("-")[0] : "";
+      return language === "en" || language === "ru" ? language : null;
+    };
+    const preference = normalize(override);
+    if (preference) return preference;
+    const languages = Array.isArray(navigator.languages) && navigator.languages.length
+      ? navigator.languages : [navigator.language];
+    for (const language of languages) {
+      const supported = normalize(language);
+      if (supported) return supported;
+    }
+    return "en";
   }
 
   async function readCommitted(key) {
@@ -42,15 +52,21 @@
     const generation = ++catalogLoadGeneration;
     const items = await readCommitted(LOCALE_OVERRIDE_KEY).catch(() => ({}));
     const locale = resolvedGateLocale(items[LOCALE_OVERRIDE_KEY]);
-    const catalogs = await Promise.all(catalogFiles.map(async (file) => {
-      try {
-        const response = await fetch(chrome.runtime.getURL(`_locales/${locale}/${file}`));
-        return response.ok ? await response.json() : {};
-      } catch {
-        return {};
-      }
-    }));
-    const nextCatalog = Object.assign({}, ...catalogs);
+    const load = async (language) => {
+      const catalogs = await Promise.all(catalogFiles.map(async (file) => {
+        try {
+          const response = await fetch(chrome.runtime.getURL(`_locales/${language}/${file}`));
+          return response.ok ? await response.json() : null;
+        } catch {
+          return null;
+        }
+      }));
+      return { baseAvailable: catalogs[0] !== null, catalog: Object.assign({}, ...catalogs) };
+    };
+    const defaults = await load("en");
+    const preferred = locale === "en" ? defaults : await load(locale);
+    const nextCatalog = preferred.baseAvailable
+      ? { ...defaults.catalog, ...preferred.catalog } : defaults.catalog;
     if (!pageActive || generation !== catalogLoadGeneration) return false;
     catalog = nextCatalog;
     return true;
