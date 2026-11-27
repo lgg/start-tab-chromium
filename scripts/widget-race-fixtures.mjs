@@ -62,9 +62,12 @@ try{
   context.runtime.notes[note.id]="remote note";context.runtime.updatedAt=++revision;
   control.state.startPageRuntimeState=structuredClone(context.runtime);
   const third=mount(note);second.dispose();
-  window.confirm=()=>false;
+  let overwriteDeclines=0;
+  const writesBeforeDecline=writes.length;
+  window.confirm=()=>{overwriteDeclines++;return false};
   button(third.root,"noteDraftRetry").click();
-  await until(()=>!button(third.root,"noteDraftRetry").disabled);
+  await until(()=>overwriteDeclines===1&&!button(third.root,"noteDraftRetry").disabled,"declined overwrite completed");
+  assert.equal(writes.length,writesBeforeDecline);
   assert.equal(one(third.root,"textarea").value,"local draft");
   assert.equal(context.runtime.notes[note.id],"remote note");
   window.confirm=()=>true;
