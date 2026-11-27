@@ -156,3 +156,34 @@ assert.equal(await sync.syncChromeSyncBackup(),"restored");
 assert.ok(fullReads>=2);
 assert.deepEqual(race.state.blockedSites,["remote-only.example"]);
 console.log("Browser Sync: first-contact pristine/non-pristine decision matrix and a frame arriving at the final absence guard");
+
+
+// A successful legacy restore must never overwrite a new local edit made
+// immediately after import commit while the optional metadata upgrade runs.
+{
+  const fresh=installChrome({startPageSettings:pristine,startPageRuntimeState:pristineRuntime,blockedSites:["local-before-legacy.example"]});
+  const local=fresh.chrome.storage.local,remote=fresh.chrome.storage.sync;
+  const meta=remoteSeedFrame[metaKey];
+  const legacy={version:2,updatedAt:meta.updatedAt,deviceId:meta.deviceId,checksum:meta.checksum,chunks:meta.chunks};
+  await remote.set({...remoteSeedFrame,[metaKey]:legacy});
+  const originalSet=local.set,originalGet=local.get;
+  let imported=false,edited=false;
+  local.set=async values=>{
+    await originalSet(values);
+    if(values[localMetaKey]?.snapshotId?.startsWith("legacy-"))imported=true;
+  };
+  local.get=async keys=>{
+    if(imported&&!edited){
+      edited=true;
+      await originalSet({blockedSites:["edited-after-legacy.example"]});
+    }
+    return originalGet(keys);
+  };
+  try{
+    await sync.restoreChromeSyncBackup();
+    assert.equal(imported,true);assert.equal(edited,true);
+    assert.deepEqual(fresh.state.blockedSites,["edited-after-legacy.example"]);
+    assert.equal((await remote.get(metaKey))[metaKey].version,2);
+    assert.match(fresh.state[localMetaKey].snapshotId,/^legacy-/);
+  }finally{local.set=originalSet;local.get=originalGet}
+}
