@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { installDom, installChrome, installFetch, one, button, value, event, key, submit, until, delay } from "./ui-fixture-dom.mjs";
 import { createDefaultStartPageSettings, createBlockInstance } from "../src/lib/start-page-settings.js";
 import { normalizeRuntimeState } from "../src/lib/start-page-runtime.js";
-import { loadI18n } from "../src/lib/i18n.js";
+import { loadI18n, loadI18nForPreference } from "../src/lib/i18n.js";
 
 const restoreFetch = installFetch();
 const settings = createDefaultStartPageSettings(100);
@@ -582,6 +582,76 @@ try {
     await import("../src/newtab/newtab-gate.js");
     await window.startTabGateReady;
     assert.equal(document.getElementById("startTabGateOverlay"), null);
+    // The classic gate and the main UI must agree about legacy preferences,
+    // browser language priority and fallback after optional catalog failures.
+    {
+      const localFetch=globalThis.fetch;
+      const languageDescriptor=Object.getOwnPropertyDescriptor(navigator,"languages");
+      const getUILanguage=control.chrome.i18n.getUILanguage;
+      const overlay=()=>document.getElementById("startTabGateOverlay");
+      const refreshGate=async preference=>{
+        const previous=overlay();
+        control.state.localeOverride=preference;
+        control.chrome.storage.onChanged.emit({localeOverride:{newValue:preference}},"local");
+        await until(()=>overlay()&&overlay()!==previous,"gate locale refresh");
+        return overlay();
+      };
+      try {
+        const en=await loadI18n();
+        control.state.localeOverride="ru";
+        const ru=await loadI18n();
+        assert.notEqual(en.t("startTabDisabledTitle"),ru.t("startTabDisabledTitle"));
+        control.state.startPageSettings.startTab.enabled=false;
+        Object.defineProperty(navigator,"languages",{configurable:true,value:["de-DE","ru-RU","en-US"]});
+        control.chrome.i18n.getUILanguage=()=>"en-US";
+        for(const [preference,expected] of [["RU_ru",ru],["EN_us",en],["unknown",ru]]){
+          const gate=await refreshGate(preference);
+          assert.equal(one(gate,"h1").textContent,expected.t("startTabDisabledTitle"));
+          assert.equal((await loadI18n()).locale,expected.locale);
+        }
+        // An optional catalog can reject instead of returning HTTP 404.
+        // Both interfaces still use the selected base locale.
+        globalThis.fetch=async input=>{
+          if(String(input).endsWith("/round7-messages.json"))throw Error("optional catalog unavailable");
+          if(String(input).endsWith("/roadmap-messages.json"))return new Response("{broken");
+          return localFetch(input);
+        };
+        for(const [preference,expected] of [["en-US",en],["ru-RU",ru]]){
+          const loaded=await loadI18nForPreference(preference.slice(0,2));
+          assert.equal(loaded.locale,expected.locale);
+          assert.equal(loaded.t("appName"),expected.t("appName"));
+          const gate=await refreshGate(preference);
+          assert.equal([...gate.querySelectorAll("button")].at(-1).textContent,expected.t("openSettings"));
+        }
+        // Missing optional Russian strings inherit the English catalog,
+        // while available Russian base strings retain their language.
+        globalThis.fetch=async input=>{
+          if(String(input).includes("/_locales/ru/")&&!String(input).endsWith("/messages.json"))throw Error("Russian optional unavailable");
+          return localFetch(input);
+        };
+        const partial=await refreshGate("ru-RU");
+        assert.equal(one(partial,"h1").textContent,en.t("startTabDisabledTitle"));
+        assert.equal([...partial.querySelectorAll("button")].at(-1).textContent,ru.t("openSettings"));
+        // Failure of the selected base catalog falls back to English.
+        globalThis.fetch=async input=>{
+          if(String(input).includes("/_locales/ru/messages.json"))throw Error("Russian base unavailable");
+          return localFetch(input);
+        };
+        const gate=await refreshGate("ru-RU");
+        assert.equal(one(gate,"h1").textContent,en.t("startTabDisabledTitle"));
+        assert.equal((await loadI18n()).locale,"en");
+      } finally {
+        globalThis.fetch=localFetch;
+        control.chrome.i18n.getUILanguage=getUILanguage;
+        if(languageDescriptor)Object.defineProperty(navigator,"languages",languageDescriptor);
+        else delete navigator.languages;
+        control.state.localeOverride="en";
+        await refreshGate("en");
+        control.state.startPageSettings.startTab.enabled=true;
+        control.chrome.storage.onChanged.emit({startPageSettings:{newValue:control.state.startPageSettings}},"local");
+        await until(()=>!overlay(),"gate reset after localization checks");
+      }
+    }
     await import("../src/newtab/newtab.js");
     await until(() => document.querySelectorAll("#grid .card").length === 3, "new tab cards");
     await until(() => document.getElementById("onboarding"), "onboarding modal");

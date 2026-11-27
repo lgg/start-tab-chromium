@@ -42,9 +42,9 @@ assert.match(consumeSource,
   "Expired leases must be removed while the native-bypass lock still protects the stale read");
 
 assert.match(gate, /function resolvedGateLocale\(override\)/);
-assert.match(gate, /chrome\.i18n\.getUILanguage\(\)/,
-  "Automatic locale mode must resolve the browser UI language for fragment-only gate strings");
-assert.match(gate, /return browserLocale\.startsWith\("ru"\) \? "ru" : "en"/);
+assert.match(gate, /navigator\.languages[\s\S]*navigator\.language/,
+  "Automatic locale mode must resolve the browser preferred languages for fragment-only gate strings");
+assert.match(gate, /const languages = Array\.isArray\(navigator\.languages\)[\s\S]*const supported = normalize\(language\);[\s\S]*if \(supported\) return supported;[\s\S]*return "en";/);
 assert.match(gate, /const locale = resolvedGateLocale\(items\[LOCALE_OVERRIDE_KEY\]\)/);
 assert.match(gate, /Promise\.all\(catalogFiles\.map/,
   "Every gate locale mode must merge all catalog fragments, not only explicit overrides");
@@ -74,7 +74,7 @@ assert.match(round16Fixtures, /assert\.equal\(await consumeNativeBypass\(tabId\)
   "Round 16 must no longer model deletion of the bypass key as successful consumption");
 assert.doesNotMatch(round16Fixtures, /if \(consumeBypassOnUpdate\) delete localState\.startTabNativeNewTabBypass/,
   "Historical fixtures must not preserve the removed false-success contract");
-assert.match(round38Static, /Automatic locale selection must resolve the supported browser UI language/,
+assert.match(round38Static, /Automatic locale selection must resolve the first supported browser language/,
   "Round 38 must retain the evolved Auto-locale contract instead of requiring a null catalog");
 assert.doesNotMatch(round38Static, /Returning to automatic locale selection must publish a null catalog/,
   "Historical validation must not reintroduce the broken Auto-locale behavior");

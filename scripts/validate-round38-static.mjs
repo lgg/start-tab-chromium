@@ -25,12 +25,12 @@ const audit = read("docs/audit-2026-07-31-round-38.md");
 for (const file of ["messages.json", "roadmap-messages.json", "round7-messages.json"]) {
   assert.ok(gate.includes(`"${file}"`), `Early gate must merge locale catalog ${file}`);
 }
-assert.match(gate, /const nextCatalog = Object\.assign\(\{\}, \.\.\.catalogs\)[\s\S]*generation !== catalogLoadGeneration[\s\S]*catalog = nextCatalog/,
+assert.match(gate, /catalog: Object\.assign\(\{\}, \.\.\.catalogs\)[\s\S]*const nextCatalog = preferred\.baseAvailable[\s\S]*generation !== catalogLoadGeneration[\s\S]*catalog = nextCatalog/,
   "The early gate must merge every locale fragment and publish it only if the load is still current");
 assert.match(gate, /chrome\.tabs\.query\(\{ currentWindow: true \}\)\.catch\(\(\) => \[\]\)/,
   "A Split View query failure must fail closed with the overlay still rendered");
-assert.match(gate, /function resolvedGateLocale\(override\)[\s\S]*override === "en" \|\| override === "ru"[\s\S]*chrome\.i18n\.getUILanguage\(\)[\s\S]*browserLocale\.startsWith\("ru"\) \? "ru" : "en"/,
-  "Automatic locale selection must resolve the supported browser UI language instead of discarding fragment catalogs");
+assert.match(gate, /function resolvedGateLocale\(override\)[\s\S]*const preference = normalize\(override\);[\s\S]*if \(preference\) return preference;[\s\S]*navigator\.languages[\s\S]*for \(const language of languages\)[\s\S]*if \(supported\) return supported;[\s\S]*return "en";/,
+  "Automatic locale selection must resolve the first supported browser language after honoring the normalized explicit preference");
 assert.match(gate, /const locale = resolvedGateLocale\(items\[LOCALE_OVERRIDE_KEY\]\)[\s\S]*Promise\.all\(catalogFiles\.map/,
   "Explicit and automatic locale modes must load the same complete fragment set through the latest-only path");
 assert.match(gate, /changes\[LOCALE_OVERRIDE_KEY\]/);
