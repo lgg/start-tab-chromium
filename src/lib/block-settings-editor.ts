@@ -1,6 +1,6 @@
 import type { I18n } from "./i18n.js";
 import { parseNumberField } from "./form-panel-cache.js";
-import { focusExistingSettingsDialog, nextSettingsDialogTitleId } from "./settings-dialog-guard.js";
+import { focusExistingSettingsDialog, nextSettingsDialogTitleId, protectSettingsDialogDraft } from "./settings-dialog-guard.js";
 import {
   blockTitleKey,
   blockUsesDefaultTitle,
@@ -385,6 +385,7 @@ export async function editBlockInstance(block: BlockInstance, i18n: I18n): Promi
     document.body.append(dialog);
 
     let dirty = false;
+    protectSettingsDialogDraft(dialog, () => dirty);
     const markDirty = (): void => { dirty = true; };
     form.addEventListener("input", markDirty);
     form.addEventListener("change", markDirty);
