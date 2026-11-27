@@ -184,5 +184,23 @@ try{
       assert.equal(control.messages.length,0);
     }finally{control.chrome.storage.local.get=get;dom.window.close()}
   }
+
+  // A non-Error rejection from a browser API after successful startup must
+  // be reported through the live-region path, not as an unhandled rejection.
+  {
+    const dom=await installDom("newtab/newtab.html");
+    const s=structuredClone(settings);
+    s.layout.blocks=s.layout.blocks.filter(b=>b.type==="note");
+    const control=installChrome({...seed(),startPageSettings:s,startPageRuntimeState:normalizeRuntimeState(undefined,s),startPageOnboarding:{onboarded:true}});
+    try{
+      await import("../src/newtab/newtab.ts?nonerror="+(++serial));
+      await until(()=>document.querySelector("#grid [data-block-id]"));
+      control.chrome.runtime.openOptionsPage=async()=>{throw "options transport refused"};
+      one(document,"#settingsButton").click();
+      await until(()=>[...document.querySelectorAll('[role="status"],[aria-live]')].some(el=>el.textContent==="options transport refused"));
+      assert.equal(control.messages.length,0);
+      window.dispatchEvent(new window.Event("pagehide"));
+    }finally{dom.window.close()}
+  }
   console.log("Residual page races: shared popup lease, initialization failures, blocked page disposal and external onboarding completion");
 }finally{globalThis.fetch=catalog;restoreFetch()}
