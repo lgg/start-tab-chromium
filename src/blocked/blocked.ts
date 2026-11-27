@@ -166,22 +166,24 @@ async function init(): Promise<void> {
   document.title = i18n.t("blockedPageTitle");
   unblockEl.textContent = i18n.t("unblockThisSite");
   cancelEl.textContent = i18n.t("cancelUnblocking");
-  if (host && !await blockedHostIsActive()) {
+  const active = host ? await blockedHostIsActive() : false;
+  if (!pageActive) return;
+  if (host && !active) {
     const redirectUrl = await redirectUrlAfterUnblock();
     if (pageActive) location.replace(redirectUrl);
     return;
   }
-  if (!pageActive) return;
   unblockEl.disabled = !host;
   unblockEl.addEventListener("click", startCountdown);
   cancelEl.addEventListener("click", cancelCountdown);
-  // A restored BFCache page must not retain a stopped, non-restartable countdown.
-  window.addEventListener("pageshow", (event) => {
-    if (event.persisted) location.reload();
-  });
   renderMessage();
 }
 
+// Register before initialization: a blocked page may enter BFCache while
+// reading its locale or blocklist, including before any controls are armed.
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted && !pageActive) location.reload();
+});
 window.addEventListener("pagehide", () => {
   pageActive = false;
   countdownActive = false;

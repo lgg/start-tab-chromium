@@ -155,7 +155,10 @@ export function normalizeSearchProviders(value: unknown, fallback: readonly Sear
       issues.push({ path: `${path}[${index}]`, messageKey: "validationInvalidSearchProvider" });
       continue;
     }
-    const id = trimmedString(item.id, stableItemId("provider", index, String(item.title ?? "provider")), 100);
+    // Imported JSON may contain objects with non-callable toString/valueOf.
+    // A generated fallback ID must never invoke untrusted object coercion.
+    const titleSeed = typeof item.title === "string" ? item.title : "provider";
+    const id = trimmedString(item.id, stableItemId("provider", index, titleSeed), 100);
     const title = trimmedString(item.title, id, 100);
     const urlTemplate = safeWebUrlTemplate(stringValue(item.urlTemplate, ""));
     if (!id || !title || !urlTemplate || seen.has(id)) {

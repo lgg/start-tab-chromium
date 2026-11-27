@@ -14,3 +14,17 @@ export function focusExistingSettingsDialog(): boolean {
   target.focus();
   return true;
 }
+
+/** A dirty editor must also be protected when the user reloads or closes
+ * the browser tab, not just when they press a button in the dialog. */
+export function protectSettingsDialogDraft(dialog: HTMLDialogElement, isDirty: () => boolean): void {
+  const beforeUnload = (event: BeforeUnloadEvent): void => {
+    if (!dialog.open || !isDirty()) return;
+    event.preventDefault();
+    event.returnValue = "";
+  };
+  window.addEventListener("beforeunload", beforeUnload);
+  dialog.addEventListener("close", () => {
+    window.removeEventListener("beforeunload", beforeUnload);
+  }, { once: true });
+}
