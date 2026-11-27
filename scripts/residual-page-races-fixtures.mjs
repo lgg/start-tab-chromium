@@ -63,13 +63,27 @@ try{
       return get(keys);
     };
     try{
-      await import("../src/blocked/blocked.ts?residual="+(++serial));
-      await until(()=>release,"blocked startup "+stage);
-      window.dispatchEvent(new window.Event("pagehide"));
-      await release();await delay(30);
-      one(document,"#unblock").click();
-      assert.equal(control.messages.length,0);
-      assert.equal(one(document,"#countdown").hidden,true);
+      const originalLocation=globalThis.location;
+      let reloads=0;
+      globalThis.location={search:originalLocation.search,reload:()=>reloads++,replace:()=>{throw Error("stale redirect")}};
+      try{
+        await import("../src/blocked/blocked.ts?residual="+(++serial));
+        await until(()=>release,"blocked startup "+stage);
+        assert.equal(one(document,"#unblock").disabled,true);
+        assert.equal(one(document,"#cancel").disabled,true);
+        window.dispatchEvent(new window.Event("pagehide"));
+        // Simulate the site being removed while the blocklist read is pending.
+        // Neither an original-URL lookup nor a redirect may follow disposal.
+        control.state.blockedSites=[];
+        const shown=new window.Event("pageshow");
+        Object.defineProperty(shown,"persisted",{value:true});
+        window.dispatchEvent(shown);
+        assert.equal(reloads,1,stage+" BFCache restore before startup completes");
+        await release();await delay(30);
+        one(document,"#unblock").click();
+        assert.equal(control.messages.length,0);
+        assert.equal(one(document,"#countdown").hidden,true);
+      }finally{globalThis.location=originalLocation}
     }finally{dom.window.close()}
   }
   // A failed startup read may reject with a string rather than Error.
