@@ -435,5 +435,48 @@ console.log("Navigation: failed session lookup, DNR repair, native grant cleanup
       assert.equal(state.themes.selectedThemeId,saved.id);
     }finally{globalThis.chrome=priorChrome}
   }
+
+  // Invalid new IDs must fail before publishing any settings or revision.
+  // Even a browser UUID collision cannot cause a duplicate API to return
+  // the existing object rather than the newly committed entity.
+  {
+    const priorChrome=globalThis.chrome;
+    const descriptor=Object.getOwnPropertyDescriptor(globalThis,"crypto");
+    const fresh=installChrome({startPageSettings:settings,startPageRuntimeState:runtime});
+    try{
+      const before=await fresh.chrome.storage.local.get(null);
+      for(const id of [""," spaced id ","bad/id","x".repeat(161)]){
+        await assert.rejects(api.saveNewBlockInstance(api.createBlockInstance("note",{id})),/Invalid block instance identity/);
+        assert.deepEqual(await fresh.chrome.storage.local.get(null),before);
+      }
+      Object.defineProperty(globalThis,"crypto",{configurable:true,value:{randomUUID:()=>"fixed-uuid"}});
+      const a=await api.addBlockInstance("note");
+      const b=await api.addBlockInstance("note");
+      const c=await api.duplicateBlockInstance(a.id,"Copied note");
+      assert.deepEqual([a.id,b.id,c.id],["note-fixed-uuid","note-fixed-uuid-2","note-fixed-uuid-3"]);
+      assert.equal(c.title,"Copied note");
+      const theme=await api.saveNewCustomTheme(api.createCustomThemeDraft(await api.getStartPageSettings(),"First"));
+      const duplicate=await api.duplicateTheme(theme.id,"Second");
+      const imported=await api.importCustomTheme(api.exportCustomTheme(theme));
+      const third=await api.saveNewCustomTheme({...theme,name:"Fourth"});
+      const legacy=await api.updateCustomTheme({...theme,id:" "+theme.id+" ",name:"Fifth"});
+      const blank=await api.saveNewCustomTheme({...theme,id:" ",name:"Normalized"});
+      const state=await api.getStartPageSettings();
+      assert.equal(theme.id,"theme-fixed-uuid");
+      assert.equal(duplicate.id,"theme-fixed-uuid-2");
+      assert.equal(imported.theme.id,"theme-fixed-uuid-3");
+      assert.equal(third.id,"theme-fixed-uuid-4");
+      assert.equal(legacy.id,"theme-fixed-uuid-5");
+      assert.equal(blank.id,"custom-theme");
+      assert.equal(state.themes.customThemes.length,6);
+      assert.equal(state.themes.selectedThemeId,blank.id);
+      assert.equal(state.themes.customThemes.find(t=>t.id===theme.id).name,"First");
+      assert.equal(state.layout.blocks.find(b=>b.id===c.id).title,"Copied note");
+      assert.equal(state.layout.blocks.length,settings.layout.blocks.length+3);
+    }finally{
+      globalThis.chrome=priorChrome;
+      if(descriptor)Object.defineProperty(globalThis,"crypto",descriptor);else delete globalThis.crypto;
+    }
+  }
 console.log("Residual helpers: effect aggregation, canonical data, split-view markers, tab lifecycle and draft acknowledgement");
 }
