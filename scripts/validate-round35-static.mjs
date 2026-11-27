@@ -171,7 +171,8 @@ assert.match(runtime, /return \{ settings, runtime, localePreference: localePref
 const themeEditor69 = read("src/lib/theme-editor.ts");
 const formCache69 = read("src/lib/form-panel-cache.ts");
 assert.match(themeEditor69, /backgroundPanels\.show\(kind\.value, dynamic, createBackgroundPanel\)/);
-assert.match(themeEditor69, /effectPanels\.show\(effect\.value, effectFields, createEffectPanel\)/);
+assert.match(themeEditor69, /if \(!effectIds\.has\(effect\.value\)\) effect\.value = lastEffect/);
+assert.match(themeEditor69, /effectPanels\.show\(lastEffect, effectFields, \(\) => createEffectPanel\(lastEffect\)\)/);
 assert.match(formCache69, /host\.replaceChildren\(\.\.\.existing\.nodes\)/);
 for (const source of [editor, themeEditor69, options]) {
   assert.match(source, /return parseNumberField\(input\.value, fallback\)/);
