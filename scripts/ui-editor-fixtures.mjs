@@ -522,6 +522,10 @@ try {
     assert.equal(field(dialog,"effectSpeed").value,"2.25");
     value(field(dialog,"themeName")," ");
     submit(one(dialog,"form"));
+    assert.equal((await promise).name,custom.name);
+    // A malformed draft with no valid fallback name requires repair.
+    promise=editTheme({...custom,name:""},i18n);dialog=one(document,"dialog[open]");
+    submit(one(dialog,"form"));
     assert.equal(dialog.isConnected,true);
     assert.equal(one(dialog,".form-error").hidden,false);
     value(field(dialog,"themeName"),"Restored aurora");
