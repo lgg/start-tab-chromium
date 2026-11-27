@@ -141,5 +141,42 @@ try{
       if(page.startsWith("options"))assert.equal(one(document,"#status").dataset.error,"true");
     }finally{dom.window.close()}
   }
+
+  // A page may be closed while a canonical storage snapshot, a locale read
+  // or an onboarding read is queued. Late replies must not repaint the old
+  // page or schedule new commands after pagehide disposes its listeners.
+  for(const stage of ["settings","locale","onboarding"]){
+    const dom=await installDom("newtab/newtab.html","https://extension.example/newtab.html");
+    const control=installChrome({...seed(),startPageOnboarding:{onboarded:true}});
+    const get=control.chrome.storage.local.get;
+    try{
+      await import("../src/newtab/newtab.ts?dispose="+(++serial));
+      await until(()=>document.querySelector("#grid [data-block-id]"));
+      const original=one(document,"#grid").innerHTML;
+      let release;
+      control.chrome.storage.local.get=keys=>{
+        const match=stage==="settings"?Array.isArray(keys)&&keys.includes("startPageSettings")&&keys.includes("startPageRuntimeState"):
+          stage==="locale"?keys==="localeOverride":keys==="startPageOnboarding";
+        if(match&&!release)return new Promise(resolve=>{release=async()=>resolve(await get(keys))});
+        return get(keys);
+      };
+      if(stage==="settings"){
+        control.state.startPageSettings.layout.blocks=[];
+        control.chrome.storage.onChanged.emit({startPageSettings:{newValue:control.state.startPageSettings}},"local");
+      }else if(stage==="locale"){
+        control.state.localeOverride="ru";
+        control.chrome.storage.onChanged.emit({localeOverride:{newValue:"ru"}},"local");
+      }else{
+        control.state.startPageOnboarding={onboarded:false};
+        control.chrome.storage.onChanged.emit({startPageOnboarding:{newValue:{onboarded:false}}},"local");
+      }
+      await until(()=>release,"pending "+stage);
+      window.dispatchEvent(new window.Event("pagehide"));
+      await release();await delay(50);
+      assert.equal(one(document,"#grid").innerHTML,original,stage);
+      assert.equal(document.getElementById("onboarding"),null);
+      assert.equal(control.messages.length,0);
+    }finally{control.chrome.storage.local.get=get;dom.window.close()}
+  }
   console.log("Residual page races: shared popup lease, initialization failures, blocked page disposal and external onboarding completion");
 }finally{globalThis.fetch=catalog;restoreFetch()}
