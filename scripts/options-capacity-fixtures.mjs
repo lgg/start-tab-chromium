@@ -63,3 +63,38 @@ try{
   assert.ok(one(document,"#statistics").textContent.includes(t.t("migrationSummary",{from:1,to:3,blocks:4,skipped:2})));
   assert.equal(scrolls,2);
 }finally{recovery.chrome.storage.local.get=get;recoveryFetch();recoveryDom.window.close()}
+
+
+// Exercise the actual Options Drive controls, including rejection before
+// any network request and the complete confirmed import transaction.
+const driveFetch=installFetch();
+const driveCatalog=globalThis.fetch;
+const driveDom=await installDom("options/options.html");
+const driveSettings=createDefaultStartPageSettings(100);
+const drive=installChrome({startPageSettings:driveSettings,startPageRuntimeState:normalizeRuntimeState(undefined,driveSettings),localeOverride:"en",blockedSites:[]});
+drive.oauth=true;
+try{
+  const t=await loadI18n();
+  const {exportBackup}=await import("../src/lib/backup.js");
+  const bundle=await exportBackup();
+  bundle.storage.blockedSites=["drive-restored.example"];
+  let requests=0;
+  globalThis.fetch=async(url,init)=>{
+    const parsed=new URL(url);
+    if(parsed.hostname!=="www.googleapis.com")return driveCatalog(url,init);
+    requests++;
+    if(parsed.searchParams.get("alt")==="media")return Response.json(bundle);
+    return Response.json({files:[{id:"drive-file",name:"start-tab-backup.json"}]});
+  };
+  await import("../src/options/options.ts?case=drive-restore");
+  await until(()=>document.querySelector("#statistics .stats-grid"));
+  const restore=()=>button(one(document,"#backup"),t.t("driveRestore"));
+  window.confirm=()=>false;restore().click();
+  assert.equal(requests,0);
+  assert.deepEqual(drive.state.blockedSites,[]);
+  window.confirm=()=>true;restore().click();
+  await until(()=>one(document,"#status").textContent===t.t("driveRestored"));
+  assert.equal(requests,2);
+  assert.deepEqual(drive.state.blockedSites,["drive-restored.example"]);
+  console.log("Options: cancelled and confirmed Google Drive restore");
+}finally{driveFetch();driveDom.window.close()}
