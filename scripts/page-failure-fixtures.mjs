@@ -439,6 +439,51 @@ try{
     }finally{globalThis.fetch=catalog;dom.window.close()}
   }
 
+
+  // Synchronous Chrome API failures must be contained by the native gate,
+  // and repeated native-tab failures must reuse the existing status node.
+  {
+    const dom=await installDom("newtab/newtab.html","https://extension.example/newtab.html");
+    const control=installChrome(seed());
+    control.state.startPageSettings.startTab.enabled=false;
+    control.chrome.i18n.getUILanguage=()=>undefined;
+    delete control.state.localeOverride;
+    const overlay=()=>one(document,"#startTabGateOverlay");
+    try{
+      await import("../src/newtab/newtab-gate.js?case="+(++serial));
+      await window.startTabGateReady;
+      const native=one(overlay(),"[data-native-new-tab]");
+      const settingsButton=[...overlay().querySelectorAll("button")].at(-1);
+      let attempts=0;
+      control.chrome.runtime.openOptionsPage=()=>{attempts++;throw Error("API disconnected")};
+      settingsButton.click();
+      assert.equal(attempts,1);
+      assert.ok(overlay().isConnected);
+      control.chrome.runtime.openOptionsPage=async()=>{attempts++};
+      settingsButton.click();assert.equal(attempts,2);
+      control.handler=async()=>({ok:false,error:"native rejected"});
+      native.click();
+      await until(()=>overlay().querySelector('[role="alert"]:not([hidden])'));
+      const status=one(overlay(),'[role="alert"]');
+      native.click();
+      await until(()=>control.messages.length===2&&!native.hasAttribute("aria-busy"));
+      assert.equal(one(overlay(),'[role="alert"]'),status);
+      assert.equal(overlay().querySelectorAll('[role="alert"]').length,1);
+      let release;
+      control.handler=()=>new Promise(resolve=>{release=resolve});
+      native.click();await until(()=>release);
+      control.state.startPageSettings.startTab.enabled=true;
+      control.chrome.storage.onChanged.emit({startPageSettings:{newValue:control.state.startPageSettings}},"local");
+      await until(()=>!document.getElementById("startTabGateOverlay"));
+      release({ok:false,error:"late failure"});
+      const fallback=one(document,"#nativeNewTab");
+      await until(()=>!fallback.hasAttribute("aria-busy"));
+      assert.ok(fallback.nextElementSibling?.getAttribute("role")==="alert");
+      assert.equal(document.getElementById("startTabGateOverlay"),null);
+      assert.equal(one(document,"#startPage").hasAttribute("inert"),false);
+    }finally{globalThis.fetch=catalog;dom.window.close()}
+  }
+
   // A web-accessible blocked page embedded as a subframe must never expose
   // an active countdown or send unblock messages.
   const frameDom=await installDom("blocked/blocked.html","https://extension.example/blocked.html?site=blocked.example");
