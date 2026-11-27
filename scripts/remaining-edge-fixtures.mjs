@@ -480,5 +480,38 @@ console.log("Navigation: failed session lookup, DNR repair, native grant cleanup
       if(descriptor)Object.defineProperty(globalThis,"crypto",descriptor);else delete globalThis.crypto;
     }
   }
+
+  // DNR rollback accepts only owned snapshots. Chrome may reorder the
+  // object properties and rule list; that is not a reason to rewrite rules.
+  {
+    const bl=await import("../src/lib/blocklist.js");
+    const priorChrome=globalThis.chrome;
+    const fresh=installChrome({blockedSites:["a.example","b.example"]});
+    const dnr=fresh.chrome.declarativeNetRequest;
+    try{
+      const foreign={id:900,priority:1,action:{type:"block"},condition:{requestDomains:["foreign.example","another.example"],resourceTypes:["main_frame","sub_frame"]}};
+      await dnr.updateDynamicRules({addRules:[foreign]});
+      await bl.syncRules();
+      const snapshot=await bl.readDynamicRulesSnapshot();
+      assert.equal(snapshot.length,2);
+      const before=await dnr.getDynamicRules();
+      const update=dnr.updateDynamicRules;
+      let writes=0;
+      dnr.updateDynamicRules=async options=>{writes++;return update(options)};
+      const reordered=[...snapshot].reverse().map(rule=>({condition:{resourceTypes:[...rule.condition.resourceTypes],requestDomains:[...rule.condition.requestDomains]},action:{redirect:{url:rule.action.redirect.url},type:rule.action.type},priority:rule.priority,id:rule.id}));
+      await bl.restoreDynamicRulesSnapshot(reordered);
+      assert.equal(writes,0);
+      for(const invalid of [[...snapshot,foreign],[snapshot[0],snapshot[0]]]){
+        await assert.rejects(bl.restoreDynamicRulesSnapshot(invalid),/Invalid blocklist dynamic-rule snapshot/);
+        assert.equal(writes,0);
+        assert.deepEqual(await dnr.getDynamicRules(),before);
+      }
+      await fresh.chrome.storage.local.set({blockedSites:["changed.example"]});
+      await bl.syncRules();
+      await bl.restoreDynamicRulesSnapshot(snapshot);
+      assert.deepEqual(await bl.readDynamicRulesSnapshot(),snapshot);
+      assert.deepEqual((await dnr.getDynamicRules()).find(rule=>rule.id===foreign.id),foreign);
+    }finally{globalThis.chrome=priorChrome}
+  }
 console.log("Residual helpers: effect aggregation, canonical data, split-view markers, tab lifecycle and draft acknowledgement");
 }
