@@ -5,7 +5,9 @@ import { booleanValue, finiteNumber, isRecord, normalizeEntityId, uniqueEntityId
 
 const EFFECT_IDS = ["animated-gradient", "aurora", "mesh", "spotlight", "noise", "matrix", "cyberpunk"] as const;
 
-function normalizeEffectConfig(value: unknown, fallback: AnimatedEffectConfig): AnimatedEffectConfig {
+export const NOISE_EFFECT_LIMITS = { speed: 2, intensity: 0.65 } as const;
+
+export function normalizeEffectConfig(value: unknown, fallback: AnimatedEffectConfig): AnimatedEffectConfig {
   const source = isRecord(value) ? value : {};
   const effect = oneOf(source.effect, EFFECT_IDS, fallback.effect);
   const speed = (fallbackValue: number, max = 4): number => finiteNumber(source.speed, fallbackValue, 0.05, max);
@@ -19,7 +21,7 @@ function normalizeEffectConfig(value: unknown, fallback: AnimatedEffectConfig): 
     case "aurora": return { effect, speed: speed(fallback.effect === effect ? fallback.speed : 1), intensity: intensity(fallback.effect === effect ? fallback.intensity : 0.65), blur: finiteNumber(source.blur, fallback.effect === effect ? fallback.blur : 72, 0, 160) };
     case "mesh": return { effect, speed: speed(fallback.effect === effect ? fallback.speed : 0.7), intensity: intensity(fallback.effect === effect ? fallback.intensity : 0.75), scale: finiteNumber(source.scale, fallback.effect === effect ? fallback.scale : 1, 0.25, 4) };
     case "spotlight": return { effect, speed: speed(fallback.effect === effect ? fallback.speed : 0.65), intensity: intensity(fallback.effect === effect ? fallback.intensity : 0.72), size: finiteNumber(source.size, fallback.effect === effect ? fallback.size : 62, 10, 180) };
-    case "noise": return { effect, intensity: intensity(fallback.effect === effect ? fallback.intensity : 0.22, 0.65), animated: booleanValue(source.animated, fallback.effect === effect ? fallback.animated : false), speed: speed(fallback.effect === effect ? fallback.speed : 0.5, 2) };
+    case "noise": return { effect, intensity: intensity(fallback.effect === effect ? fallback.intensity : 0.22, NOISE_EFFECT_LIMITS.intensity), animated: booleanValue(source.animated, fallback.effect === effect ? fallback.animated : false), speed: speed(fallback.effect === effect ? fallback.speed : 0.5, NOISE_EFFECT_LIMITS.speed) };
     case "matrix": return { effect, speed: speed(fallback.effect === effect ? fallback.speed : 1), intensity: intensity(fallback.effect === effect ? fallback.intensity : 0.7), density: finiteNumber(source.density, fallback.effect === effect ? fallback.density : 0.55, 0.1, 1) };
     case "cyberpunk": return { effect, speed: speed(fallback.effect === effect ? fallback.speed : 1.1), intensity: intensity(fallback.effect === effect ? fallback.intensity : 0.72), scanlines: booleanValue(source.scanlines, fallback.effect === effect ? fallback.scanlines : true) };
   }

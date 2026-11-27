@@ -9,6 +9,7 @@ type StartPageTheme,
 type ValidationIssue,
 } from "./start-page-settings.js";
 import type { BackgroundTile } from "./start-page-types.js";
+import { normalizeEffectConfig, NOISE_EFFECT_LIMITS } from "./start-page-theme-validation.js";
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text = ""): HTMLElementTagNameMap[K] {
 const node = document.createElement(tag);
 node.className = className;
@@ -22,7 +23,9 @@ return node;
 }
 function textInput(value: string, type: "text" | "url" | "color" = "text"): HTMLInputElement {
 const input = element("input", "input");
-input.type = type;
+// Native color controls sanitize CSS colors they cannot represent, often
+// replacing an imported rgb()/rgba()/named color with black on save.
+input.type = type === "color" && !/^#[0-9a-f]{6}$/i.test(value) ? "text" : type;
 input.value = value;
 input.autocomplete = "off";
 return input;
@@ -63,6 +66,27 @@ return parseNumberField(input.value, fallback);
 function issueText(i18n: I18n, issues: ValidationIssue[]): string {
 return issues.map((issue) => `${issue.path}: ${i18n.t(issue.messageKey, issue.replacements)}`).join("\n");
 }
+/** Split only top-level separators: CSS color functions can contain commas,
+ * including nested var()/color-mix() expressions and quoted strings. */
+function splitCssColors(value: string): string[] {
+  const colors: string[] = [];
+  let start = 0, depth = 0, quote = "", escaped = false;
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i];
+    if (escaped) { escaped = false; continue; }
+    if (char === "\\") { escaped = true; continue; }
+    if (quote) { if (char === quote) quote = ""; continue; }
+    if (char === "'" || char === '"') { quote = char; continue; }
+    if (char === "(") depth++;
+    else if (char === ")") depth = Math.max(0, depth - 1);
+    else if (char === "," && depth === 0) {
+      colors.push(value.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  colors.push(value.slice(start).trim());
+  return colors.filter(Boolean);
+}
 function defaultEffectTile(theme: StartPageTheme): Extract<BackgroundTile, { kind: "effect" }> {
 if (theme.background.kind === "effect") return structuredClone(theme.background);
 return {
@@ -86,6 +110,8 @@ const dynamic = element("div", "settings-grid theme-background-editor__dynamic")
 root.append(field(i18n.t("backgroundTile"), kind, true), dynamic);
 let readDynamic: () => BackgroundTile;
 const backgroundPanels = new FormPanelCache<BackgroundTile>();
+const backgroundKinds = new Set<string>(["solid", "gradient", "image", "effect"]);
+let lastKind = theme.background.kind;
 const createBackgroundPanel = (): (() => BackgroundTile) => {
 switch (kind.value) {
 case "solid": {
@@ -129,15 +155,16 @@ let readEffect: () => EffectConfig;
 const effectPanels = new FormPanelCache<EffectConfig>();
 let lastEffect: AnimatedEffectId = existing.config.effect;
 const createEffectPanel = (selected: AnimatedEffectId): (() => EffectConfig) => {
-const current = existing.config.effect === selected ? existing.config : null;
-const speed = numberInput(existing.config.speed, 0.05, 4);
-const intensity = numberInput(existing.config.intensity, 0, 1);
+// Use the same defaults as persistence, not another effect\'s values.
+const current = normalizeEffectConfig({ effect: selected }, existing.config);
+const speed = numberInput(current.speed, 0.05, selected === "noise" ? NOISE_EFFECT_LIMITS.speed : 4);
+const intensity = numberInput(current.intensity, 0, selected === "noise" ? NOISE_EFFECT_LIMITS.intensity : 1);
 switch (selected) {
 case "animated-gradient": {
 const angle = numberInput(current?.effect === "animated-gradient" ? current.angle : 135, 0, 360);
 const colors = textInput(current?.effect === "animated-gradient" ? current.colors.join(", ") : "#111827, #312e81, #0f766e, #111827");
 effectFields.append(field(i18n.t("effectSpeed"), speed), field(i18n.t("effectIntensity"), intensity), field(i18n.t("effectAngle"), angle), field(i18n.t("effectColors"), colors, true));
-return () => ({ effect: "animated-gradient", speed: readNumber(speed, 1), intensity: readNumber(intensity, 0.8), angle: readNumber(angle, 135), colors: colors.value.split(",").map((item) => item.trim()).filter(Boolean) });
+return () => ({ effect: "animated-gradient", speed: readNumber(speed, 1), intensity: readNumber(intensity, 0.8), angle: readNumber(angle, 135), colors: splitCssColors(colors.value) });
 }
 case "aurora": {
 const blur = numberInput(current?.effect === "aurora" ? current.blur : 72, 0, 160);
@@ -185,7 +212,9 @@ return () => ({ kind: "effect", baseColor: baseColor.value, config: readEffect()
 }
 };
 const draw = (): void => {
-readDynamic = backgroundPanels.show(kind.value, dynamic, createBackgroundPanel);
+if (!backgroundKinds.has(kind.value)) kind.value = lastKind;
+else lastKind = kind.value as BackgroundTile["kind"];
+readDynamic = backgroundPanels.show(lastKind, dynamic, createBackgroundPanel);
 };
 kind.addEventListener("change", draw);
 draw();
