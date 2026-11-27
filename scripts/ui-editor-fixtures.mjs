@@ -319,6 +319,44 @@ try {
   console.log("Block dialog: default title preservation, invalid link rejection and repair");
   console.log("Block settings: all 16 types, collections, provider removal, modal exclusivity, validation and discard");
 
+  // Browser tab reload/close must protect dirty dialogs independently
+  // of the layout draft or the Options general form. Clean and closed
+  // dialogs must not block a deliberate navigation.
+  const beforeUnload = () => {
+    const e = new window.Event("beforeunload", {cancelable:true});
+    window.dispatchEvent(e);
+    return e.defaultPrevented;
+  };
+  for (const [open, label] of [
+    [() => editBlockInstance(createBlockInstance("note"), i18n), "instanceName"],
+    [() => editTheme(getTheme(settings), i18n), "themeName"],
+  ]) {
+    for (const closeMode of ["save", "cancel"]) {
+      const pending = open();
+      const d = one(document, "dialog[open]");
+      assert.equal(beforeUnload(), false, "clean dialog");
+      value(field(d,label), "Unsaved browser navigation");
+      assert.equal(beforeUnload(), true, "dirty dialog");
+      if(closeMode === "save") submit(one(d,"form"));
+      else { window.confirm=()=>true; button(d,"cancel").click(); }
+      const result = await pending;
+      assert.equal(Boolean(result),closeMode==="save");
+      assert.equal(beforeUnload(), false, "closed dialog");
+    }
+  }
+  // Structural edits trigger the same guard, even before typing.
+  {
+    const pending = editBlockInstance(createBlockInstance("links"), i18n);
+    const d = one(document,"dialog[open]");
+    button(d,"addLink").click();
+    assert.equal(beforeUnload(),true);
+    window.confirm=()=>true;
+    button(d,"cancel").click();
+    assert.equal(await pending,null);
+    assert.equal(beforeUnload(),false);
+  }
+  console.log("Audit: protect dirty settings dialogs from tab reload and close");
+
   const theme = getTheme(settings);
   const background = host();
   for (const kind of ["solid", "gradient", "image", "effect"]) {
