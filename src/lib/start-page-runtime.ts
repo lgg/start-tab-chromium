@@ -146,7 +146,7 @@ function normalizeClock(block: Extract<BlockInstance, { type: ClockBlockType }>,
     durationMs,
     targetAt,
     phase,
-    focusSessionStartedAt: block.type === "pomodoro" ? timestamp(value.focusSessionStartedAt) : null,
+    focusSessionStartedAt: block.type === "pomodoro" && running && phase === "work" ? timestamp(value.focusSessionStartedAt) : null,
     completionToken,
     lastCompletedToken,
   };
@@ -823,13 +823,15 @@ export function startClockState(clock: ClockRuntimeState, now = Date.now()): Clo
     accumulatedMs,
     targetAt: remaining === null ? null : now + remaining,
     completionToken: clock.type === "stopwatch" ? null : clockToken(),
-    focusSessionStartedAt: clock.type === "pomodoro" && clock.phase === "work" && clock.focusSessionStartedAt === null ? now : clock.focusSessionStartedAt,
+    // Pausing records the interrupted work segment; a resume starts a new
+    // segment and must never reuse an earlier imported focus timestamp.
+    focusSessionStartedAt: clock.type === "pomodoro" && clock.phase === "work" ? now : null,
   };
 }
 
 export function pauseClockState(clock: ClockRuntimeState, now = Date.now()): ClockRuntimeState {
   if (!clock.running) return clock;
-  return { ...clock, running: false, startedAt: null, accumulatedMs: elapsedClockMs(clock, now), targetAt: null, completionToken: null };
+  return { ...clock, running: false, startedAt: null, accumulatedMs: elapsedClockMs(clock, now), targetAt: null, completionToken: null, focusSessionStartedAt: null };
 }
 
 export function resetClockState(block: Extract<BlockInstance, { type: ClockBlockType }>, phase: PomodoroPhase = "work"): ClockRuntimeState {
@@ -843,9 +845,14 @@ export function pomodoroFocusElapsedMs(clock: ClockRuntimeState, now = Date.now(
   if (clock.type !== "pomodoro"
     || !clock.running
     || clock.phase !== "work"
+    || clock.startedAt === null
     || clock.focusSessionStartedAt === null) return 0;
   const effectiveEnd = clock.targetAt === null ? now : Math.min(now, clock.targetAt);
-  return Math.max(0, effectiveEnd - clock.focusSessionStartedAt);
+  const effectiveStart = Math.max(clock.startedAt, clock.focusSessionStartedAt);
+  // Imported clocks may carry stale focus markers or inconsistent deadlines.
+  // Count only the current active segment, never time spent paused or more
+  // than the duration still available when this segment started.
+  return Math.min(Math.max(0, clock.durationMs - clock.accumulatedMs), Math.max(0, effectiveEnd - effectiveStart));
 }
 
 /** Reset every configured clock and its complete alarm set as one recoverable transaction. */
