@@ -35,7 +35,7 @@ const workflow = read(".github/workflows/ci.yml");
 const selfHosted = read("scripts/validate-self-hosted-ci.mjs");
 
 assert.match(json, /export function canonicalJsonValue/);
-assert.match(json, /left < right \? -1 : left > right \? 1 : 0/,
+assert.match(json, /Object\.keys\(value\)\.sort\(\)/,
   "Canonical JSON keys must use locale-independent code-unit ordering");
 for (const source of [settings, runtime, worker, storagePlan, options]) {
   assert.ok(source.includes("jsonContentEqual"), "Every semantic storage comparison must use canonical JSON content equality");
@@ -114,7 +114,7 @@ assert.match(links76, /session\.view !== draw \|\| !session\.begin\(\)/);
 assert.match(links76, /session\.committed\.observe\(ack\.savedLinkPage, ack\.runtimeUpdatedAt\)/);
 assert.match(runtimeRenderer, /Math\.ceil\(value \/ 1000\) \* 1000/);
 assert.match(runtimeRenderer, /const clockRequests = new ClockRequestGate\(\)/);
-assert.match(runtimeRenderer, /clockRequests\.begin\(block\.id, token\)[\s\S]*await refreshClock\(block, context\)[\s\S]*clockRequests\.finish\(lease\)/);
+assert.match(runtimeRenderer, /clockRequests\.begin\(block\.id, token\)[\s\S]*await refreshClock\(context\)[\s\S]*clockRequests\.finish\(lease\)/);
 assert.match(runtimeRenderer, /clockRequests\.canComplete\(block\.id, clock\.completionToken\)/);
 assert.match(clockGate, /retryAt: this\.now\(\) \+ this\.retryDelayMs/);
 assert.match(newtab, /pageshow[\s\S]*event\.persisted && disposed[\s\S]*location\.reload\(\)/);
@@ -140,7 +140,7 @@ for (const source of [sync, backupUrls, blocklist]) {
   assert.doesNotMatch(source, /localeCompare/,
     "Checksums, recovery ordering, and canonical rules must not depend on host locale collation");
 }
-assert.match(sync, /function compareJsonKeys/);
+assert.match(sync, /Object\.keys\(value\)[\s\S]*\.sort\(\)/);
 
 assert.ok(readme.includes("General, Blocks, Themes, Backup and sync, Website blocker, and Statistics and migration"));
 assert.ok(readme.includes("Open Start Tab** action in the page header"));
