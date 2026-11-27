@@ -369,3 +369,24 @@ console.log("Round 159: canonical UTF-16 ordering and exact date-token substitut
   }
 }
 console.log("Round 160: complete runtime mutation target matrix",checks);
+
+
+ // A legacy appearance must not create a 1001st custom theme or silently
+ // change the selected theme on the next normalization.
+{
+  const {normalizeStartPageSettingsWithReport}=await import("../src/lib/start-page-settings-validation.js");
+  const base=BUILT_IN_THEMES[0];
+  const customThemes=Array.from({length:limits.MAX_CUSTOM_THEMES},(_,index)=>({...base,id:"capacity-theme-"+index,name:"Theme "+index,builtIn:false}));
+  const legacy={...settings,schemaVersion:1,appearance:{backgroundColor:"#123456"},themes:{selectedThemeId:customThemes[0].id,customThemes}};
+  const full=normalizeStartPageSettingsWithReport(legacy);
+  same(full.settings.themes.customThemes.length,limits.MAX_CUSTOM_THEMES);
+  same(full.settings.themes.customThemes.map(x=>x.id),customThemes.map(x=>x.id));
+  same(full.settings.themes.selectedThemeId,customThemes[0].id);
+  check(full.report.issues.some(x=>x.path==="appearance"));
+  same(full.report.skippedBlocks,0);
+  same(normalizeStartPageSettingsWithReport(full.settings).settings,full.settings);
+  const room=normalizeStartPageSettingsWithReport({...legacy,themes:{customThemes:customThemes.slice(1)}}).settings;
+  same(room.themes.customThemes.length,limits.MAX_CUSTOM_THEMES);
+  same(room.themes.selectedThemeId,"migrated-legacy-theme");
+  same(normalizeStartPageSettingsWithReport(room).settings,room);
+}
