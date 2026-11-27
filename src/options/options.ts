@@ -486,7 +486,7 @@ function blockActions(block: BlockInstance): HTMLElement {
   const info = element("div", "instance-row__info");
   info.append(
     element("strong", "instance-row__title", blockName(block, i18n)),
-    element("span", "instance-row__meta", `${i18n.t(`blockTitle${block.type[0]?.toUpperCase() ?? ""}${block.type.slice(1)}`)} · ${block.id}`),
+    element("span", "instance-row__meta", `${i18n.t(blockTitleKey(block.type))} · ${block.id}`),
     element("span", block.enabled ? "badge badge--active" : "badge", i18n.t(block.enabled ? "enabled" : "disabled")),
   );
   const actions = element("div", "instance-row__actions");
