@@ -105,11 +105,21 @@ function normalizeBlock(value: unknown, index: number, root: Record<string, unkn
 function normalizeBlocks(value: unknown, root: Record<string, unknown>, columns: number, zone: LayoutZone, mode: LayoutMode, issues: ValidationIssue[], migrationIssues: MigrationIssue[]): BlockInstance[] {
   const source = Array.isArray(value) ? value.slice(0, MAX_START_PAGE_BLOCKS) : cloneBlocks(DEFAULT_LAYOUT_BLOCKS);
   const seenIds = new Set<string>();
-  const reservedIds = new Set(source.flatMap((candidate) => isRecord(candidate) && isBlockType(candidate.type)
-    ? [normalizeEntityId(candidate.id, candidate.type)] : []));
-  const explicitIds = new Set(source.flatMap((candidate) => isRecord(candidate) && isBlockType(candidate.type)
-    && typeof candidate.id === "string" && candidate.id.trim().length > 0
-    ? [normalizeEntityId(candidate.id, candidate.type)] : []));
+  const reservedIds = new Set<string>();
+  const explicitIds = new Set<string>();
+  const retainedSingletons = new Set<BlockType>();
+  // Reserve identities only for blocks that can survive normalization.
+  // A discarded duplicate singleton must not displace a valid legacy ID.
+  for (const candidate of source) {
+    if (!isRecord(candidate) || !isBlockType(candidate.type)) continue;
+    if (isSingletonBlockType(candidate.type)) {
+      if (retainedSingletons.has(candidate.type)) continue;
+      retainedSingletons.add(candidate.type);
+    }
+    const id = normalizeEntityId(candidate.id, candidate.type);
+    reservedIds.add(id);
+    if (typeof candidate.id === "string" && candidate.id.trim().length > 0) explicitIds.add(id);
+  }
   const seenSingletons = new Set<BlockType>();
   const blocks = source.flatMap((candidate, index) => {
     const block = normalizeBlock(candidate, index, root, columns, zone, seenIds, reservedIds, explicitIds, seenSingletons, issues, migrationIssues);
