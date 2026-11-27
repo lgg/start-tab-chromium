@@ -318,5 +318,27 @@ console.log("Navigation: failed session lookup, DNR repair, native grant cleanup
   const {formatDateParts,createDatePartsFormatter}=await import("../src/newtab/date-pattern.js");
   assert.equal(formatDateParts("YYYY-MM DD HH:mm:ss",{}),"-MM  ::");
   assert.equal(createDatePartsFormatter("en-GB","UTC")(new Date("2026-11-26T12:34:56Z")).hour,"12");
-  console.log("Residual helpers: effect aggregation, canonical data, split-view markers, tab lifecycle and draft acknowledgement");
+  
+  // A direct guarded import does not require the optional legacy fallback
+  // when a durable revision exists. A stale revision must reject before any
+  // DNR or storage change; a matching revision commits atomically.
+  {
+    const {exportBackup,importBackup}=await import("../src/lib/backup.js");
+    const priorChrome=globalThis.chrome;
+    const fresh=installChrome({startPageSettings:settings,startPageRuntimeState:runtime,
+      blockedSites:["old-import.example"],startTabDataRevision:{version:1,updatedAt:4000}});
+    try{
+      const bundle=await exportBackup();
+      bundle.storage.blockedSites=["new-import.example"];
+      const snapshot=await fresh.chrome.storage.local.get(null);
+      const rules=await fresh.chrome.declarativeNetRequest.getDynamicRules();
+      await assert.rejects(importBackup(bundle,{expectedCurrentDataRevision:3999}),rev.StartTabDataRevisionConflictError);
+      assert.deepEqual(await fresh.chrome.storage.local.get(null),snapshot);
+      assert.deepEqual(await fresh.chrome.declarativeNetRequest.getDynamicRules(),rules);
+      await importBackup(bundle,{expectedCurrentDataRevision:4000});
+      assert.deepEqual(fresh.state.blockedSites,["new-import.example"]);
+      assert.ok(fresh.state.startTabDataRevision.updatedAt>4000);
+    }finally{globalThis.chrome=priorChrome}
+  }
+console.log("Residual helpers: effect aggregation, canonical data, split-view markers, tab lifecycle and draft acknowledgement");
 }
