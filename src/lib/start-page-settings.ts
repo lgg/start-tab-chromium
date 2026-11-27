@@ -643,7 +643,7 @@ export async function updateCustomTheme(theme: StartPageTheme, expectedUpdatedAt
       fallback.id = normalizeEntityId(theme.id, "custom-theme");
       fallback.builtIn = false;
       const normalized = normalizeTheme({ ...theme, builtIn: false, updatedAt: now }, fallback);
-      normalized.id = current.themes.customThemes.some((item) => item.id === normalized.id) ? nextThemeId(current) : normalized.id;
+      normalized.id = getBuiltInTheme(normalized.id) || current.themes.customThemes.some((item) => item.id === normalized.id) ? nextThemeId(current) : normalized.id;
       normalized.builtIn = false;
       normalized.createdAt = now;
       normalized.updatedAt = now;
