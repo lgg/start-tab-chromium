@@ -546,6 +546,20 @@ try {
         assert.deepEqual(ed.settings.layout.blocks.map(b=>b.id),[original.id+"-2",original.id+"-3",original.id+"-4"]);
         const next=normalizeRuntimeState(r,ed.settings);
         assert.equal(Object.keys(next.notes).length,0);
+        // An unsaved text draft belonging to a removed draft-only block
+        // may still be visible in the recovery panel. Do not reuse its ID.
+        button(cardFor(original.id+"-2"),"deleteBlock").click();
+        add();
+        assert.deepEqual(ed.settings.layout.blocks.map(b=>b.id),[original.id+"-3",original.id+"-4",original.id+"-5"]);
+        ed.cancel();
+        ed.enter();
+        add();
+        assert.deepEqual(ed.settings.layout.blocks.map(b=>b.id),[original.id,original.id+"-6"]);
+        // A refresh that removes the saved block must not release its ID.
+        ed.replaceSavedSettings({...s,updatedAt:s.updatedAt+1,layout:{...s.layout,blocks:[]}});
+        button(cardFor(original.id),"deleteBlock").click();
+        add();
+        assert.deepEqual(ed.settings.layout.blocks.map(b=>b.id),[original.id+"-6",original.id+"-7"]);
         ed.cancel();
       }
     } finally {
