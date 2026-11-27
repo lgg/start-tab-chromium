@@ -58,7 +58,7 @@ try {
       declarationOnly.push([name, item]);
     }
   }
-  const declarationPaths = declarationOnly.map(([name]) => path.relative(root, name).replaceAll("\\\\", "/"));
+  const declarationPaths = declarationOnly.map(([name]) => path.relative(root, name).replaceAll("\\", "/"));
   const executable = Object.fromEntries(["lines", "statements", "functions", "branches"].map(key => {
     const excludedTotal = declarationOnly.reduce((n, [, item]) => n + item[key].total, 0);
     const excludedCovered = declarationOnly.reduce((n, [, item]) => n + item[key].covered, 0);
