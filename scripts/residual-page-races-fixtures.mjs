@@ -124,5 +124,22 @@ try{
       open.click();await until(()=>control.calls.some(c=>c[0]==="create"));
     }finally{dom.window.close()}
   }
+
+  // Non-Error failures during initial storage reads must be visible in
+  // the correct page region and must not arm partially initialized UI.
+  for(const [page,module,selector] of [
+    ["newtab/newtab.html","../src/newtab/newtab.ts","#grid .fatal-error"],
+    ["options/options.html","../src/options/options.ts","#status"]
+  ]){
+    const dom=await installDom(page);
+    const control=installChrome(seed());
+    control.chrome.storage.local.get=async()=>{throw "initial storage connection lost"};
+    try{
+      await import(module+"?init-failure="+(++serial));
+      await until(()=>document.querySelector(selector)?.textContent==="initial storage connection lost");
+      assert.equal(control.messages.length,0);
+      if(page.startsWith("options"))assert.equal(one(document,"#status").dataset.error,"true");
+    }finally{dom.window.close()}
+  }
   console.log("Residual page races: shared popup lease, initialization failures, blocked page disposal and external onboarding completion");
 }finally{globalThis.fetch=catalog;restoreFetch()}
