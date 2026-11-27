@@ -331,7 +331,7 @@ for(const reader of ["getStartPageRuntimeState","getStartPageViewSnapshot"]){
     try{
       await assert.rejects(rt[reader](),/changed during runtime normalization|newer extension version/);
       assert.ok(injected);
-      assert.deepEqual(fresh.state[key],changed);
+      assert.deepEqual(fresh.state[key],structuredClone(changed));
       if(key!==rt.START_PAGE_RUNTIME_KEY)assert.deepEqual(fresh.state[rt.START_PAGE_RUNTIME_KEY],{version:0});
     }finally{store.get=read;globalThis.chrome=previous}
   }
