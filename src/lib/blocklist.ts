@@ -36,7 +36,9 @@ class DynamicRuleCollisionError extends Error {
 }
 
 export function normalizeHost(host: string): string {
-  return host.trim().replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
+  // Apply the existing www-alias policy once, to a fixed point. Every
+  // storage, backup and rule boundary must resolve the same hostname.
+  return host.trim().replace(/\.$/, "").replace(/^(?:www\.)+/i, "").toLowerCase();
 }
 
 function normalizeHostCandidate(host: string): string | null {
@@ -363,7 +365,15 @@ function parseBlocklistDynamicRule(rule: chrome.declarativeNetRequest.Rule): Par
   if (siteValues.length !== 1) return null;
   const rawSite = siteValues[0]!;
   const site = normalizeStoredHost(rawSite);
-  if (!site || rawSite !== site) return null;
+  if (!site) return null;
+  // Older normalization removed only one www label per pass. Explicitly
+  // marked rules could therefore contain a noncanonical www-prefixed site
+  // that the old ownership parser could not recognize. Recover only the
+  // exact historical host shape, never an unmarked lookalike.
+  const historicalMarkedSite = rawSite !== site && rawSite.startsWith("www.")
+    && rawSite === rawSite.toLowerCase() && /^[a-z0-9_.-]+$/.test(rawSite)
+    && !rawSite.includes("..") && !rawSite.endsWith(".");
+  if (rawSite !== site && !historicalMarkedSite) return null;
 
   const actionKeys = Object.keys(rule.action).sort();
   const redirectKeys = Object.keys(redirect).sort();
@@ -372,7 +382,7 @@ function parseBlocklistDynamicRule(rule: chrome.declarativeNetRequest.Rule): Par
     || actionKeys[1] !== "type"
     || redirectKeys.length !== 1
     || redirectKeys[0] !== "url"
-    || rule.priority !== rulePriorityForHost(site)) {
+    || rule.priority !== rulePriorityForHost(rawSite)) {
     return null;
   }
 
@@ -383,7 +393,7 @@ function parseBlocklistDynamicRule(rule: chrome.declarativeNetRequest.Rule): Par
     || conditionKeys[0] !== "requestDomains"
     || conditionKeys[1] !== "resourceTypes"
     || requestDomains?.length !== 1
-    || requestDomains[0] !== site
+    || requestDomains[0] !== rawSite
     || resourceTypes?.length !== 1
     || resourceTypes[0] !== chrome.declarativeNetRequest.ResourceType.MAIN_FRAME) {
     return null;
@@ -393,8 +403,8 @@ function parseBlocklistDynamicRule(rule: chrome.declarativeNetRequest.Rule): Par
   url.searchParams.forEach(() => { parameterCount += 1; });
   const owners = url.searchParams.getAll("owner");
   const legacyRedirectUrl = chrome.runtime.getURL(`${BLOCKED_PAGE}?site=${encodeURIComponent(site)}`);
-  const currentRedirectUrl = chrome.runtime.getURL(`${BLOCKED_PAGE}?site=${encodeURIComponent(site)}&owner=${BLOCKLIST_RULE_OWNER_VALUE}`);
-  if (parameterCount === 1
+  const currentRedirectUrl = chrome.runtime.getURL(`${BLOCKED_PAGE}?site=${encodeURIComponent(rawSite)}&owner=${BLOCKLIST_RULE_OWNER_VALUE}`);
+  if (rawSite === site && parameterCount === 1
     && owners.length === 0
     && rule.id >= 1
     && rule.id <= MAX_BLOCKED_SITES
