@@ -100,5 +100,29 @@ try{
       window.dispatchEvent(new window.Event("pagehide"));
     }finally{dom.window.close()}
   }
+
+  // Opening the start tab may fail on a restricted browser. Report the
+  // actual Error while leaving the rest of the settings page usable.
+  {
+    const dom=await installDom("options/options.html");
+    const control=installChrome(seed());
+    control.chrome.runtime.getManifest=()=>({chrome_url_overrides:{newtab:"newtab.html"}});
+    try{
+      const {loadI18n}=await import("../src/lib/i18n.js");
+      const t=await loadI18n();
+      await import("../src/options/options.ts?residual="+(++serial));
+      await until(()=>document.querySelector("#statistics .stats-grid"));
+      const open=[...one(document,"#headerActions").querySelectorAll("button")].find(b=>b.textContent===t.t("openStartTab"));
+      assert.ok(open);
+      const create=control.chrome.tabs.create;
+      control.chrome.tabs.create=async()=>{throw Error("browser refused tab creation")};
+      open.click();
+      await until(()=>one(document,"#status").textContent==="browser refused tab creation");
+      assert.equal(one(document,"#status").dataset.error,"true");
+      assert.ok(document.querySelector("#general form"));
+      control.chrome.tabs.create=create;
+      open.click();await until(()=>control.calls.some(c=>c[0]==="create"));
+    }finally{dom.window.close()}
+  }
   console.log("Residual page races: shared popup lease, initialization failures, blocked page disposal and external onboarding completion");
 }finally{globalThis.fetch=catalog;restoreFetch()}
