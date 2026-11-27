@@ -13,6 +13,7 @@ import {
   assertStartTabDataRevisionUnchanged,
   markStartTabDataChanged,
 } from "./data-revision.js";
+import { jsonContentEqual } from "./json-content.js";
 import { FOCUS_STATS_KEY, normalizeFocusStats } from "./focus-stats.js";
 import { normalizeRuntimeState } from "./start-page-runtime.js";
 import { DEFAULT_SETTINGS, isRecord, normalizeStartPageSettings } from "./start-page-settings.js";
@@ -76,10 +77,6 @@ function pathMatches(path: CanonicalPath, expected: readonly string[]): boolean 
 }
 
 /** Remove generated timestamps only from known schema entities, never from user-keyed dictionaries. */
-function compareJsonKeys(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
-
 function isVolatileTimestampField(path: CanonicalPath, key: string): boolean {
   if (!VOLATILE_CONTENT_KEYS.has(key)) return false;
   if (pathMatches(path, ["storage", "startPageSettings"])) return key === "updatedAt";
@@ -94,7 +91,7 @@ function canonicalValue(value: unknown, path: CanonicalPath = []): unknown {
   if (!isRecord(value)) return value;
   return Object.fromEntries(Object.keys(value)
     .filter((key) => !isVolatileTimestampField(path, key))
-    .sort(compareJsonKeys)
+    .sort()
     .map((key) => [key, canonicalValue(value[key], [...path, key])]));
 }
 
@@ -104,19 +101,10 @@ function previousCanonicalValue(value: unknown): unknown {
   if (!isRecord(value)) return value;
   return Object.fromEntries(Object.keys(value)
     .filter((key) => !VOLATILE_CONTENT_KEYS.has(key))
-    .sort(compareJsonKeys)
+    .sort()
     .map((key) => [key, previousCanonicalValue(value[key])]));
 }
 
-function sortedValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortedValue);
-  if (!isRecord(value)) return value;
-  return Object.fromEntries(Object.keys(value)
-    .sort(compareJsonKeys)
-    .map((key) => [key, sortedValue(value[key])]));
-}
-
-function stableJson(value: unknown): string { return JSON.stringify(sortedValue(value)); }
 function canonicalJson(value: unknown, path: CanonicalPath): string { return JSON.stringify(canonicalValue(value, path)); }
 export function canonicalBackupContent(bundle: BackupBundle): string {
   return JSON.stringify(canonicalValue({ app: bundle.app, version: bundle.version, schema: bundle.schema, storage: bundle.storage }));
@@ -142,12 +130,12 @@ function isPristineBackup(bundle: BackupBundle): boolean {
   if (isRecord(storage.startPageOnboarding) && storage.startPageOnboarding.onboarded === true) return false;
   if (storage.localeOverride === "en" || storage.localeOverride === "ru") return false;
   if (Object.prototype.hasOwnProperty.call(storage, FOCUS_STATS_KEY)
-    && stableJson(normalizeFocusStats(storage[FOCUS_STATS_KEY])) !== stableJson(normalizeFocusStats(undefined))) return false;
+    && !jsonContentEqual(normalizeFocusStats(storage[FOCUS_STATS_KEY]), normalizeFocusStats(undefined))) return false;
   return true;
 }
 function remoteWins(remote: SyncMeta, local: Awaited<ReturnType<typeof prepareSnapshot>>): boolean {
   if (remote.contentUpdatedAt !== local.contentUpdatedAt) return remote.contentUpdatedAt > local.contentUpdatedAt;
-  return compareJsonKeys(remote.contentChecksum, local.contentChecksum) > 0;
+  return remote.contentChecksum > local.contentChecksum;
 }
 const utf8 = new TextEncoder();
 function syncItemQuotaBytes(): number {
@@ -218,9 +206,8 @@ function isSyncMeta(value: unknown): value is SyncMeta {
     && Number.isInteger(value.chunks) && (value.chunks as number) > 0 && (value.chunks as number) <= MAX_SYNC_CHUNKS
     && Number.isInteger(value.backupVersion) && (value.backupVersion as number) >= 1 && (value.backupVersion as number) <= BACKUP_VERSION;
 }
-function timestamp(value: string): number { const parsed = Date.parse(value); return Number.isFinite(parsed) ? parsed : 0; }
 function normalizeLegacyMeta(meta: LegacySyncMeta): SyncMeta {
-  return { version: SYNC_META_VERSION, updatedAt: meta.updatedAt, contentUpdatedAt: timestamp(meta.updatedAt), deviceId: meta.deviceId,
+  return { version: SYNC_META_VERSION, updatedAt: meta.updatedAt, contentUpdatedAt: Date.parse(meta.updatedAt), deviceId: meta.deviceId,
     snapshotId: `legacy-${meta.checksum.slice(0, 16)}`, checksum: meta.checksum, contentChecksum: "0".repeat(64),
     chunks: meta.chunks, backupVersion: 3 };
 }
@@ -307,16 +294,14 @@ function snapshotRevisionGuard(snapshot: Awaited<ReturnType<typeof prepareSnapsh
 }
 
 async function retrySyncConflicts<T>(operation: () => Promise<T>): Promise<T> {
-  let lastConflict: StartTabDataRevisionConflictError | ChromeSyncRemoteConflictError | null = null;
-  for (let attempt = 0; attempt < MAX_LOCAL_REVISION_RETRIES; attempt += 1) {
+  for (let attempt = 1; ; attempt += 1) {
     try {
       return await operation();
     } catch (error) {
       if (!(error instanceof StartTabDataRevisionConflictError) && !(error instanceof ChromeSyncRemoteConflictError)) throw error;
-      lastConflict = error;
+      if (attempt >= MAX_LOCAL_REVISION_RETRIES) throw error;
     }
   }
-  throw lastConflict ?? new StartTabDataRevisionConflictError("Start Tab data kept changing during Browser Sync; retry when edits are complete");
 }
 
 /** Metadata and chunks can arrive independently from Chrome Sync. A smart
