@@ -149,7 +149,7 @@ check(normalizeThemeBundle(null).issues.some(x=>x.messageKey==="validationInvali
 {
   const {importCustomTheme}=await import("../src/lib/start-page-settings.js");
   const before=structuredClone(control.state);
-  for(const theme of [undefined,null,false,0,"theme",[],{}]){
+  for(const theme of [undefined,null,false,0,"theme",[],{}, {...image,schemaVersion:999}]){
     const envelope={app:"Start Tab Theme",version:1,theme};
     check(normalizeThemeBundle(envelope).issues.some(x=>x.messageKey==="validationInvalidThemeFile"));
     await assert.rejects(importCustomTheme(envelope),/Invalid Start Tab theme file/);
