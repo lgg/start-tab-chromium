@@ -213,6 +213,67 @@ await assert.rejects(backup.importBackup(null),/Invalid Start Tab backup/);
 assert.equal(backup.backupModifiedAt({...beforeBackup,storage:{}}),0);
 assert.equal(backup.backupModifiedAt({...beforeBackup,storage:{startPageSettings:{updatedAt:123}}}),123);
 assert.equal(backup.backupModifiedAt({...beforeBackup,storage:{startPageRuntimeState:{updatedAt:456}}}),456);
+// A real full-format export may not silently become a partial destructive
+// restore. Historical v4 exports did not promise completeness.
+{
+  const full=await backup.exportBackup();
+  assert.equal(full.complete,true);
+  const stored=await local.get(null);
+  const rules=await control.chrome.declarativeNetRequest.getDynamicRules();
+  const alarmNames=[...control.alarms.keys()];
+  assert.doesNotThrow(()=>backup.migrateBackup(full));
+  for(const key of ["blockedSites","startPageSettings","startPageRuntimeState","lastBlockedUrls","startPageOnboarding"]){
+    const missing=structuredClone(full);
+    delete missing.storage[key];
+    assert.throws(()=>backup.migrateBackup(missing),/Invalid Start Tab backup section/,key);
+    await assert.rejects(backup.importBackup(missing),/Invalid Start Tab backup section/,key);
+  }
+  for(const [parent,field] of [
+    ["startPageSettings","schemaVersion"],["startPageSettings","layout"],["startPageSettings","themes"],["startPageSettings","startTab"],
+    ["startPageSettings","settingsButton"],["startPageSettings","focusStats"],
+    ["startPageSettings.layout","blocks"],["startPageSettings.themes","customThemes"],
+    ["startPageSettings.themes","selectedThemeId"],["startPageRuntimeState","version"],["startPageRuntimeState","clocks"],
+    ["startPageRuntimeState","notes"],["startPageRuntimeState","tasks"],["startPageRuntimeState","linkPages"]
+  ]){
+    const missing=structuredClone(full);
+    const owner=parent.split(".").reduce((value,key)=>value[key],missing.storage);
+    delete owner[field];
+    await assert.rejects(backup.importBackup(missing),/Invalid Start Tab backup section/,parent+"."+field);
+  }
+  for(const [key,invalid] of [["lastBlockedUrls",[]],["lastBlockedUrls",{example:42}],["startPageOnboarding",{}],["localeOverride","invalid"],["focusStats",{version:1}]]){
+    await assert.rejects(backup.importBackup({...full,storage:{...full.storage,[key]:invalid}}),/Invalid Start Tab backup section/,key);
+  }
+  for(const schema of [null,{}, {version:999,storageKeys:[]},{version:4,storageKeys:"invalid"},{version:4,storageKeys:[123]},{version:4,storageKeys:["blockedSites"]}]){
+    await assert.rejects(backup.importBackup({...full,schema}),/Invalid Start Tab backup (schema|section)/);
+  }
+  assert.deepEqual(await local.get(null),stored);
+  assert.deepEqual(await control.chrome.declarativeNetRequest.getDynamicRules(),rules);
+  assert.deepEqual([...control.alarms.keys()],alarmNames);
+  const partial={app:"Start Tab",version:4,exportedAt:full.exportedAt,storage:{blockedSites:["legacy.example"]}};
+  assert.deepEqual(backup.migrateBackup(partial).storage.blockedSites,["legacy.example"]);
+  const optional=structuredClone(full);
+  delete optional.storage.localeOverride;delete optional.storage.focusStats;
+  assert.doesNotThrow(()=>backup.migrateBackup(optional));
+  // Original July 2026 v4 exports listed every supported key regardless of
+  // presence. Statistics then lacked the completion-token dictionary.
+  const historical=structuredClone(full);
+  delete historical.complete;
+  delete historical.storage.blockedSites;
+  delete historical.storage.lastBlockedUrls;
+  delete historical.storage.startPageOnboarding;
+  historical.storage.focusStats={version:1,totals:{focusSessionsCompleted:7},byDay:{},byDomain:{}};
+  const upgraded=backup.migrateBackup(historical);
+  assert.equal(upgraded.complete,true);
+  assert.equal(upgraded.storage.focusStats.totals.focusSessionsCompleted,7);
+  assert.deepEqual(Object.keys(upgraded.storage.focusStats.processedClockCompletions),[]);
+  assert.deepEqual(upgraded.storage.blockedSites,[]);
+  assert.equal(upgraded.storage.startPageOnboarding.onboarded,false);
+  // Old pre-import recovery envelopes could contain raw partial storage.
+  const oldRecovery={...historical,storage:{blockedSites:["legacy-recovery.example"]}};
+  assert.deepEqual(backup.migrateBackup(oldRecovery).storage.blockedSites,["legacy-recovery.example"]);
+}
+console.log("Deep audit: declared backup truncation rejected without modifying local storage, rules or alarms");
+
 const previousRecovery=control.state[backup.PRE_IMPORT_BACKUP_KEY];
 await local.remove(backup.PRE_IMPORT_BACKUP_KEY);
 await assert.rejects(backup.restorePreImportBackup(),/No pre-import recovery/);

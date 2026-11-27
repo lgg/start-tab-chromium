@@ -136,7 +136,7 @@ assert.match(google, /nextPageToken,incompleteSearch,files\(id,name,modifiedTime
 assert.match(google, /if \(payload\.incompleteSearch !== undefined && payload\.incompleteSearch !== false\)[\s\S]*throw new Error\("Google Drive backup search is incomplete/);
 
 assert.match(backup, /function assertBackupPayload\(storage: Record<string, unknown>\)/);
-assert.match(backup, /assertSupportedSchemas\(value\.storage\);\s*assertBackupPayload\(value\.storage\);\s*return currentSchema/);
+assert.match(backup, /assertSupportedSchemas\(value\.storage\);\s*assertBackupPayload\(value\.storage\);\s*assertDeclaredBackupShape\(value\);\s*return currentSchema/);
 
 assert.match(backup, /requireShape\(record\(settings\.layout\), "blocks"/);
 assert.match(backup, /requireShape\(runtime, "tasks", START_PAGE_RUNTIME_KEY, \(value\) => recordValues\(value, recordArray\)\)/);
