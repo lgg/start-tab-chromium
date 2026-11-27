@@ -173,6 +173,73 @@ try{
     await delay(20);
     assert.equal(staleDetail.textContent,"ipLoading");
   }finally{globalThis.fetch=oldFetch;control.chrome.tabs.query=oldQuery}
+
+  // A detached renderer must not submit or overwrite a newer draft.
+  {
+    const customNote={...note,id:"custom-note-lifecycle",title:"Private note",config:{...note.config,placeholder:"Custom note placeholder"}};
+    const customTasks={...tasks,id:"custom-task-lifecycle",title:"Private tasks",config:{...tasks.config,placeholder:"Custom task placeholder"}};
+    const old=mount(customNote), live=mount(customNote);
+    assert.equal(one(live.root,"textarea").placeholder,"Custom note placeholder");
+    assert.equal(one(live.root,"textarea").getAttribute("aria-label"),"Private note");
+    const priorWrites=writes.length;
+    value(one(old.root,"textarea"),"obsolete note");
+    old.dispose();
+    await delay(220);
+    assert.equal(writes.length,priorWrites);
+    assert.equal(one(live.root,"textarea").value,"");
+    live.dispose();
+    const a=mount(customTasks), b=mount(customTasks);
+    assert.equal(one(b.root,"input").placeholder,"Custom task placeholder");
+    value(one(a.root,"input"),"obsolete task");
+    submit(one(a.root,"form"));
+    assert.equal(writes.length,priorWrites);
+    assert.equal(one(b.root,"input").value,"");
+    a.dispose();
+    // Emulate a platform without randomUUID; task IDs must still be unique.
+    const descriptor=Object.getOwnPropertyDescriptor(globalThis,"crypto");
+    try{
+      Object.defineProperty(globalThis,"crypto",{configurable:true,value:undefined});
+      write=async m=>{commit(m);return {ok:true,runtimeUpdatedAt:revision,savedTasks:m.tasks}};
+      value(one(b.root,"input"),"first fallback task");submit(one(b.root,"form"));
+      await until(()=>b.root.querySelectorAll(".task").length===1&&!one(b.root,"form button").disabled);
+      value(one(b.root,"input"),"second fallback task");submit(one(b.root,"form"));
+      await until(()=>b.root.querySelectorAll(".task").length===2&&!one(b.root,"form button").disabled);
+      const saved=context.runtime.tasks[customTasks.id];
+      assert.equal(new Set(saved.map(t=>t.id)).size,2);
+      assert.ok(saved.every(t=>t.id.startsWith("task-")));
+      const checks=b.root.querySelectorAll(".task__check");
+      checks[0].checked=true;event(checks[0],"change");
+      await until(()=>context.runtime.tasks[customTasks.id][0].done&&!one(b.root,"form button").disabled);
+      assert.equal(context.runtime.tasks[customTasks.id][1].done,false);
+    }finally{Object.defineProperty(globalThis,"crypto",descriptor)}
+    b.dispose();
+    const beforeDetached=writes.length;
+    value(one(b.root,"input"),"detached draft");submit(one(b.root,"form"));
+    assert.equal(writes.length,beforeDetached);
+  }
+  // A hidden draft with an obsolete generation cannot discard its successor.
+  {
+    const h=host();let discards=0;
+    const drafts=[{kind:"search",title:"",value:"preserved",pending:false,discard:()=>{discards++;return false}}];
+    renderHiddenTextDrafts(h,drafts,context);
+    assert.equal(one(h,"strong").textContent,"hiddenSearchDraft");
+    const select=button(h,"hiddenNoteSelect"),discard=button(h,"hiddenNoteDiscard");
+    const before=refreshes;
+    discard.click();await delay();
+    assert.equal(discards,1);assert.equal(refreshes,before);
+    h.remove();select.click();discard.click();await delay();
+    assert.equal(discards,1);assert.equal(refreshes,before);
+  }
+  // A failed completion refresh must retain the acknowledgement and a
+  // disposed clock must ignore even synthetic events from its old controls.
+  {
+    const custom={...timer,id:"clock-disposal"};
+    const c=mount(custom);
+    const oldButton=button(c.root,"clockStart");
+    const before=control.messages.length;
+    c.dispose();oldButton.click();await delay();
+    assert.equal(control.messages.length,before);
+  }
   console.log("Widgets: fallback search, disconnected controls, hidden search drafts, absent IP country and pinned failure");
   console.log("Widget races: pending notes, explicit overwrite, hidden drafts, legacy ACKs, failed refresh and timer completion");
 }finally{dom.window.close()}
