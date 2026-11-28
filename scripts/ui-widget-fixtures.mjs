@@ -540,6 +540,57 @@ try {
       assert.ok(calls>=1);
     }finally{history.search=search;}
   }
+  // Pinned tabs must not survive unpin/close/navigation in the widget or
+  // reappear from an earlier request or a previous mount.
+  {
+    const tabs = control.chrome.tabs;
+    const query = tabs.query;
+    const events = [tabs.onCreated, tabs.onUpdated, tabs.onRemoved];
+    const listenerCounts = events.map(e => e.listeners.size);
+    const cleanupStart = cleanups.length;
+    browserPinned.root.remove();
+    let calls = 0;
+    let releaseOld;
+    const oldTab = { id: 42, pinned: true, title: "Old pinned", url: "https://old-pinned.example/" };
+    const newTab = { id: 43, pinned: true, title: "New pinned", url: "https://new-pinned.example/" };
+    try {
+      tabs.query = async () => { calls++; return [oldTab]; };
+      const live = widget("browserPinned", {}, "live-browser-pinned");
+      await until(() => live.root.querySelector("a"));
+      assert.equal(one(live.root, "a").href, oldTab.url);
+      assert.deepEqual(events.map(e => e.listeners.size), listenerCounts.map(n => n+1));
+
+      const initialCalls = calls;
+      tabs.onUpdated.emit(99, { title: "Unrelated" }, { id: 99, pinned: false });
+      await delay(20);
+      assert.equal(calls, initialCalls);
+      tabs.query = async () => { calls++; return new Promise(resolve => { releaseOld = resolve; }); };
+      tabs.onUpdated.emit(42, { pinned: false }, { ...oldTab, pinned: false });
+      assert.equal(live.root.querySelector("a"), null);
+      await until(() => releaseOld);
+
+      tabs.query = async () => { calls++; return [newTab]; };
+      tabs.onRemoved.emit(42, { windowId: 1, isWindowClosing: false });
+      tabs.onCreated.emit(newTab);
+      await until(() => live.root.querySelector("a")?.href === newTab.url);
+      releaseOld([oldTab]);
+      await delay(30);
+      assert.equal(one(live.root, "a").href, newTab.url);
+
+      tabs.query = async () => { throw Error("pinned query failed"); };
+      tabs.onUpdated.emit(43, { url: "https://changed.example/" }, newTab);
+      assert.equal(live.root.querySelector("a"), null);
+      await until(() => live.root.textContent === "browserPinnedUnavailable");
+
+      for (const cleanup of cleanups.splice(cleanupStart)) cleanup();
+      assert.deepEqual(events.map(e => e.listeners.size), listenerCounts);
+      live.root.remove();
+      tabs.query = async () => [];
+      const remounted = widget("browserPinned", {}, "live-browser-pinned");
+      await until(() => remounted.root.textContent === "emptyList");
+      assert.equal(remounted.root.querySelector("a"), null);
+    } finally { tabs.query = query; }
+  }
   console.log("Widget failure and boundary matrix passed");
   console.log("Widgets: dates, search, hidden drafts, IP, pagination, notes, tasks, clocks, history, pinned, stats, calendar, weather and commands");
 } finally {
