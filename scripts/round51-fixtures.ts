@@ -87,6 +87,31 @@ const consumed = storage[NATIVE_NEW_TAB_BYPASS_KEY] as { tabId?: number; consume
 assert.equal(consumed?.tabId, 51);
 assert.equal(typeof consumed?.consumedAt, "number");
 
+// A second sequential open must not revoke the first tab's unexpired
+// consumed permission. Chromium can emit several URL transitions for a
+// native new tab, even after its initial acknowledgement.
+resetState();
+const originalNow = Date.now;
+let sequentialNow = 10_000;
+Date.now = () => sequentialNow;
+try {
+  updateHandler = async (tabId) => { assert.equal(await consumeNativeNewTabBypass(tabId), true); };
+  await openNativeNewTab({ consumptionTimeoutMs: 100, pollIntervalMs: 1 });
+  nextTabId = 52;
+  liveUrl99 = "about:blank";
+  sequentialNow += 20;
+  await openNativeNewTab({ consumptionTimeoutMs: 100, pollIntervalMs: 1 });
+  assert.equal(await consumeNativeNewTabBypass(51), true, "Opening a second tab must preserve the first consumed lease");
+  assert.equal(await consumeNativeNewTabBypass(52), true);
+  assert.equal(await consumeNativeNewTabBypass(53), false, "Unrelated tabs are not granted a bypass");
+  sequentialNow += 81;
+  assert.equal(await consumeNativeNewTabBypass(51), false, "The first lease must expire at its original deadline");
+  assert.equal(await consumeNativeNewTabBypass(52), true);
+  sequentialNow += 20;
+  assert.equal(await consumeNativeNewTabBypass(52), false);
+  assert.deepEqual(removedTabs, []);
+} finally { Date.now = originalNow; }
+
 // Regression: a grant can expire while tabs.update is still settling. The old
 // poller started a fresh timeout afterward and could accept loss of the grant
 // as success even though no bypass was consumed.
