@@ -135,8 +135,8 @@ async function mutateDisplayedTarget(expected: PopupTarget): Promise<void> {
       return;
     }
     const message: Message = current.blockedHost
-      ? { type: "unblock", host: current.blockedHost }
-      : { type: "block", host: current.host };
+      ? { type: "unblock", host: current.blockedHost, popupTargetHost: current.host }
+      : { type: "block", host: current.host, popupTargetHost: current.host };
     if (!(await sendAction(message))) return;
     await reloadTabIfPossible(current);
     window.close();

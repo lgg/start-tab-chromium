@@ -77,6 +77,25 @@ try {
   assert.equal((await getFocusStats()).totals.unblocksAfterCountdown, 1);
   await ok({ type: "clear", expectedSites: ["other.example"] });
   assert.deepEqual(control.state.blockedSites, []);
+
+  // Popup read/worker dispatch are separate contexts. A new parent or more
+  // specific rule must not be silently overwritten by a stale popup click.
+  await ok({ type: "block", host: "parent.example" });
+  const beforePopupConflict = structuredClone(control.state);
+  await reject({ type: "block", host: "child.parent.example", popupTargetHost: "child.parent.example" }, /blocklist changed/);
+  assert.deepEqual(control.state, beforePopupConflict);
+  await ok({ type: "block", host: "child.parent.example" });
+  const beforeUnblockConflict = structuredClone(control.state);
+  await reject({ type: "unblock", host: "parent.example", popupTargetHost: "child.parent.example" }, /blocklist changed/);
+  assert.deepEqual(control.state, beforeUnblockConflict);
+  await reject({ type: "unblock", host: "parent.example", popupTargetHost: "other.example" }, /Invalid popup/);
+  await reject({ type: "block", host: "other.example", popupTargetHost: "parent.example" }, /Invalid popup/);
+  await reject({ type: "block", host: "other.example", popupTargetHost: 42 }, /Unsupported/);
+  await ok({ type: "unblock", host: "child.parent.example", popupTargetHost: "child.parent.example" });
+  await ok({ type: "unblock", host: "parent.example", popupTargetHost: "child.parent.example" });
+  await ok({ type: "block", host: "child.parent.example", popupTargetHost: "child.parent.example" });
+  await ok({ type: "clear", expectedSites: ["child.parent.example"] });
+  assert.deepEqual(control.state.blockedSites, []);
   await ok({ type: "runtime-note", instanceId: "worker-note", value: "Hello", expectedValue: "" });
   assert.equal((await view()).runtime.notes["worker-note"], "Hello");
   await reject({ type: "runtime-note", instanceId: "worker-note", value: "Stale", expectedValue: "" }, /changed/);
