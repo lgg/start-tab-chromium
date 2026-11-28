@@ -19,6 +19,23 @@ const NATIVE_NEW_TAB_URLS = [
   "about:newtab",
 ] as const;
 const NATIVE_NEW_TAB_BYPASS_LOCK = "native-new-tab-bypass";
+const PREVIOUS_BYPASSES_KEY = "startTabNativeNewTabPreviousBypasses";
+const MAX_PREVIOUS_BYPASSES = 256;
+
+interface ConsumedBypass { tabId: number; expiresAt: number; consumedAt: number }
+
+function isLiveConsumedBypass(value: unknown, now: number): value is ConsumedBypass {
+  if (!value || typeof value !== "object") return false;
+  const grant = value as Partial<ConsumedBypass>;
+  return typeof grant.tabId === "number" && Number.isSafeInteger(grant.tabId) && grant.tabId >= 0
+    && typeof grant.expiresAt === "number" && Number.isFinite(grant.expiresAt) && grant.expiresAt > now
+    && typeof grant.consumedAt === "number" && Number.isFinite(grant.consumedAt)
+    && grant.consumedAt < grant.expiresAt;
+}
+
+function livePreviousBypasses(value: unknown, now: number): ConsumedBypass[] {
+  return Array.isArray(value) ? value.filter((grant): grant is ConsumedBypass => isLiveConsumedBypass(grant, now)) : [];
+}
 
 async function waitForNativeBypassConsumption(
   tabId: number,
@@ -42,9 +59,24 @@ async function writeOwnedBypass(tabId: number, timeoutMs: number): Promise<numbe
     // Start this attempt's timeout only when its grant can actually be
     // published. Time spent queued behind an older consumer is not usable
     // navigation time and must not make the new grant stale on arrival.
+    const items = await chrome.storage.local.get([NATIVE_NEW_TAB_BYPASS_KEY, PREVIOUS_BYPASSES_KEY]);
+    const now = Date.now();
     const expiresAt = Date.now() + timeoutMs;
+    const previous = items[NATIVE_NEW_TAB_BYPASS_KEY];
+    const archived = livePreviousBypasses(items[PREVIOUS_BYPASSES_KEY], now)
+      .filter(grant => grant.tabId !== tabId);
+    // Open requests are serialized by the worker, but a previously opened
+    // tab may still receive another eligible URL event during its lease.
+    // Replacing the current grant must not revoke that consumed permission.
+    if (isLiveConsumedBypass(previous, now) && previous.tabId !== tabId) {
+      const index = archived.findIndex(grant => grant.tabId === previous.tabId);
+      if (index >= 0) archived.splice(index, 1);
+      archived.push(previous);
+    }
     await chrome.storage.local.set({
       [NATIVE_NEW_TAB_BYPASS_KEY]: { tabId, expiresAt },
+      ...(archived.length > 0 || items[PREVIOUS_BYPASSES_KEY] !== undefined
+        ? { [PREVIOUS_BYPASSES_KEY]: archived.slice(-MAX_PREVIOUS_BYPASSES) } : {}),
     });
     return expiresAt;
   });
@@ -124,20 +156,22 @@ export async function consumeNativeNewTabBypass(tabId: number): Promise<boolean>
   return withStorageLock(NATIVE_NEW_TAB_BYPASS_LOCK, async () => {
     const items = await chrome.storage.local.get(NATIVE_NEW_TAB_BYPASS_KEY);
     const value = items[NATIVE_NEW_TAB_BYPASS_KEY] as NativeNewTabBypass | undefined;
-    if (typeof value?.tabId !== "number" || typeof value.expiresAt !== "number") return false;
-    if (value.expiresAt <= Date.now()) {
-      // The read and removal are protected by the same lock used to publish a
-      // retry. A newer grant therefore cannot appear between this stale check
-      // and removal, while expired leases still get cleaned promptly.
-      await chrome.storage.local.remove(NATIVE_NEW_TAB_BYPASS_KEY);
-      return false;
+    if (typeof value?.tabId === "number" && typeof value.expiresAt === "number") {
+      if (value.expiresAt <= Date.now()) {
+        // Expired cleanup shares the lock with publication of newer grants.
+        await chrome.storage.local.remove(NATIVE_NEW_TAB_BYPASS_KEY);
+        if (value.tabId === tabId) return false;
+      } else if (value.tabId === tabId) {
+        if (typeof value.consumedAt !== "number") {
+          await chrome.storage.local.set({
+            [NATIVE_NEW_TAB_BYPASS_KEY]: { ...value, consumedAt: Date.now() },
+          });
+        }
+        return true;
+      }
     }
-    if (value.tabId !== tabId) return false;
-    if (typeof value.consumedAt !== "number") {
-      await chrome.storage.local.set({
-        [NATIVE_NEW_TAB_BYPASS_KEY]: { ...value, consumedAt: Date.now() },
-      });
-    }
-    return true;
+    const previous = await chrome.storage.local.get(PREVIOUS_BYPASSES_KEY);
+    return livePreviousBypasses(previous[PREVIOUS_BYPASSES_KEY], Date.now())
+      .some(grant => grant.tabId === tabId);
   });
 }
