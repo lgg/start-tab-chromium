@@ -1,6 +1,7 @@
 import {
   BLOCK_INSTANCE_SCHEMA_VERSION,
   START_PAGE_SCHEMA_VERSION,
+  THEME_SCHEMA_VERSION,
   type BlockInstance,
   type BlockType,
   type LayoutMode,
@@ -188,6 +189,18 @@ export function hasBlockUserData(block: BlockInstance, runtime: { notes?: Record
   return BLOCK_DESCRIPTORS.find((descriptor) => descriptor.type === block.type)?.containsUserData === true;
 }
 
+function hasFutureSchemaVersion(value: unknown, supported: number): boolean {
+  return isRecord(value) && typeof value.schemaVersion === "number"
+    && Number.isInteger(value.schemaVersion) && value.schemaVersion > supported;
+}
+
+/** Nested block and theme formats have independent schema versions. A
+ * current root version does not authorize rewriting a newer nested payload. */
 export function isFutureStartPageSchema(value: unknown): boolean {
-  return isRecord(value) && typeof value.schemaVersion === "number" && Number.isInteger(value.schemaVersion) && value.schemaVersion > START_PAGE_SCHEMA_VERSION;
+  if (!isRecord(value)) return false;
+  if (hasFutureSchemaVersion(value, START_PAGE_SCHEMA_VERSION)) return true;
+  const blocks = isRecord(value.layout) ? value.layout.blocks : undefined;
+  if (Array.isArray(blocks) && blocks.some(block => hasFutureSchemaVersion(block, BLOCK_INSTANCE_SCHEMA_VERSION))) return true;
+  const themes = isRecord(value.themes) ? value.themes.customThemes : undefined;
+  return Array.isArray(themes) && themes.some(theme => hasFutureSchemaVersion(theme, THEME_SCHEMA_VERSION));
 }
