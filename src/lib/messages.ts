@@ -8,10 +8,17 @@ import {
   MAX_NOTE_LENGTH,
   MAX_START_PAGE_BLOCKS,
 } from "./platform-limits.js";
-import type { LocalTask, StartPageSettings } from "./start-page-types.js";
+import type { ClockRuntimeState, LocalTask, StartPageSettings } from "./start-page-types.js";
 import { isLocalePreference, type LocaleChange } from "./i18n.js";
 
 export type ClockAction = "toggle" | "start" | "pause" | "reset";
+
+/** Stable fingerprint of the displayed clock, independent of object property order. */
+export function clockCommandSnapshot(clock: ClockRuntimeState): string {
+  return JSON.stringify([clock.type, clock.running, clock.startedAt, clock.accumulatedMs,
+    clock.durationMs, clock.targetAt, clock.phase, clock.focusSessionStartedAt,
+    clock.completionToken, clock.lastCompletedToken]);
+}
 
 export type Message =
   | { type: "block"; host: string }
@@ -21,7 +28,7 @@ export type Message =
   | { type: "open-native-new-tab" }
   | { type: "reset-start-page" }
   | { type: "replace-start-page-settings"; settings: unknown; expectedSettingsUpdatedAt: number; expectedRuntimeUpdatedAt: number; localeChange?: LocaleChange; completeOnboarding?: true }
-  | { type: "clock-action"; instanceId: string; action: ClockAction; expectedCompletionToken?: string }
+  | { type: "clock-action"; instanceId: string; action: ClockAction; expectedCompletionToken?: string; expectedClockState?: string }
   | { type: "complete-clock"; instanceId: string; token: string }
   | { type: "reset-clocks" }
   | { type: "runtime-note"; instanceId: string; value: string; expectedValue: string }
@@ -98,7 +105,9 @@ export function isMessage(value: unknown): value is Message {
     case "clock-action":
       return isSafeIdentifier(value.instanceId) && (value.action === "toggle" || value.action === "start"
         || value.action === "pause" || value.action === "reset")
-        && (value.expectedCompletionToken === undefined || (value.action === "pause" && isSafeIdentifier(value.expectedCompletionToken)));
+        && (value.expectedCompletionToken === undefined || (value.action === "pause" && isSafeIdentifier(value.expectedCompletionToken)))
+        && (value.expectedClockState === undefined || (value.action !== "toggle"
+          && typeof value.expectedClockState === "string" && value.expectedClockState.length > 0 && value.expectedClockState.length <= 4096));
     case "complete-clock":
       return isSafeIdentifier(value.instanceId) && isSafeIdentifier(value.token);
     case "runtime-note":

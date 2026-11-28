@@ -3,6 +3,7 @@ import { installChrome, installFetch, until } from "./ui-fixture-dom.mjs";
 import { createDefaultStartPageSettings, createBlockInstance } from "../src/lib/start-page-settings.js";
 import { normalizeRuntimeState, getStartPageViewSnapshot } from "../src/lib/start-page-runtime.js";
 import { getFocusStats } from "../src/lib/focus-stats.js";
+import { clockCommandSnapshot } from "../src/lib/messages.js";
 const settings = createDefaultStartPageSettings(100);
 settings.layout.blocks = [
   createBlockInstance("note", { id: "worker-note" }), createBlockInstance("localTasks", { id: "worker-task" }),
@@ -154,7 +155,9 @@ try {
 
   // A stale Pause from another tab must not stop a newly started countdown.
   await ok({type:"clock-action",instanceId:"worker-timer",action:"start"});
-  const oldToken=(await view()).runtime.clocks["worker-timer"].completionToken;
+  const oldClock=(await view()).runtime.clocks["worker-timer"];
+  const oldToken=oldClock.completionToken;
+  const oldSnapshot=clockCommandSnapshot(oldClock);
   await ok({type:"clock-action",instanceId:"worker-timer",action:"reset"});
   await ok({type:"clock-action",instanceId:"worker-timer",action:"start"});
   const newToken=(await view()).runtime.clocks["worker-timer"].completionToken;
@@ -162,11 +165,19 @@ try {
   const beforeStalePause=structuredClone(control.state.startPageRuntimeState);
   await reject({type:"clock-action",instanceId:"worker-timer",action:"pause",expectedCompletionToken:oldToken},/countdown changed/);
   assert.deepEqual(control.state.startPageRuntimeState,beforeStalePause);
+  const currentSnapshot=clockCommandSnapshot((await view()).runtime.clocks["worker-timer"]);
+  await reject({type:"clock-action",instanceId:"worker-timer",action:"reset",expectedClockState:oldSnapshot},/clock changed/);
+  assert.deepEqual(control.state.startPageRuntimeState,beforeStalePause);
+  await reject({type:"clock-action",instanceId:"worker-timer",action:"pause",expectedClockState:oldSnapshot},/clock changed/);
+  assert.deepEqual(control.state.startPageRuntimeState,beforeStalePause);
+  await reject({type:"clock-action",instanceId:"worker-timer",action:"reset",expectedClockState:123},/Unsupported/);
+  await reject({type:"clock-action",instanceId:"worker-timer",action:"toggle",expectedClockState:currentSnapshot},/Unsupported/);
   await reject({type:"clock-action",instanceId:"worker-timer",action:"pause",expectedCompletionToken:123},/Unsupported/);
   await reject({type:"clock-action",instanceId:"worker-timer",action:"reset",expectedCompletionToken:newToken},/Unsupported/);
-  await ok({type:"clock-action",instanceId:"worker-timer",action:"pause",expectedCompletionToken:newToken});
+  await ok({type:"clock-action",instanceId:"worker-timer",action:"pause",expectedCompletionToken:newToken,expectedClockState:currentSnapshot});
   assert.equal((await view()).runtime.clocks["worker-timer"].running,false);
-  await ok({type:"clock-action",instanceId:"worker-timer",action:"reset"});
+  await reject({type:"clock-action",instanceId:"worker-timer",action:"start",expectedClockState:oldSnapshot},/clock changed/);
+  await ok({type:"clock-action",instanceId:"worker-timer",action:"reset",expectedClockState:clockCommandSnapshot((await view()).runtime.clocks["worker-timer"])});
 
   // Worker uses the browser locale if catalog reads fail; alarm completion
   // must remain committed regardless of translation or delivery failures.
