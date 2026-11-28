@@ -37,6 +37,52 @@ try{
       assert.equal(control.messages.length,1);
     }finally{dom.window.close()}
   }
+  // The worker may reject an action because the matching rule changed
+  // after the popup's preflight. The next click must use the fresh rule,
+  // not require an extra click to discover the change.
+  for (const refreshFails of [false,true]) {
+    const dom=await installDom("popup/popup.html");
+    const control=installChrome(seed());
+    control.tab={id:1,url:"https://blocked.example/path"};
+    try{
+      await import("../src/popup/popup.ts?residual="+(++serial));
+      const primary=one(document,"#primary"),clear=one(document,"#clear");
+      await until(()=>!primary.hidden&&!primary.disabled);
+      const oldLabel=primary.textContent;
+      control.handler=async()=>{
+        control.state.blockedSites=[];
+        if(refreshFails)control.chrome.tabs.query=async()=>{throw Error("refresh unavailable")};
+        return {ok:false,error:"blocklist conflict"};
+      };
+      primary.click();
+      await until(()=>one(document,"#note").textContent.includes("blocklist conflict")&&document.body.getAttribute("aria-busy")==="false");
+      assert.equal(control.messages.length,1);
+      assert.equal(control.calls.some(call=>Array.isArray(call)&&call[0]==="reload"),false);
+      if(refreshFails){
+        assert.equal(primary.hidden,true);
+        assert.equal(primary.disabled,true);
+        assert.equal(clear.disabled,true);
+        assert.match(one(document,"#note").textContent,/refresh unavailable/);
+        event(primary,"click");event(clear,"click");
+        await delay(20);
+        assert.equal(control.messages.length,1);
+      }else{
+        assert.equal(primary.hidden,false);
+        assert.equal(primary.disabled,false);
+        assert.notEqual(primary.textContent,oldLabel);
+        let closed=0;
+        const closeWindow=window.close.bind(window);
+        try{
+          window.close=()=>{closed++};
+          control.handler=async()=>({ok:true});
+          primary.click();
+          await until(()=>closed===1);
+          assert.deepEqual(control.messages.at(-1),{type:"block",host:"blocked.example",popupTargetHost:"blocked.example"});
+          assert.equal(control.messages.length,2);
+        }finally{window.close=closeWindow}
+      }
+    }finally{dom.window.close()}
+  }
   // The host action may commit after the user navigates to another
   // document on that host. The optional reload must not interrupt it.
   {
