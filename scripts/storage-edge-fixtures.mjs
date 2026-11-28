@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { installDom, installChrome, installFetch, host, one, until, delay, i18n } from "./ui-fixture-dom.mjs";
-import { createDefaultStartPageSettings, createBlockInstance } from "../src/lib/start-page-settings.js";
-import { normalizeRuntimeState } from "../src/lib/start-page-runtime.js";
+import { createDefaultStartPageSettings, createBlockInstance, getStartPageSettings, updateStartPageSettings, isFutureStartPageSchema } from "../src/lib/start-page-settings.js";
+import { normalizeRuntimeState, getStartPageViewSnapshot } from "../src/lib/start-page-runtime.js";
 import * as stats from "../src/lib/focus-stats.js";
 import * as sync from "../src/lib/chrome-sync.js";
 import * as blocklist from "../src/lib/blocklist.js";
@@ -223,6 +223,35 @@ const primitives=await import("../src/lib/start-page-validation-primitives.js");
 const beforeBackup=await backup.exportBackup();
 for(const [key,future] of [["startPageSettings",{schemaVersion:999}],["startPageRuntimeState",{version:999}],["focusStats",{version:999}]]){
   assert.throws(()=>backup.migrateBackup({...beforeBackup,storage:{...beforeBackup.storage,[key]:future}}),/newer extension version/);
+}
+// The root can be current while a block or theme has its own newer format.
+// Neither a read/migration nor a backup/sync operation may downgrade it.
+{
+  const saved=await local.get(null);
+  const original=beforeBackup.storage.startPageSettings;
+  assert.equal(isFutureStartPageSchema(original),false);
+  for(const nested of [
+    { ...original, layout: { ...original.layout, blocks: [...original.layout.blocks, { ...createBlockInstance("note"), schemaVersion: 2, futureField: "keep me" }] } },
+    { ...original, themes: { ...original.themes, customThemes: [{ id: "future-theme", schemaVersion: 2, futureField: "keep me" }] } },
+  ]){
+    assert.equal(isFutureStartPageSchema(nested),true);
+    const futureBackup={...beforeBackup,storage:{...beforeBackup.storage,startPageSettings:nested}};
+    assert.throws(()=>backup.migrateBackup(futureBackup),/newer extension version/);
+    await assert.rejects(backup.importBackup(futureBackup),/newer extension version/);
+    await local.set({startPageSettings:nested});
+    const beforeRead=await local.get(null);
+    try {
+      await getStartPageSettings();
+      await getStartPageViewSnapshot();
+      await assert.rejects(updateStartPageSettings(current=>current),/newer extension version/);
+      await assert.rejects(backup.exportBackup(),/newer extension version/);
+      await assert.rejects(backup.importBackup(beforeBackup),/newer extension version/);
+      assert.deepEqual(await local.get(null),beforeRead);
+    } finally {
+      await local.set({startPageSettings:saved.startPageSettings});
+    }
+  }
+  assert.equal(isFutureStartPageSchema({schemaVersion:4,layout:{blocks:[null,{schemaVersion:1}]},themes:{customThemes:[null,{schemaVersion:1}]}}),false);
 }
 assert.throws(()=>backup.migrateBackup(null),/Invalid Start Tab backup/);
 await assert.rejects(backup.importBackup(null),/Invalid Start Tab backup/);
