@@ -180,7 +180,7 @@ async function handle(message: Message, sender: chrome.runtime.MessageSender): P
     throw new Error("Blocked page mutation requires an active top-level document for the requested site");
   }
   switch (message.type) {
-    case "block": await blockHost(message.host); break;
+    case "block": await blockHost(message.host, message.popupTargetHost); break;
     case "unblock": {
       const fromBlockedPage = !!sender.url && isBlockedPageNavigation(sender.url, blockedPageUrl());
       const assertCurrent = fromBlockedPage ? async () => {
@@ -190,7 +190,7 @@ async function handle(message: Message, sender: chrome.runtime.MessageSender): P
           (id) => chrome.webNavigation.getFrame({ tabId: id, frameId: 0 }),
         )) throw new Error("Blocked page changed before unblocking; no site was removed");
       } : undefined;
-      const changed = await unblockHost(message.host, assertCurrent);
+      const changed = await unblockHost(message.host, assertCurrent, message.popupTargetHost);
       // The worker owns the commit boundary. A closed or navigated
       // interstitial must not lose the count, and a duplicate/no-op
       // unblock must not increment it. Statistics are best-effort:

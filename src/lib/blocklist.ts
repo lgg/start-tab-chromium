@@ -657,29 +657,45 @@ async function applyBlocklistMutation(
   }
 }
 
-export async function blockHost(host: string): Promise<void> {
+/** A popup command carries the displayed target host, not just the rule
+ * it intends to mutate. Check the most-specific match inside data-write. */
+function assertPopupBlockMatch(sites: readonly string[], target: string, expected: string | null): void {
+  if (matchingBlockedSite(target, sites) !== expected) {
+    throw new Error("Start Tab blocklist changed in another extension context; review the current site before retrying");
+  }
+}
+
+export async function blockHost(host: string, popupTargetHost?: string): Promise<void> {
   const normalized = requireHost(host);
+  const target = popupTargetHost === undefined ? undefined : requireHost(popupTargetHost);
+  if (target !== undefined && target !== normalized) throw new Error("Invalid popup block target");
   if (isPageContext()) {
-    await sendMessage({ type: "block", host: normalized });
+    await sendMessage({ type: "block", host: normalized, ...(target === undefined ? {} : { popupTargetHost: target }) });
     return;
   }
   await migrateLegacyStorage();
-  await runMutation(() => applyBlocklistMutation((current) => ({
-    sites: current.sites.includes(normalized) ? current.sites : [...current.sites, normalized],
-    lastBlockedUrls: current.lastBlockedUrls,
-  })));
+  await runMutation(() => applyBlocklistMutation((current) => {
+    if (target !== undefined) assertPopupBlockMatch(current.sites, target, null);
+    return {
+      sites: current.sites.includes(normalized) ? current.sites : [...current.sites, normalized],
+      lastBlockedUrls: current.lastBlockedUrls,
+    };
+  }));
 }
 
-export async function unblockHost(host: string, assertCurrent?: () => Promise<void>): Promise<boolean> {
+export async function unblockHost(host: string, assertCurrent?: () => Promise<void>, popupTargetHost?: string): Promise<boolean> {
   const normalized = requireHost(host);
+  const target = popupTargetHost === undefined ? undefined : requireHost(popupTargetHost);
+  if (target !== undefined && !hostMatchesBlockedSite(target, normalized)) throw new Error("Invalid popup unblock target");
   if (isPageContext()) {
-    const ack = await sendMessage({ type: "unblock", host: normalized });
+    const ack = await sendMessage({ type: "unblock", host: normalized, ...(target === undefined ? {} : { popupTargetHost: target }) });
     return ack.changed === true;
   }
   await migrateLegacyStorage();
   return runMutation(async () => {
     let changed = false;
     await applyBlocklistMutation((current) => {
+      if (target !== undefined) assertPopupBlockMatch(current.sites, target, normalized);
       changed = current.sites.includes(normalized);
       if (changed) delete current.lastBlockedUrls[normalized];
       return {

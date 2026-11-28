@@ -55,7 +55,7 @@ try {
     control.handler = original;
     primary.click();
     await until(() => control.calls.includes("close"));
-    assert.deepEqual(control.messages.at(-1), { type: "block", host: "changed.example" });
+    assert.deepEqual(control.messages.at(-1), { type: "block", host: "changed.example", popupTargetHost: "changed.example" });
     assert.ok(control.calls.some(c => Array.isArray(c) && c[0] === "reload"));
     window.confirm = () => false;
     const prior = control.messages.length;

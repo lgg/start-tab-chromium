@@ -45,19 +45,19 @@ assert.match(outputValidator, /isValidGoogleOAuthClientId\(configuredGoogleClien
 
 assert.match(messages, /changed\?: boolean/,
   "Worker acknowledgements must expose whether a mutation actually changed state");
-assert.match(blocklist, /export async function unblockHost\(host: string, assertCurrent\?: \(\) => Promise<void>\): Promise<boolean>/,
+assert.match(blocklist, /export async function unblockHost\(host: string, assertCurrent\?: \(\) => Promise<void>, popupTargetHost\?: string\): Promise<boolean>/,
   "Unblock operations must return an atomic mutation result");
 assert.match(blocklist, /let changed = false;[\s\S]*await applyBlocklistMutation[\s\S]*return changed;/,
   "A stale unblock must remain a durable no-op while still allowing derived DNR repair inside the serialized mutation queue");
 assert.doesNotMatch(blocklist, /if \(!sites\.includes\(normalized\)\) return false;/,
   "Unblock must not bypass DNR reconciliation through an early storage-only return");
-assert.match(worker, /case "unblock": \{[\s\S]*?const changed = await unblockHost\(message\.host, assertCurrent\);[\s\S]*?return \{ changed \};/,
+assert.match(worker, /case "unblock": \{[\s\S]*?const changed = await unblockHost\(message\.host, assertCurrent, message\.popupTargetHost\);[\s\S]*?return \{ changed \};/,
   "The service worker must return the actual serialized unblock result");
 assert.match(worker, /sendResponse\(\{ ok: true, \.\.\.\(result \?\? \{\}\) \}\)/,
   "Worker message results must reach the calling extension page");
 assert.match(blocked, /return ack\.changed === true \? "removed" : "unchanged";/,
   "The blocked page must not infer removal from a generic successful acknowledgement");
-assert.match(worker, /const changed = await unblockHost\(message\.host, assertCurrent\);[\s\S]*?if \(changed && fromBlockedPage\) \{[\s\S]*?recordUnblockAfterCountdown\(message\.host\)/,
+assert.match(worker, /const changed = await unblockHost\(message\.host, assertCurrent, message\.popupTargetHost\);[\s\S]*?if \(changed && fromBlockedPage\) \{[\s\S]*?recordUnblockAfterCountdown\(message\.host\)/,
   "Countdown statistics must be conditional on a committed interstitial removal");
 assert.doesNotMatch(blocked, /type: "record-unblock"/, "The page must not issue a second statistics mutation");
 

@@ -21,8 +21,8 @@ export function clockCommandSnapshot(clock: ClockRuntimeState): string {
 }
 
 export type Message =
-  | { type: "block"; host: string }
-  | { type: "unblock"; host: string }
+  | { type: "block"; host: string; popupTargetHost?: string }
+  | { type: "unblock"; host: string; popupTargetHost?: string }
   | { type: "clear"; expectedSites: string[] }
   | { type: "replace-blocked-sites"; sites: string[] }
   | { type: "open-native-new-tab" }
@@ -66,6 +66,9 @@ export function isMessage(value: unknown): value is Message {
   switch (value.type) {
     case "block":
     case "unblock":
+      return typeof value.host === "string" && value.host.length <= 2048
+        && (value.popupTargetHost === undefined || (typeof value.popupTargetHost === "string"
+          && value.popupTargetHost.length > 0 && value.popupTargetHost.length <= 2048));
     case "record-unblock":
     case "blocked-original-url":
       return typeof value.host === "string" && value.host.length <= 2048;
