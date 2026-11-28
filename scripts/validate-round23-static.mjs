@@ -51,14 +51,15 @@ assert.match(blocklist, /let changed = false;[\s\S]*await applyBlocklistMutation
   "A stale unblock must remain a durable no-op while still allowing derived DNR repair inside the serialized mutation queue");
 assert.doesNotMatch(blocklist, /if \(!sites\.includes\(normalized\)\) return false;/,
   "Unblock must not bypass DNR reconciliation through an early storage-only return");
-assert.match(worker, /case "unblock": \{[\s\S]*?return \{ changed: await unblockHost\(message\.host, assertCurrent\) \};/,
+assert.match(worker, /case "unblock": \{[\s\S]*?const changed = await unblockHost\(message\.host, assertCurrent\);[\s\S]*?return \{ changed \};/,
   "The service worker must return the actual serialized unblock result");
 assert.match(worker, /sendResponse\(\{ ok: true, \.\.\.\(result \?\? \{\}\) \}\)/,
   "Worker message results must reach the calling extension page");
 assert.match(blocked, /return ack\.changed === true \? "removed" : "unchanged";/,
   "The blocked page must not infer removal from a generic successful acknowledgement");
-assert.match(blocked, /if \(result === "removed"\)[\s\S]*record-unblock/,
-  "Countdown statistics must remain conditional on a confirmed removal");
+assert.match(worker, /const changed = await unblockHost\(message\.host, assertCurrent\);[\s\S]*?if \(changed && fromBlockedPage\) \{[\s\S]*?recordUnblockAfterCountdown\(message\.host\)/,
+  "Countdown statistics must be conditional on a committed interstitial removal");
+assert.doesNotMatch(blocked, /type: "record-unblock"/, "The page must not issue a second statistics mutation");
 
 for (const command of ["node scripts/run-round23-fixtures.mjs", "node scripts/validate-round23-static.mjs"]) {
   assert.ok(packageJson.scripts.test.includes(command), `npm test is missing ${command}`);

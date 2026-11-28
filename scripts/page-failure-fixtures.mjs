@@ -135,9 +135,9 @@ try{
       assert.equal(control.messages.filter(m=>m.type==="record-unblock").length,0);
       control.handler=async m=>m.type==="blocked-original-url"?{ok:true,blockedUrl:"https://unrelated.example/"}:m.type==="unblock"?{ok:true,changed:true}:{ok:false,error:"statistics unavailable"};
       unblock.click();advance(10001);
-      await until(()=>control.messages.some(m=>m.type==="record-unblock"));
+      await until(()=>control.messages.filter(m=>m.type==="unblock").length===2);
       await delay(20);
-      assert.equal(control.messages.filter(m=>m.type==="record-unblock").length,1);
+      assert.equal(control.messages.filter(m=>m.type==="record-unblock").length,0);
     },{locale});
   }
   await blocked("?site=blocked.example",async(control,advance)=>{
@@ -171,7 +171,7 @@ try{
         advance(10001);
         await until(()=>redirects.length===1);
         assert.equal(redirects[0],destination?.startsWith("https://sub.blocked.example/")?destination:"https://blocked.example/");
-        assert.deepEqual(control.messages.map(m=>m.type),["blocked-original-url","unblock","record-unblock"]);
+        assert.deepEqual(control.messages.map(m=>m.type),["blocked-original-url","unblock"]);
         window.dispatchEvent(new window.Event("pagehide"));
         const show=new window.Event("pageshow");Object.defineProperty(show,"persisted",{value:true});
         window.dispatchEvent(show);
@@ -201,8 +201,8 @@ try{
       assert.equal(control.messages.length,0);
     });
   }
-  // The final statistics acknowledgement may arrive after pagehide. Do not
-  // navigate a discarded interstitial even though its unblock has committed.
+  // The worker owns the unblock and statistics; its acknowledgement may
+  // arrive after pagehide. Do not navigate a discarded interstitial.
   await blocked("?site=blocked.example",async(control,advance)=>{
     const actual=globalThis.location,redirects=[];
     globalThis.location={search:actual.search,replace:url=>redirects.push(url)};
@@ -210,17 +210,20 @@ try{
     try{
       control.handler=async m=>{
         if(m.type==="blocked-original-url")return {ok:true,blockedUrl:"https://blocked.example/path"};
-        if(m.type==="unblock"){control.state.blockedSites=[];return {ok:true,changed:true}}
-        return new Promise(resolve=>{release=resolve});
+        if(m.type==="unblock"){
+          control.state.blockedSites=[];
+          return new Promise(resolve=>{release=resolve});
+        }
+        throw Error("Unexpected standalone statistics request");
       };
       one(document,"#unblock").click();advance(10001);
-      await until(()=>release,"pending statistics acknowledgement");
+      await until(()=>release,"pending unblock acknowledgement");
       window.dispatchEvent(new window.Event("pagehide"));
-      release({ok:true});
+      release({ok:true,changed:true});
       await delay(30);
       assert.deepEqual(redirects,[]);
       assert.deepEqual(control.state.blockedSites,[]);
-      assert.equal(control.messages.filter(m=>m.type==="record-unblock").length,1);
+      assert.equal(control.messages.filter(m=>m.type==="record-unblock").length,0);
     }finally{globalThis.location=actual}
   });
   // Initial reads may finish after the page has already been disposed.

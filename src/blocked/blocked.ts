@@ -145,9 +145,6 @@ async function finishUnblock(): Promise<void> {
     showUnblockFailed();
     return;
   }
-  if (result === "removed") {
-    await sendMessage({ type: "record-unblock", host }).catch(() => undefined);
-  }
   if (pageActive) location.replace(redirectUrl);
 }
 
