@@ -25,7 +25,7 @@ const audit = read("docs/audit-2026-07-31-round-38.md");
 for (const file of ["messages.json", "roadmap-messages.json", "round7-messages.json"]) {
   assert.ok(gate.includes(`"${file}"`), `Early gate must merge locale catalog ${file}`);
 }
-assert.match(gate, /catalog: Object\.assign\(\{\}, \.\.\.catalogs\)[\s\S]*const nextCatalog = preferred\.baseAvailable[\s\S]*generation !== catalogLoadGeneration[\s\S]*catalog = nextCatalog/,
+assert.match(gate, /catalog: Object\.assign\(Object\.create\(null\), \.\.\.catalogs\)[\s\S]*const nextCatalog = preferred\.baseAvailable[\s\S]*generation !== catalogLoadGeneration[\s\S]*catalog = nextCatalog/,
   "The early gate must merge every locale fragment and publish it only if the load is still current");
 assert.match(gate, /candidates = await chrome\.tabs\.query\(\{ currentWindow: true \}\);[\s\S]*?catch \{[\s\S]*?if \(pageActive && generation === applyGeneration\) \{[\s\S]*?showOverlay\(text\("splitViewTitle"[\s\S]*?text\("splitViewQueryFailed"[^\n]*, \[\], true\);[\s\S]*?return;/,
   "A Split View query failure must fail closed with a current-generation retry overlay");

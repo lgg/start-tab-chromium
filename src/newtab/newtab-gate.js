@@ -58,12 +58,17 @@
           const response = await fetch(chrome.runtime.getURL(`_locales/${language}/${file}`));
           if (!response.ok) return null;
           const value = await response.json();
-          return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+          if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+          // Keep valid sibling entries while rejecting corrupt translations
+          // that would otherwise shadow the English/base catalog.
+          return Object.fromEntries(Object.entries(value).filter(([, entry]) =>
+            entry && typeof entry === "object" && !Array.isArray(entry)
+            && typeof entry.message === "string" && entry.message.trim().length > 0));
         } catch {
           return null;
         }
       }));
-      return { baseAvailable: catalogs[0] !== null, catalog: Object.assign({}, ...catalogs) };
+      return { baseAvailable: catalogs[0] !== null, catalog: Object.assign(Object.create(null), ...catalogs) };
     };
     const defaults = await load("en");
     const preferred = locale === "en" ? defaults : await load(locale);
@@ -74,7 +79,8 @@
     return true;
   }
 
-  const text = (key, fallback) => catalog?.[key]?.message || chrome.i18n.getMessage(key) || fallback;
+  const text = (key, fallback) => (catalog && Object.hasOwn(catalog, key) ? catalog[key].message : "")
+    || chrome.i18n.getMessage(key) || fallback;
 
   async function workerCommand(message) {
     const response = await chrome.runtime.sendMessage(message);
