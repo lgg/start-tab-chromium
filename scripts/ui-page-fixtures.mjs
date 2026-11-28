@@ -108,7 +108,8 @@ try {
     one(document, "#cancel").click();
     one(document, "#unblock").click();
     now += 10001; tick();
-    await until(() => control.messages.some(m => m.type === "record-unblock"), "countdown success");
+    await until(() => control.state.blockedSites.length === 0, "countdown success");
+    assert.equal(control.messages.filter(m => m.type === "record-unblock").length, 0);
     assert.deepEqual(control.state.blockedSites, []);
     window.dispatchEvent(new window.Event("pagehide"));
     assert.equal(tick, undefined);

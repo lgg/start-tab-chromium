@@ -190,7 +190,15 @@ async function handle(message: Message, sender: chrome.runtime.MessageSender): P
           (id) => chrome.webNavigation.getFrame({ tabId: id, frameId: 0 }),
         )) throw new Error("Blocked page changed before unblocking; no site was removed");
       } : undefined;
-      return { changed: await unblockHost(message.host, assertCurrent) };
+      const changed = await unblockHost(message.host, assertCurrent);
+      // The worker owns the commit boundary. A closed or navigated
+      // interstitial must not lose the count, and a duplicate/no-op
+      // unblock must not increment it. Statistics are best-effort:
+      // their failure cannot undo a committed blocklist change.
+      if (changed && fromBlockedPage) {
+        await runStatsJob(() => recordUnblockAfterCountdown(message.host)).catch(ignoreBackgroundError);
+      }
+      return { changed };
     }
     case "clear": await clearAll(message.expectedSites); break;
     case "replace-blocked-sites": await replaceBlockedSites(message.sites); break;
@@ -226,7 +234,9 @@ async function handle(message: Message, sender: chrome.runtime.MessageSender): P
       );
       return blockedUrl ? { blockedUrl } : {};
     }
-    case "record-unblock": await runStatsJob(() => recordUnblockAfterCountdown(message.host)); break;
+    // Compatibility with pages mounted before the worker was updated.
+    // A standalone report can no longer create a second count.
+    case "record-unblock": break;
     case "reset-stats": await runStatsJob(resetFocusStats); break;
   }
 }

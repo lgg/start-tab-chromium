@@ -51,8 +51,28 @@ try {
   assert.equal(original.blockedUrl, "https://example.com/path");
   assert.equal((await ok({ type: "blocked-original-url", host: "example.com" }, { ...blockedSender, frameId: 1 })).blockedUrl, undefined);
   assert.equal((await ok({ type: "unblock", host: "example.com" }, blockedSender)).changed, true);
+  // The count is committed without a second message from the page.
+  assert.equal((await getFocusStats()).totals.unblocksAfterCountdown, 1);
+  assert.equal((await ok({ type: "unblock", host: "example.com" }, blockedSender)).changed, false);
   assert.equal((await ok({ type: "unblock", host: "example.com" })).changed, false);
   await ok({ type: "record-unblock", host: "example.com" }, blockedSender);
+  await ok({ type: "record-unblock", host: "example.com" });
+  assert.equal((await getFocusStats()).totals.unblocksAfterCountdown, 1);
+  // A normal popup unblock is not an interstitial countdown.
+  await ok({ type: "block", host: "popup-only.example" });
+  assert.equal((await ok({ type: "unblock", host: "popup-only.example" })).changed, true);
+  assert.equal((await getFocusStats()).totals.unblocksAfterCountdown, 1);
+  // Statistics failure cannot turn a committed unblock into an error.
+  await ok({ type: "block", host: "example.com" });
+  const originalSetForStats = chrome.storage.local.set;
+  chrome.storage.local.set = async payload => {
+    if (Object.hasOwn(payload,"focusStats")) throw Error("stats unavailable");
+    return originalSetForStats(payload);
+  };
+  try {
+    assert.equal((await ok({ type: "unblock", host: "example.com" }, blockedSender)).changed, true);
+    assert.deepEqual(control.state.blockedSites, ["other.example"]);
+  } finally { chrome.storage.local.set = originalSetForStats; }
   assert.equal((await getFocusStats()).totals.unblocksAfterCountdown, 1);
   await ok({ type: "clear", expectedSites: ["other.example"] });
   assert.deepEqual(control.state.blockedSites, []);
