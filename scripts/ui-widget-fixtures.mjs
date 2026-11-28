@@ -344,6 +344,7 @@ try {
     control.chrome.history.search=async()=>{throw Error("history unavailable")};
     const failedRecent=widget("recent",{maxResults:8},"failed-recent");
     await until(()=>failedRecent.root.textContent==="recentUnavailable");
+    emptyRecent.root.remove(); failedRecent.root.remove();
     control.chrome.history.search=oldHistory;
     const originalGet=control.chrome.storage.local.get;
     control.chrome.storage.local.get=async()=>{throw Error("stats unavailable")};
