@@ -251,13 +251,56 @@ export function renderRecent(
 }
 
 export function renderBrowserPinned(container: HTMLElement, context: BlockRenderContext): void {
-  const status = element("p", "empty-state", context.i18n.t("browserPinnedLoading"));
-  container.append(status);
-  void requestCache.get("browser-pinned", 15_000, browserPinnedTabs).then((items) => {
-    if (attached(status)) status.replaceWith(urlList(items, context.i18n));
-  }).catch(() => {
-    if (attached(status)) status.textContent = context.i18n.t("browserPinnedUnavailable");
+  // A pinned tab is live browser state, not a reusable provider response.
+  // Invalidate the visible list and pending queries on browser mutations.
+  let active = true;
+  let generation = 0;
+  let refreshQueued = false;
+  const load = (): void => {
+    const current = ++generation;
+    const status = element("p", "empty-state", context.i18n.t("browserPinnedLoading"));
+    container.replaceChildren(status);
+    const isCurrent = (): boolean => active && current === generation && attached(status);
+    void browserPinnedTabs().then((items) => {
+      if (isCurrent()) status.replaceWith(urlList(items, context.i18n));
+    }).catch(() => {
+      if (isCurrent()) status.textContent = context.i18n.t("browserPinnedUnavailable");
+    });
+  };
+  const invalidate = (): void => {
+    if (!active || !attached(container)) return;
+    ++generation;
+    container.replaceChildren(element("p", "empty-state", context.i18n.t("browserPinnedLoading")));
+    if (refreshQueued) return;
+    refreshQueued = true;
+    queueMicrotask(() => {
+      refreshQueued = false;
+      if (active && attached(container)) load();
+    });
+  };
+  const created = (tab: chrome.tabs.Tab): void => { if (tab.pinned) invalidate(); };
+  const updated = (_id: number, change: chrome.tabs.TabChangeInfo, tab: chrome.tabs.Tab): void => {
+    if (change.pinned !== undefined || (tab.pinned && (change.url !== undefined || change.title !== undefined))) invalidate();
+  };
+  chrome.tabs.onCreated?.addListener(created);
+  chrome.tabs.onUpdated?.addListener(updated);
+  chrome.tabs.onRemoved?.addListener(invalidate);
+  chrome.tabs.onMoved?.addListener(invalidate);
+  chrome.tabs.onAttached?.addListener(invalidate);
+  chrome.tabs.onDetached?.addListener(invalidate);
+  chrome.tabs.onReplaced?.addListener(invalidate);
+  context.registerCleanup(() => {
+    active = false;
+    ++generation;
+    chrome.tabs.onCreated?.removeListener(created);
+    chrome.tabs.onUpdated?.removeListener(updated);
+    chrome.tabs.onRemoved?.removeListener(invalidate);
+    chrome.tabs.onMoved?.removeListener(invalidate);
+    chrome.tabs.onAttached?.removeListener(invalidate);
+    chrome.tabs.onDetached?.removeListener(invalidate);
+    chrome.tabs.onReplaced?.removeListener(invalidate);
   });
+  load();
 }
 
 function resetCommandButton(
