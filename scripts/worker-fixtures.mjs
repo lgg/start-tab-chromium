@@ -36,6 +36,22 @@ try {
   const view = () => getStartPageViewSnapshot();
   assert.equal(worker.sameTasks([], []), true);
   await reject({ type: "invalid" }, /Unsupported/);
+  // The worker must refuse onboarding if either the persisted or proposed
+  // configuration disables Start Tab, even with current CAS revisions.
+  {
+    const saved = await view();
+    const disabled = {...saved.settings, startTab:{enabled:false}};
+    const original = structuredClone(control.state);
+    const command = settings => ({type:"replace-start-page-settings",settings,expectedSettingsUpdatedAt:saved.settings.updatedAt,expectedRuntimeUpdatedAt:saved.runtime.updatedAt,completeOnboarding:true});
+    await reject(command(disabled), /disabled; onboarding/);
+    assert.deepEqual(control.state,original);
+    control.state.startPageSettings=disabled;
+    try {
+      const before=structuredClone(control.state);
+      await reject(command(saved.settings), /disabled; onboarding/);
+      assert.deepEqual(control.state,before);
+    } finally { control.state.startPageSettings=original.startPageSettings; }
+  }
   await ok({ type: "block", host: "example.com" });
   assert.deepEqual(control.state.blockedSites, ["example.com"]);
   await ok({ type: "block", host: "example.com" });
