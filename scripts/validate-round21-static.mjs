@@ -47,7 +47,7 @@ assert.match(options, /importButton\.disabled = themeCapacityReached/,
   "Theme import must stop at the shared capacity");
 assert.match(options, /async function runAction<T>/,
   "Options actions must preserve typed operation results");
-assert.match(options, /successMessage: string \| \(\(result: T\) => string\)/,
+assert.match(options, /successMessage: string \| \(\(result: T\) => string \| null\)/,
   "Success messages must be able to depend on the actual operation result");
 assert.match(options, /runAction\(\(\) => syncChromeSyncBackup\(confirmDataRestore\), \(result\) => result === "cancelled" \? null : i18n\.t/,
   "Smart Sync must display uploaded/restored/unchanged instead of overwriting it with a generic status");
