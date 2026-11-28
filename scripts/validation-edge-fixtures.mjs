@@ -155,6 +155,14 @@ check(normalizeThemeBundle(null).issues.some(x=>x.messageKey==="validationInvali
     await assert.rejects(importCustomTheme(envelope),/Invalid Start Tab theme file/);
     same(control.state,before);
   }
+  // A valid envelope with an invalid image URL previously selected a
+  // fallback theme and reported success. Reject it before any transaction.
+  for(const url of ["", "not a URL", "javascript:alert(1)", "ftp://example.com/a.png"]){
+    const broken=themeBundle({...image,background:{...image.background,url}});
+    check(normalizeThemeBundle(broken).issues.some(x=>x.messageKey==="validationInvalidUrl"));
+    await assert.rejects(importCustomTheme(broken),/Invalid Start Tab theme file: theme\.background\.url/);
+    same(control.state,before);
+  }
   const exported=themeBundle(image);
   same(normalizeThemeBundle(exported).value.theme,exported.theme);
 }

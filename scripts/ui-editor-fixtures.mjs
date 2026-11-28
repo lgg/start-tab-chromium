@@ -422,6 +422,13 @@ try {
   applyTheme({ ...theme, background: { kind: "solid", color: "#112233" } }, background);
   assert.equal(background.dataset.effect, undefined);
   assert.equal(document.documentElement.style.getPropertyValue("--effect-intensity"), "");
+  // URL validation accepts embedded ASCII whitespace as the browser URL
+  // parser strips it. The CSS renderer must use the same canonical URL.
+  const pastedUrl="https://example.com/back\nground.png?signature=a%2Bb";
+  const imageTheme={...theme,background:{kind:"image",url:pastedUrl,fit:"cover",position:"center"}};
+  applyTheme(imageTheme,background);
+  assert.ok(background.style.backgroundImage.includes("https://example.com/background.png?signature=a%2Bb"),background.style.backgroundImage);
+  assert.equal(imageTheme.background.url,pastedUrl);
   // Round-trip every built-in and fractional values permitted by the schema.
   const { BUILT_IN_THEMES } = await import("../src/lib/start-page-defaults.js");
   for (const source of BUILT_IN_THEMES) {

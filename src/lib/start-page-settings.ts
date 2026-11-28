@@ -748,8 +748,10 @@ export async function selectTheme(themeId: string): Promise<void> {
 
 export async function importCustomTheme(value: unknown): Promise<{ theme: StartPageTheme; issues: ValidationIssue[] }> {
   const normalizedBundle = normalizeThemeBundle(value);
-  if (normalizedBundle.issues.some((issue) => issue.messageKey === "validationInvalidThemeFile")) {
-    throw new Error("Invalid Start Tab theme file");
+  // Unlike migration of already-stored settings, an explicit import must
+  // not silently substitute a fallback background for an invalid image.
+  if (normalizedBundle.issues.length > 0) {
+    throw new Error("Invalid Start Tab theme file: " + normalizedBundle.issues.map(issue => issue.path).join(", "));
   }
   let importedId = "";
   const result = await updateStartPageSettings((current) => {

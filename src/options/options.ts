@@ -31,6 +31,7 @@ import {
   type LocalePreference,
 } from "../lib/i18n.js";
 import { jsonContentEqual } from "../lib/json-content.js";
+import { themeImageCssUrl } from "../lib/start-page-theme-validation.js";
 import { editBlockInstance } from "../lib/block-settings-editor.js";
 import { sendMessage } from "../lib/messages.js";
 import { MAX_CUSTOM_THEMES, MAX_START_PAGE_BLOCKS } from "../lib/platform-limits.js";
@@ -586,7 +587,11 @@ function themeCard(theme: StartPageTheme): HTMLElement {
   preview.style.setProperty("--preview-accent", theme.tokens.accent);
   if (theme.background.kind === "solid") preview.style.background = theme.background.color;
   if (theme.background.kind === "gradient") preview.style.background = theme.background.css;
-  if (theme.background.kind === "image") preview.style.background = `center / cover url(${JSON.stringify(theme.background.url)})`;
+  if (theme.background.kind === "image") {
+    preview.style.backgroundImage = themeImageCssUrl(theme.background.url);
+    preview.style.backgroundPosition = "center";
+    preview.style.backgroundSize = "cover";
+  }
   if (theme.background.kind === "effect") preview.style.background = theme.background.baseColor;
   preview.append(element("span", "theme-card__preview-card", theme.name));
   const info = element("div", "theme-card__info");
