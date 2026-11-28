@@ -1,6 +1,10 @@
 import type { StartPageTheme } from "../lib/start-page-settings.js";
 
 function cssUrl(value: string): string {
+  // Stored URLs retain their original text (including signed query data).
+  // Serialize with the same URL parser used by validation before passing
+  // the destination into CSS: raw newlines are invalid in quoted CSS URLs.
+  value = new URL(value).href;
   return `url("${value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}")`;
 }
 
