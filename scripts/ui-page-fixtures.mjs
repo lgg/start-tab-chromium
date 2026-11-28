@@ -721,6 +721,28 @@ try {
         const partial=await refreshGate("ru-RU");
         assert.equal(one(partial,"h1").textContent,en.t("startTabDisabledTitle"));
         assert.equal([...partial.querySelectorAll("button")].at(-1).textContent,ru.t("openSettings"));
+        // A syntactically valid catalog may still contain bad individual
+        // entries. They must not hide healthy lower-priority translations
+        // or crash the main page's string formatter.
+        globalThis.fetch=async input=>{
+          const url=String(input);
+          if(url.endsWith("/_locales/ru/roadmap-messages.json"))return Response.json({
+            startTabDisabledTitle:{message:123}, openSettings:{message:" "},
+            appName:{message:null}, validSibling:{message:"Valid sibling"},
+          });
+          if(url.endsWith("/_locales/ru/round7-messages.json"))return Response.json({
+            startTabDisabledTitle:{message:false}, openSettings:[],
+          });
+          return localFetch(input);
+        };
+        const damaged=await loadI18nForPreference("ru");
+        assert.equal(damaged.t("startTabDisabledTitle"),en.t("startTabDisabledTitle"));
+        assert.equal(damaged.t("openSettings"),ru.t("openSettings"));
+        assert.equal(damaged.t("appName"),ru.t("appName"));
+        assert.equal(damaged.t("validSibling"),"Valid sibling");
+        const damagedGate=await refreshGate("ru-RU");
+        assert.equal(one(damagedGate,"h1").textContent,damaged.t("startTabDisabledTitle"));
+        assert.equal([...damagedGate.querySelectorAll("button")].at(-1).textContent,damaged.t("openSettings"));
         // Failure of the selected base catalog falls back to English.
         globalThis.fetch=async input=>{
           if(String(input).includes("/_locales/ru/messages.json"))throw Error("Russian base unavailable");

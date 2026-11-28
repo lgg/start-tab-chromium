@@ -84,7 +84,12 @@ async function fetchCatalog(path: string, required: boolean): Promise<LocaleCata
     if (!catalog || typeof catalog !== "object" || Array.isArray(catalog)) {
       throw new Error(`Invalid locale catalog: ${path}`);
     }
-    return catalog as LocaleCatalog;
+    // Invalid entries must not shadow a valid lower-priority translation
+    // or reach renderTemplate as a non-string.
+    const entries = Object.entries(catalog).filter(([, entry]) =>
+      entry && typeof entry === "object" && !Array.isArray(entry)
+      && typeof entry.message === "string" && entry.message.trim().length > 0);
+    return Object.fromEntries(entries) as LocaleCatalog;
   } catch (error) {
     // Optional catalog failures (including network/JSON errors) must not
     // disable the entire extension page or discard a valid base locale.
@@ -128,7 +133,7 @@ export async function loadI18nForPreference(preference: LocalePreference): Promi
   const { locale, catalog } = await mergeCatalogs(preferredLocale, defaultCatalog);
   document.documentElement.lang = locale;
   const t = (key: string, replacements: Record<string, string | number> = {}): string => {
-    const template = catalog[key]?.message ?? key;
+    const template = Object.hasOwn(catalog, key) ? catalog[key]?.message ?? key : key;
     return renderTemplate(template, replacements);
   };
   return { locale, preference, t, list: (key: string) => t(key).split("|").filter(Boolean) };
