@@ -50,6 +50,25 @@ try {
   assert.deepEqual(events.map(x=>x.id),["all","time"]);
   assert.equal(events[0].title,"All day");assert.equal(events[0].allDay,true);
   assert.equal(events[1].title,"");assert.equal(events[1].allDay,false);assert.equal(requests,1);
+
+  // Google allows offsetless and compact-offset event timestamps. Request
+  // UTC so an offsetless result never depends on the machine running Chrome.
+  globalThis.fetch=async url=>{
+    assert.equal(new URL(url).searchParams.get("timeZone"),"UTC");
+    return response({items:[
+      allDay,
+      {id:"utc",start:{dateTime:"2027-01-01T10:00:00"},end:{dateTime:"2027-01-01T11:00:00"}},
+      {id:"offset",start:{dateTime:"2027-01-01T10:00:00-0500"},end:{dateTime:"2027-01-01T11:00:00-0500"}},
+      {id:"reversed",start:{dateTime:"2027-01-01T10:00:00-0500"},end:{dateTime:"2027-01-01T12:00:00Z"}},
+      {id:"invalid",start:{dateTime:"2027-01-01T25:00:00"},end:{dateTime:"2027-01-02T11:00:00"}},
+    ]});
+  };
+  const zoned=await google.listCalendarEvents();
+  assert.deepEqual(zoned.map(e=>[e.id,e.start,e.end]),[
+    ["all","2027-01-01","2027-01-02"],
+    ["utc","2027-01-01T10:00:00Z","2027-01-01T11:00:00Z"],
+    ["offset","2027-01-01T10:00:00-05:00","2027-01-01T11:00:00-05:00"],
+  ]);
   for(const invalid of [undefined,null,[],1,{items:{}}]) {
     globalThis.fetch=async()=>invalid===undefined?new Response(null,{status:204}):response(invalid);
     await assert.rejects(google.listCalendarEvents(),/invalid event listing/);

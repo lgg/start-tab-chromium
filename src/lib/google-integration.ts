@@ -152,13 +152,22 @@ function normalizedCalendarMaxResults(maxResults: number): number {
   return Math.min(MAX_CALENDAR_RESULTS, Math.max(MIN_CALENDAR_RESULTS, Math.round(maxResults)));
 }
 
+/** Calendar.list is explicitly requested in UTC. Resolve any offsetless
+ * response in that zone, never in the computer's local time zone. Preserve
+ * explicit offsets and accept the compact offset form documented by Google. */
+function calendarResponseDateTime(value: string): string {
+  const normalized = value.replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
+  const absolute = /(?:Z|[+-]\d{2}:\d{2})$/i.test(normalized) ? normalized : normalized + "Z";
+  return validCalendarDateTime(absolute) ? absolute : "";
+}
+
 function calendarEvent(payload: CalendarEventPayload): GoogleCalendarEvent | null {
   if (payload.status === "cancelled" || typeof payload.id !== "string" || !payload.id.trim()) return null;
   const event: GoogleCalendarEvent = {
     id: payload.id,
     title: payload.summary?.trim() ?? "",
-    start: typeof payload.start?.dateTime === "string" ? payload.start.dateTime : typeof payload.start?.date === "string" ? payload.start.date : "",
-    end: typeof payload.end?.dateTime === "string" ? payload.end.dateTime : typeof payload.end?.date === "string" ? payload.end.date : "",
+    start: typeof payload.start?.dateTime === "string" ? calendarResponseDateTime(payload.start.dateTime) : typeof payload.start?.date === "string" ? payload.start.date : "",
+    end: typeof payload.end?.dateTime === "string" ? calendarResponseDateTime(payload.end.dateTime) : typeof payload.end?.date === "string" ? payload.end.date : "",
     allDay: Boolean(typeof payload.start?.date === "string" && payload.start.date
       && !(typeof payload.start.dateTime === "string" && payload.start.dateTime)),
   };
@@ -194,6 +203,7 @@ export async function listCalendarEvents(
     const url = new URL(GOOGLE_CALENDAR_EVENTS_URL.replace("{calendarId}", calendarSegment));
     url.searchParams.set("fields", "nextPageToken,items(id,summary,status,start(date,dateTime),end(date,dateTime))");
     url.searchParams.set("singleEvents", "true");
+    url.searchParams.set("timeZone", "UTC");
     url.searchParams.set("orderBy", "startTime");
     url.searchParams.set("timeMin", timeMin);
     url.searchParams.set("maxResults", String(normalizedQuery ? CALENDAR_QUERY_PAGE_SIZE : limit));
