@@ -27,8 +27,10 @@ for (const file of ["messages.json", "roadmap-messages.json", "round7-messages.j
 }
 assert.match(gate, /catalog: Object\.assign\(\{\}, \.\.\.catalogs\)[\s\S]*const nextCatalog = preferred\.baseAvailable[\s\S]*generation !== catalogLoadGeneration[\s\S]*catalog = nextCatalog/,
   "The early gate must merge every locale fragment and publish it only if the load is still current");
-assert.match(gate, /chrome\.tabs\.query\(\{ currentWindow: true \}\)\.catch\(\(\) => \[\]\)/,
-  "A Split View query failure must fail closed with the overlay still rendered");
+assert.match(gate, /candidates = await chrome\.tabs\.query\(\{ currentWindow: true \}\);[\s\S]*?catch \{[\s\S]*?if \(pageActive && generation === applyGeneration\) \{[\s\S]*?showOverlay\(text\("splitViewTitle"[\s\S]*?text\("splitViewQueryFailed"[^\n]*, \[\], true\);[\s\S]*?return;/,
+  "A Split View query failure must fail closed with a current-generation retry overlay");
+assert.doesNotMatch(gate, /chrome\.tabs\.query\(\{ currentWindow: true \}\)\.catch\(\(\) => \[\]\)/,
+  "A failed query must not masquerade as an empty list");
 assert.match(gate, /function resolvedGateLocale\(override\)[\s\S]*const preference = normalize\(override\);[\s\S]*if \(preference\) return preference;[\s\S]*navigator\.languages[\s\S]*for \(const language of languages\)[\s\S]*if \(supported\) return supported;[\s\S]*return "en";/,
   "Automatic locale selection must resolve the first supported browser language after honoring the normalized explicit preference");
 assert.match(gate, /const locale = resolvedGateLocale\(items\[LOCALE_OVERRIDE_KEY\]\)[\s\S]*Promise\.all\(catalogFiles\.map/,
@@ -39,7 +41,7 @@ assert.match(gate, /loadGateCatalog\(\)\.then\(\(current\) => current \? apply\(
 assert.match(gate, /return \{ url: value, title: title \|\| value \};/);
 assert.match(gate, /button\.textContent = tab\.title;/);
 for (const catalog of [en, ru]) {
-  for (const key of ["splitViewTitle", "splitViewText", "startTabDisabledTitle", "startTabDisabledText", "gateUntitledTab"]) {
+  for (const key of ["splitViewTitle", "splitViewText", "splitViewQueryFailed", "startTabDisabledTitle", "startTabDisabledText", "gateUntitledTab"]) {
     assert.equal(typeof catalog[key]?.message, "string", `Missing localized early-gate key: ${key}`);
     assert.ok(catalog[key].message.trim(), `Empty localized early-gate key: ${key}`);
   }

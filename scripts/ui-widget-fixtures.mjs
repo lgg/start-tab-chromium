@@ -545,7 +545,7 @@ try {
   {
     const tabs = control.chrome.tabs;
     const query = tabs.query;
-    const events = [tabs.onCreated, tabs.onUpdated, tabs.onRemoved];
+    const events = [tabs.onCreated, tabs.onUpdated, tabs.onRemoved, tabs.onMoved, tabs.onAttached, tabs.onDetached, tabs.onReplaced];
     const listenerCounts = events.map(e => e.listeners.size);
     const cleanupStart = cleanups.length;
     browserPinned.root.remove();
@@ -576,6 +576,16 @@ try {
       releaseOld([oldTab]);
       await delay(30);
       assert.equal(one(live.root, "a").href, newTab.url);
+
+      // All browser tab movement/replacement events must be wired up, not
+      // silently skipped by incomplete Chrome API doubles.
+      for (const event of [tabs.onMoved, tabs.onAttached, tabs.onDetached, tabs.onReplaced]) {
+        const before = calls;
+        event.emit(43, {});
+        assert.equal(live.root.querySelector("a"), null);
+        await until(() => live.root.querySelector("a")?.href === newTab.url);
+        assert.equal(calls, before+1);
+      }
 
       tabs.query = async () => { throw Error("pinned query failed"); };
       tabs.onUpdated.emit(43, { url: "https://changed.example/" }, newTab);

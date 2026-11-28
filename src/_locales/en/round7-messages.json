@@ -20,6 +20,9 @@
   "splitViewTitle": {
     "message": "Choose a tab for Split View"
   },
+  "splitViewQueryFailed": {
+    "message": "Could not list open tabs. Try again."
+  },
   "splitViewText": {
     "message": "Select an open tab below."
   },
