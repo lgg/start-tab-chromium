@@ -118,5 +118,8 @@
   },
   "popupBlocklistRefreshRequired": {
     "message": "Could not refresh the blocklist. Reopen the popup before another blocklist action."
+  },
+  "migrationReportUnavailable": {
+    "message": "The migration report could not be loaded."
   }
 }

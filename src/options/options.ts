@@ -717,35 +717,54 @@ function renderBlocker(): HTMLElement {
 }
 
 async function renderStatistics(): Promise<HTMLElement> {
-  const item = section("statistics", i18n.t("sectionStatistics"), i18n.t("sectionStatisticsDescription"));
-  const stats = await getFocusStats();
-  const grid = element("div", "stats-grid");
-  const values: Array<[string, string]> = [
-    [i18n.t("statsBlockHitsLabel"), String(stats.totals.blockHits)],
-    [i18n.t("statsAvoidedVisitsLabel"), String(stats.totals.avoidedVisits)],
-    [i18n.t("statsTimeSavedLabel"), String(Math.round(stats.totals.estimatedMinutesSaved))],
-    [i18n.t("statsFocusSessionsLabel"), String(stats.totals.focusSessionsCompleted)],
-    [i18n.t("statsInterruptedLabel"), String(stats.totals.focusSessionsInterrupted)],
-    [i18n.t("statsFocusMinutesLabel"), String(Math.round(stats.totals.focusTimeMs / 60000))],
-    [i18n.t("statsUnblocksLabel"), String(stats.totals.unblocksAfterCountdown)],
-  ];
-  grid.append(...values.map(([label, value]) => {
-    const card = element("div", "stat-card");
-    card.append(element("span", "stat-card__value", value), element("span", "stat-card__label", label));
-    return card;
-  }));
-  const reset = button(i18n.t("resetStatistics"), "button button--danger");
-  reset.addEventListener("click", () => {
-    if (!window.confirm(i18n.t("resetStatisticsConfirm"))) return;
-    void runAction(resetFocusStats, i18n.t("statisticsReset"));
-  });
-  const migration = await getStartPageMigrationReport();
+  const strings = i18n;
+  const item = section("statistics", strings.t("sectionStatistics"), strings.t("sectionStatisticsDescription"));
+  // These independent reads must not hide each other's results. Their
+  // failures belong to this section, not the foreground action status.
+  const [statsResult, migrationResult] = await Promise.allSettled([
+    getFocusStats(), getStartPageMigrationReport(),
+  ]);
+  if (statsResult.status === "fulfilled") {
+    const stats = statsResult.value;
+    const grid = element("div", "stats-grid");
+    const values: Array<[string, string]> = [
+      [strings.t("statsBlockHitsLabel"), String(stats.totals.blockHits)],
+      [strings.t("statsAvoidedVisitsLabel"), String(stats.totals.avoidedVisits)],
+      [strings.t("statsTimeSavedLabel"), String(Math.round(stats.totals.estimatedMinutesSaved))],
+      [strings.t("statsFocusSessionsLabel"), String(stats.totals.focusSessionsCompleted)],
+      [strings.t("statsInterruptedLabel"), String(stats.totals.focusSessionsInterrupted)],
+      [strings.t("statsFocusMinutesLabel"), String(Math.round(stats.totals.focusTimeMs / 60000))],
+      [strings.t("statsUnblocksLabel"), String(stats.totals.unblocksAfterCountdown)],
+    ];
+    grid.append(...values.map(([label, value]) => {
+      const card = element("div", "stat-card");
+      card.append(element("span", "stat-card__value", value), element("span", "stat-card__label", label));
+      return card;
+    }));
+    const reset = button(strings.t("resetStatistics"), "button button--danger");
+    reset.addEventListener("click", () => {
+      if (!window.confirm(strings.t("resetStatisticsConfirm"))) return;
+      void runAction(resetFocusStats, strings.t("statisticsReset"));
+    });
+    item.body.append(grid, actionRow(reset));
+  } else {
+    const unavailable = element("p", "empty-state", strings.t("statisticsUnavailable"));
+    unavailable.title = actionFailureText(statsResult.reason);
+    item.body.append(unavailable);
+  }
   const migrationCard = element("div", "option-card");
-  migrationCard.append(element("h3", "option-card__title", i18n.t("migrationStatus")));
-  migrationCard.append(element("p", "option-card__description", migration
-    ? i18n.t("migrationSummary", { from: migration.fromVersion, to: migration.toVersion, blocks: migration.migratedBlocks, skipped: migration.skippedBlocks })
-    : i18n.t("migrationNotRequired")));
-  item.body.append(grid, actionRow(reset), migrationCard);
+  migrationCard.append(element("h3", "option-card__title", strings.t("migrationStatus")));
+  if (migrationResult.status === "fulfilled") {
+    const migration = migrationResult.value;
+    migrationCard.append(element("p", "option-card__description", migration
+      ? strings.t("migrationSummary", { from: migration.fromVersion, to: migration.toVersion, blocks: migration.migratedBlocks, skipped: migration.skippedBlocks })
+      : strings.t("migrationNotRequired")));
+  } else {
+    const unavailable = element("p", "empty-state", strings.t("migrationReportUnavailable"));
+    unavailable.title = actionFailureText(migrationResult.reason);
+    migrationCard.append(unavailable);
+  }
+  item.body.append(migrationCard);
   return item.root;
 }
 
@@ -790,10 +809,11 @@ function render(preserveGeneral = false): void {
   }).catch((error: unknown) => {
     if (generation !== renderGeneration) return;
     const failed = section("statistics", i18n.t("sectionStatistics"), i18n.t("sectionStatisticsDescription"));
-    failed.body.append(element("p", "empty-state", i18n.t("statisticsUnavailable")));
+    const unavailable = element("p", "empty-state", i18n.t("statisticsUnavailable"));
+    unavailable.title = actionFailureText(error);
+    failed.body.append(unavailable);
     sections.append(failed.root);
     restoreDeferredSectionAnchor(failed.root);
-    reportUiError(error);
   });
   } finally {
     rendering = false;
