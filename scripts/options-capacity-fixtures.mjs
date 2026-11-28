@@ -52,16 +52,38 @@ try{
   await import("../src/options/options.ts?case=statistics-recovery");
   await until(()=>document.querySelector("#statistics .empty-state"));
   assert.equal(one(document,"#statistics .empty-state").textContent,t.t("statisticsUnavailable"));
-  assert.equal(one(document,"#status").textContent,"statistics bridge unavailable");
+  assert.equal(one(document,"#statistics .empty-state").title,"statistics bridge unavailable");
+  assert.equal(one(document,"#status").textContent,"");
+  assert.ok(one(document,"#statistics").textContent.includes(t.t("migrationNotRequired")));
   assert.equal(scrolls,1);
   assert.equal(button(one(document,"#backup"),t.t("syncNow")).disabled,false);
-  recovery.chrome.storage.local.get=get;
+  // An action has committed successfully, even if its deferred statistics
+  // refresh fails. The local fallback must not replace the success status.
+  button(one(document,"#backup"),t.t("syncNow")).click();
+  await until(()=>scrolls===2&&document.body.getAttribute("aria-busy")!=="true");
+  assert.equal(one(document,"#status").textContent,t.t("syncUploaded"));
+  assert.equal(one(document,"#status").dataset.error,"false");
+  assert.equal(one(document,"#statistics .empty-state").title,"statistics bridge unavailable");
+
   const {START_PAGE_MIGRATION_REPORT_KEY}=await import("../src/lib/start-page-settings.js");
   await recovery.chrome.storage.local.set({[START_PAGE_MIGRATION_REPORT_KEY]:{fromVersion:1,toVersion:3,migratedBlocks:4,skippedBlocks:2,issues:[]}});
+  recovery.chrome.storage.local.get=async keys=>{
+    if(keys===START_PAGE_MIGRATION_REPORT_KEY)throw Error("migration report unavailable");
+    return get(keys);
+  };
   button(one(document,"#backup"),t.t("syncNow")).click();
-  await until(()=>document.querySelector("#statistics .stats-grid"));
+  await until(()=>scrolls===3&&document.body.getAttribute("aria-busy")!=="true");
+  assert.ok(one(document,"#statistics .stats-grid"));
+  assert.equal(button(one(document,"#statistics"),t.t("resetStatistics")).disabled,false);
+  assert.equal(one(document,"#statistics .empty-state").textContent,t.t("migrationReportUnavailable"));
+  assert.equal(one(document,"#status").textContent,t.t("syncUnchanged"));
+  assert.equal(one(document,"#status").dataset.error,"false");
+
+  recovery.chrome.storage.local.get=get;
+  button(one(document,"#backup"),t.t("syncNow")).click();
+  await until(()=>scrolls===4&&document.body.getAttribute("aria-busy")!=="true");
   assert.ok(one(document,"#statistics").textContent.includes(t.t("migrationSummary",{from:1,to:3,blocks:4,skipped:2})));
-  assert.equal(scrolls,2);
+  assert.equal(document.querySelector("#statistics .empty-state"),null);
 }finally{recovery.chrome.storage.local.get=get;recoveryFetch();recoveryDom.window.close()}
 
 

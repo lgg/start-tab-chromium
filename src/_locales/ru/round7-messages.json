@@ -118,5 +118,8 @@
   },
   "popupBlocklistRefreshRequired": {
     "message": "Не удалось обновить список блокировки. Откройте меню заново перед следующим действием."
+  },
+  "migrationReportUnavailable": {
+    "message": "Не удалось загрузить отчёт о миграции."
   }
 }
