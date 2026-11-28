@@ -273,6 +273,61 @@ await local.remove(native.NATIVE_NEW_TAB_BYPASS_KEY);
   }finally{Date.now=originalNow;local.get=originalGet;tabs.create=originalCreate;tabs.get=originalTabGet;tabs.update=originalTabUpdate;tabs.remove=originalTabRemove}
 }
 
+// The clock can cross the expiry boundary between two synchronous reads.
+// The consumer must use the timestamp at which it actually checked the lease.
+{
+  const originalNow=Date.now;
+  const key=native.NATIVE_NEW_TAB_BYPASS_KEY;
+  let now=100000;
+  try {
+    await local.set({[key]:{tabId:73,expiresAt:100001}});
+    Date.now=()=>now++;
+    assert.equal(await native.consumeNativeNewTabBypass(73),true);
+    assert.deepEqual(control.state[key],{tabId:73,expiresAt:100001,consumedAt:100000});
+    assert.equal(await native.consumeNativeNewTabBypass(73),false);
+    assert.equal(control.state[key],undefined);
+
+    // An invalid existing acknowledgement must not be treated as valid.
+    await local.set({[key]:{tabId:73,expiresAt:200000,consumedAt:200001}});
+    const consumedAt=now;
+    assert.equal(await native.consumeNativeNewTabBypass(73),true);
+    assert.equal(control.state[key].consumedAt,consumedAt);
+  } finally {
+    Date.now=originalNow;
+    await local.remove(key);
+  }
+}
+
+// An acknowledgement at or beyond the deadline is not successful
+// consumption, even if it is returned by an asynchronous storage read.
+{
+  const originalNow=Date.now, originalGet=local.get;
+  const originalCreate=tabs.create, originalTabGet=tabs.get, originalTabUpdate=tabs.update, originalTabRemove=tabs.remove;
+  const key=native.NATIVE_NEW_TAB_BYPASS_KEY;
+  let now=100000,attempts=0;
+  const removed=[];
+  Date.now=()=>now;
+  tabs.create=async options=>{control.tab={id:73,...options};return {...control.tab}};
+  tabs.get=async()=>({...control.tab});
+  tabs.update=async(id,options)=>{attempts++;control.tab={id,...options};return {...control.tab}};
+  tabs.remove=async id=>{removed.push(id)};
+  local.get=async keys=>{
+    const result=await originalGet(keys);
+    if(keys===key&&result[keys]?.tabId===73){
+      const grant=result[keys];
+      now=grant.expiresAt;
+      return {...result,[key]:{...grant,consumedAt:grant.expiresAt}};
+    }
+    return result;
+  };
+  try{
+    await assert.rejects(native.openNativeNewTab({consumptionTimeoutMs:10,pollIntervalMs:1}),/rejected every native/);
+    assert.equal(attempts,3);
+    assert.deepEqual(removed,[73]);
+    assert.equal(control.state[key],undefined);
+  }finally{Date.now=originalNow;local.get=originalGet;tabs.create=originalCreate;tabs.get=originalTabGet;tabs.update=originalTabUpdate;tabs.remove=originalTabRemove}
+}
+
 const {installDom}=await import("./ui-fixture-dom.mjs");
 const dom=await installDom();
 try{

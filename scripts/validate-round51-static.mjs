@@ -22,7 +22,7 @@ assert.match(nativeTab, /async function waitForNativeBypassConsumption\([\s\S]*t
   "The poller must use the grant's absolute expiry instead of starting a second timeout after navigation");
 assert.match(nativeTab, /value\?\.tabId !== tabId \|\| value\.expiresAt !== expiresAt\) return false/,
   "Missing, foreign, or replaced bypass ownership must fail closed");
-assert.match(nativeTab, /typeof value\.consumedAt === "number"\) return true/,
+assert.match(nativeTab, /validConsumptionTime\(value\.consumedAt, expiresAt\)\) return true/,
   "Only explicit consumption of the exact grant may acknowledge native-new-tab success");
 assert.match(nativeTab,
   /async function writeOwnedBypass\(tabId: number, timeoutMs: number\): Promise<number> \{[\s\S]*withStorageLock\(NATIVE_NEW_TAB_BYPASS_LOCK[\s\S]*const expiresAt = Date\.now\(\) \+ timeoutMs;[\s\S]*return expiresAt/,
@@ -38,7 +38,7 @@ const consumeSource = nativeTab.slice(consumeIndex);
 assert.match(consumeSource, /return withStorageLock\(NATIVE_NEW_TAB_BYPASS_LOCK/,
   "Bypass consumption must serialize its read, expiry cleanup, and consumedAt write with retries");
 assert.match(consumeSource,
-  /if \(value\.expiresAt <= Date\.now\(\)\) \{[\s\S]*await chrome\.storage\.local\.remove\(NATIVE_NEW_TAB_BYPASS_KEY\);[\s\S]*return false;/,
+  /if \(!Number\.isFinite\(value\.expiresAt\) \|\| value\.expiresAt <= now\) \{[\s\S]*await chrome\.storage\.local\.remove\(NATIVE_NEW_TAB_BYPASS_KEY\);[\s\S]*return false;/,
   "Expired leases must be removed while the native-bypass lock still protects the stale read");
 
 assert.match(gate, /function resolvedGateLocale\(override\)/);
