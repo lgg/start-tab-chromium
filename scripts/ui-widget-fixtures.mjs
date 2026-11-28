@@ -489,6 +489,57 @@ try {
       assert.equal(one(result.root,"a").href,"https://history-without-title.example/");
     }finally{control.chrome.history.search=search}
   }
+  // Deleting history while the Start Tab is open must immediately hide
+  // removed links, even if an earlier search finishes after the deletion.
+  {
+    const history=control.chrome.history;
+    const search=history.search;
+    const listenersBefore=history.onVisitRemoved.listeners.size;
+    const cleanupStart=cleanups.length;
+    // Clean up earlier standalone fixture widgets, which unlike the real
+    // singleton history widget are all mounted simultaneously.
+    const previousRoots=[...document.querySelectorAll(".url-list")].map(el=>el.parentElement);
+    for(const root of previousRoots)root.remove();
+    let calls=0;
+    let releaseOld;
+    try{
+      history.search=async()=>[{title:"Private history",url:"https://deleted.example/"}];
+      const live=widget("recent",{maxResults:21},"history-removal");
+      await until(()=>live.root.querySelector("a"));
+      assert.match(live.root.textContent,/Private history/);
+      assert.equal(history.onVisitRemoved.listeners.size,listenersBefore+1);
+
+      history.search=async()=>{calls++;return new Promise(resolve=>{releaseOld=resolve;});};
+      history.onVisitRemoved.emit({allHistory:false,urls:["https://deleted.example/"]});
+      assert.equal(live.root.querySelector("a"),null);
+      await until(()=>releaseOld);
+      // Another deletion arrives while the previous refresh is pending.
+      history.search=async()=>[];
+      history.onVisitRemoved.emit({allHistory:true,urls:[]});
+      await until(()=>live.root.textContent==="emptyList");
+      releaseOld([{title:"Stale private history",url:"https://deleted.example/"}]);
+      await delay(30);
+      assert.equal(live.root.textContent,"emptyList");
+      assert.equal(live.root.querySelector("a"),null);
+
+      history.search=async()=>[{title:"Second private visit",url:"https://deleted-again.example/"}];
+      history.onVisitRemoved.emit({allHistory:false,urls:["https://other.example/"]});
+      await until(()=>live.root.querySelector("a"));
+      history.search=async()=>{throw Error("history read failed");};
+      history.onVisitRemoved.emit({allHistory:true});
+      assert.equal(live.root.querySelector("a"),null);
+      await until(()=>live.root.textContent==="recentUnavailable");
+
+      for(const cleanup of cleanups.splice(cleanupStart))cleanup();
+      assert.equal(history.onVisitRemoved.listeners.size,listenersBefore);
+      live.root.remove();
+      history.search=async()=>[];
+      const reopened=widget("recent",{maxResults:21},"history-removal");
+      await until(()=>reopened.root.textContent==="emptyList");
+      assert.equal(reopened.root.querySelector("a"),null,"remount must never recover deleted cached history");
+      assert.ok(calls>=1);
+    }finally{history.search=search;}
+  }
   console.log("Widget failure and boundary matrix passed");
   console.log("Widgets: dates, search, hidden drafts, IP, pagination, notes, tasks, clocks, history, pinned, stats, calendar, weather and commands");
 } finally {
