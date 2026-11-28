@@ -56,8 +56,8 @@ assert.match(gate, /catalogFiles[\s\S]*messages\.json[\s\S]*round7-messages\.jso
   "The early gate must load every catalog that can contain gate strings");
 assert.doesNotMatch(gate, /openerNewTab/,
   "A generic opener relationship must not be treated as proof of Split View");
-assert.match(gate, /opener\?\.url[\s\S]*opener\?\.pendingUrl[\s\S]*opener\?\.title/,
-  "Opener-based Split View detection must require an explicit marker");
+assert.match(gate, /const openerUrl = opener\?\.pendingUrl \|\| opener\?\.url;[\s\S]*openerMarked = !isWebAddress\(openerUrl\)[\s\S]*\[openerUrl, opener\?\.title\]\.some\(containsSplitMarker\)/,
+  "Opener-based Split View detection must require an explicit marker outside ordinary web navigation");
 assert.match(gate, /function trapFocus/);
 assert.match(gate, /previousFocus\?\.isConnected/);
 assert.match(gate, /ONBOARDING_ID/);
