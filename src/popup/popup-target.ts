@@ -47,10 +47,11 @@ export async function readStablePopupTarget(
   return { ...current, blockedHost };
 }
 
-/** A committed block action remains valid, but its optional reload must not
- * interrupt another navigation or reload a different host. */
+/** Blocking is host-scoped, but reloading is document-scoped. A new
+ * destination on the same host is still a different navigation and must
+ * not be interrupted by a delayed acknowledgement. */
 export function mayReloadPopupTarget(target: PopupTarget, tab: PopupTab | undefined): boolean {
   if (!tab || tab.id !== target.tabId || !tab.url) return false;
   if (tab.pendingUrl && tab.pendingUrl !== tab.url) return false;
-  return hostFromUrl(tab.url) === target.host;
+  return tab.url === target.url && hostFromUrl(tab.url) === target.host;
 }
