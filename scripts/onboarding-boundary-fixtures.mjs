@@ -119,7 +119,7 @@ try{
       let reads=0,writes=0;
       store.get=async keys=>{
         const snapshot=await get(keys);
-        if(keys==="startPageOnboarding"&&++reads===1)control.state.startPageOnboarding={onboarded:true};
+        if((keys==="startPageOnboarding"||Array.isArray(keys)&&keys.includes("startPageOnboarding"))&&++reads===1)control.state.startPageOnboarding={onboarded:true};
         return snapshot;
       };
       store.set=async items=>{
@@ -132,6 +132,34 @@ try{
       assert.equal(writes,0);
       assert.equal(control.messages.length,0);
       assert.deepEqual(control.state.startPageOnboarding,{onboarded:true});
+      window.dispatchEvent(new window.Event("pagehide"));
+    }finally{dom.window.close()}
+  }
+
+  // The persisted setting can be disabled before the gate processes the
+  // storage notification. Skip must not consume the onboarding state.
+  {
+    const dom=await installDom("newtab/newtab.html","https://extension.example/newtab.html");
+    const s=createDefaultStartPageSettings(100);
+    const control=installChrome({startPageSettings:s,startPageRuntimeState:normalizeRuntimeState(undefined,s),localeOverride:"en",startPageOnboarding:{onboarded:false}});
+    try{
+      const t=await loadI18n();
+      await import("../src/newtab/newtab.ts?disabled-skip="+(++serial));
+      const modal=()=>document.getElementById("onboarding");
+      await until(()=>modal());
+      const store=control.chrome.storage.local,get=store.get;
+      store.get=async keys=>{
+        const snapshot=await get(keys);
+        if(keys==="startPageOnboarding"){
+          control.state.startPageSettings={...control.state.startPageSettings,startTab:{enabled:false},updatedAt:200};
+        }
+        return snapshot;
+      };
+      button(modal(),t.t("onboardingSkip")).click();
+      await until(()=>!modal());
+      assert.deepEqual(control.state.startPageOnboarding,{onboarded:false});
+      assert.equal(control.state.startPageSettings.startTab.enabled,false);
+      assert.equal(control.messages.length,0);
       window.dispatchEvent(new window.Event("pagehide"));
     }finally{dom.window.close()}
   }

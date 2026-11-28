@@ -669,6 +669,9 @@ export async function replaceStartPageSettingsWithRuntime(
       throw new Error("Start Tab runtime data was created by a newer extension version and cannot be modified safely");
     }
     const previousSettings = normalizeStartPageSettings(items[START_PAGE_SETTINGS_KEY]);
+    if (completeOnboarding && (!previousSettings.startTab.enabled || !prepared.settings.startTab.enabled)) {
+      throw new Error("Start Tab is disabled; onboarding cannot be completed");
+    }
     const previousRuntime = normalizeRuntimeState(
       items[START_PAGE_RUNTIME_KEY],
       previousSettings,

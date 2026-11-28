@@ -15,6 +15,9 @@ import {
 } from "../lib/start-page-runtime.js";
 import {
   LAYOUT_PRESETS,
+  START_PAGE_SETTINGS_KEY,
+  isFutureStartPageSchema,
+  normalizeStartPageSettings,
   blockTitleKey,
   blockUsesDefaultTitle,
   getTheme,
@@ -455,11 +458,23 @@ async function finishOnboarding(presetId: LayoutPresetId | null, owner: HTMLElem
         });
       } else {
         await withStorageLock("data-write", async () => {
-          const items = await chrome.storage.local.get(START_PAGE_ONBOARDING_KEY);
+          const items = await chrome.storage.local.get([START_PAGE_ONBOARDING_KEY, START_PAGE_SETTINGS_KEY]);
           if (!isCurrent() || isStartPageOnboardingComplete(items[START_PAGE_ONBOARDING_KEY])) return;
+          const rawSettings = items[START_PAGE_SETTINGS_KEY];
+          // The gate's DOM update is asynchronous. Its absence is not proof
+          // that another tab has not already disabled the start page.
+          if (!normalizeStartPageSettings(rawSettings).startTab.enabled) return;
+          if (isFutureStartPageSchema(rawSettings)) {
+            throw new Error("Start Tab settings were created by a newer extension version and onboarding cannot be completed safely");
+          }
           await commitStorageMutationWithRevision(
             [START_PAGE_ONBOARDING_KEY],
             () => chrome.storage.local.set({ [START_PAGE_ONBOARDING_KEY]: { onboarded: true } }),
+            Date.now(),
+            { expectedStorage: {
+              [START_PAGE_SETTINGS_KEY]: rawSettings,
+              [START_PAGE_ONBOARDING_KEY]: items[START_PAGE_ONBOARDING_KEY],
+            } },
           );
         });
       }
