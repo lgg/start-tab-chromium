@@ -21,8 +21,8 @@ const manualQa = read("docs/manual-qa-round41.md");
 const audit = read("docs/audit-2026-08-01-round-41.md");
 
 assert.match(nativeTab, /consumedAt\?: number/);
-assert.match(nativeTab, /typeof value\.consumedAt === "number"/);
-assert.match(nativeTab, /\[NATIVE_NEW_TAB_BYPASS_KEY\]: \{ \.\.\.value, consumedAt: Date\.now\(\) \}/);
+assert.match(nativeTab, /validConsumptionTime\(value\.consumedAt, expiresAt\)/);
+assert.match(nativeTab, /const now = Date\.now\(\);[\s\S]*value\.expiresAt <= now[\s\S]*\[NATIVE_NEW_TAB_BYPASS_KEY\]: \{ \.\.\.value, consumedAt: now \}/);
 assert.doesNotMatch(nativeTab, /if \(value\.tabId === tabId\) await chrome\.storage\.local\.remove/,
   "A consumed native-tab bypass must remain valid for repeated URL events during its lease");
 
