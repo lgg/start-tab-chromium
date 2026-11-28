@@ -24,13 +24,16 @@ const MAX_PREVIOUS_BYPASSES = 256;
 
 interface ConsumedBypass { tabId: number; expiresAt: number; consumedAt: number }
 
+function validConsumptionTime(value: unknown, expiresAt: number): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value < expiresAt;
+}
+
 function isLiveConsumedBypass(value: unknown, now: number): value is ConsumedBypass {
   if (!value || typeof value !== "object") return false;
   const grant = value as Partial<ConsumedBypass>;
   return typeof grant.tabId === "number" && Number.isSafeInteger(grant.tabId) && grant.tabId >= 0
     && typeof grant.expiresAt === "number" && Number.isFinite(grant.expiresAt) && grant.expiresAt > now
-    && typeof grant.consumedAt === "number" && Number.isFinite(grant.consumedAt)
-    && grant.consumedAt < grant.expiresAt;
+    && validConsumptionTime(grant.consumedAt, grant.expiresAt);
 }
 
 function livePreviousBypasses(value: unknown, now: number): ConsumedBypass[] {
@@ -46,7 +49,7 @@ async function waitForNativeBypassConsumption(
     const items = await chrome.storage.local.get(NATIVE_NEW_TAB_BYPASS_KEY);
     const value = items[NATIVE_NEW_TAB_BYPASS_KEY] as NativeNewTabBypass | undefined;
     if (value?.tabId !== tabId || value.expiresAt !== expiresAt) return false;
-    if (typeof value.consumedAt === "number") return true;
+    if (validConsumptionTime(value.consumedAt, expiresAt)) return true;
     const remainingMs = expiresAt - Date.now();
     if (remainingMs <= 0) return false;
     await new Promise((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, remainingMs)));
@@ -156,15 +159,18 @@ export async function consumeNativeNewTabBypass(tabId: number): Promise<boolean>
   return withStorageLock(NATIVE_NEW_TAB_BYPASS_LOCK, async () => {
     const items = await chrome.storage.local.get(NATIVE_NEW_TAB_BYPASS_KEY);
     const value = items[NATIVE_NEW_TAB_BYPASS_KEY] as NativeNewTabBypass | undefined;
+    // Take one time sample for both the lease check and its acknowledgement.
+    // A second clock read can cross the deadline and publish an invalid grant.
+    const now = Date.now();
     if (typeof value?.tabId === "number" && typeof value.expiresAt === "number") {
-      if (value.expiresAt <= Date.now()) {
+      if (!Number.isFinite(value.expiresAt) || value.expiresAt <= now) {
         // Expired cleanup shares the lock with publication of newer grants.
         await chrome.storage.local.remove(NATIVE_NEW_TAB_BYPASS_KEY);
         if (value.tabId === tabId) return false;
       } else if (value.tabId === tabId) {
-        if (typeof value.consumedAt !== "number") {
+        if (!validConsumptionTime(value.consumedAt, value.expiresAt)) {
           await chrome.storage.local.set({
-            [NATIVE_NEW_TAB_BYPASS_KEY]: { ...value, consumedAt: Date.now() },
+            [NATIVE_NEW_TAB_BYPASS_KEY]: { ...value, consumedAt: now },
           });
         }
         return true;
