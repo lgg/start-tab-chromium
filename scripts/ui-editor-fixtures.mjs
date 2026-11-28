@@ -184,8 +184,27 @@ try {
   value(field(staleDialog,"instanceName"),"Stale dialog");
   key(stableCard(),"ArrowDown");
   submit(one(staleDialog,"form"));
-  await until(()=>stableErrors.some(e=>/settings changed/.test(e.message)));
+  await until(()=>!one(staleDialog,".form-error").hidden);
+  assert.match(one(staleDialog,".form-error").textContent,/settings changed/);
+  assert.equal(staleDialog.open,true);
+  assert.equal(field(staleDialog,"instanceName").value,"Stale dialog");
   assert.notEqual(stable.settings.layout.blocks.find(b=>b.id===note.id).title,"Stale dialog");
+  button(staleDialog,"cancel").click();
+  await until(()=>!staleDialog.isConnected);
+  // An actual external revision is also rejected before closing the modal.
+  target=stableCard();button(target,"editBlock").click();
+  const externalDialog=one(document,"dialog[open]");
+  value(field(externalDialog,"instanceName"),"External conflict draft");
+  const newer=cloneSettings(external);newer.updatedAt=501;newer.layout.gap=20;
+  stable.replaceSavedSettings(newer);
+  submit(one(externalDialog,"form"));
+  await until(()=>!one(externalDialog,".form-error").hidden);
+  assert.match(one(externalDialog,".form-error").textContent,/settings changed/);
+  assert.equal(externalDialog.open,true);
+  assert.equal(field(externalDialog,"instanceName").value,"External conflict draft");
+  assert.notEqual(stable.settings.layout.blocks.find(b=>b.id===note.id).title,"External conflict draft");
+  button(externalDialog,"cancel").click();
+  await until(()=>!externalDialog.isConnected);
   stable.cancel();
   stable.enter();
   value(one(stableToolbar,'[aria-label="layoutZone"]'),"full","change");
