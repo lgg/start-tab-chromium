@@ -46,7 +46,7 @@ assert.match(blocked, /const active = host \? await blockedHostIsActive\(\) : fa
   "Stale blocked pages must leave without arming actions, but disposed pages must not query or redirect");
 assert.match(blocked, /if \(!await blockedHostIsActive\(\) \|\| !pageActive\) return "unchanged"/,
   "Countdown completion must recheck the current blocklist");
-assert.match(worker, /const changed = await unblockHost\(message\.host, assertCurrent\);[\s\S]*?if \(changed && fromBlockedPage\) \{[\s\S]*?recordUnblockAfterCountdown\(message\.host\)/,
+assert.match(worker, /const changed = await unblockHost\(message\.host, assertCurrent, message\.popupTargetHost\);[\s\S]*?if \(changed && fromBlockedPage\) \{[\s\S]*?recordUnblockAfterCountdown\(message\.host\)/,
   "Countdown statistics must be conditional on a committed interstitial removal");
 assert.doesNotMatch(blocked, /type: "record-unblock"/, "The page must not issue a second statistics mutation");
 

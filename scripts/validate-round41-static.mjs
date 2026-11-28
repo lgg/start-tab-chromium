@@ -120,6 +120,6 @@ assert.match(registry103, /if \(!await isCurrent\(\)\) return null;\s*const dest
 assert.match(worker, /chrome\.webNavigation\.getFrame\(\{ tabId: id, frameId: 0 \}\)/);
 assert.match(registry103, /frame\?\.documentId === sender\.documentId/);
 
-assert.match(worker, /case "unblock": \{[\s\S]*?isCurrentBlockedPageSender\([\s\S]*?await unblockHost\(message\.host, assertCurrent\)/);
+assert.match(worker, /case "unblock": \{[\s\S]*?isCurrentBlockedPageSender\([\s\S]*?await unblockHost\(message\.host, assertCurrent, message\.popupTargetHost\)/);
 assert.match(blocklist90, /async function applyBlocklistMutation\([\s\S]*?const originalRules = await readDynamicRulesSnapshot\(\);[\s\S]*?if \(assertCurrent\) await assertCurrent\(\);\s*const requested = transform\(/);
 assert.match(blocklist90, /export async function unblockHost[\s\S]*?return runMutation\(async \(\) => \{[\s\S]*?\}, assertCurrent\);/);
