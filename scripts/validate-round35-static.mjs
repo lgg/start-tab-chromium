@@ -66,7 +66,7 @@ assert.match(settings, /saveNewBlockInstance[\s\S]*updateStartPageSettings/,
 assert.match(settings, /saveNewBlockInstance[\s\S]*\.\.\.nextGridPosition\(current\)/,
   "A block confirmed after another layout change must recompute its free grid row from the latest settings");
 assert.match(options,
-  /createBlockInstanceDraft\(settings,[\s\S]*editBlockInstance\(created, i18n\)[\s\S]*if \(!configured\) return;[\s\S]*saveNewBlockInstance\(configured\)/,
+  /createBlockInstanceDraft\(settings,[\s\S]*editBlockInstance\(created, i18n, \(configured\) =>[\s\S]*persistEditor\(\(\) => saveNewBlockInstance\(configured\)/,
   "Cancelling the Add Block dialog must not persist a block");
 for (const functionName of [
   "updateBlockInstance", "duplicateBlockInstance", "setLayoutMode", "setLayoutZone",
