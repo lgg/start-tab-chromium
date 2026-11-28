@@ -31,7 +31,7 @@ assert.match(focus, /startedSessions[\s\S]*focusSessionsStarted/,
   "Focus-stat transition patches must count automatically started work sessions");
 assert.match(runtime, /if \(!result\.completed \|\| \(!result\.startedWork && result\.focusTimeMs <= 0\)\) return/,
   "Non-Pomodoro completion must not touch or reject an unrelated future focus-statistics schema");
-assert.match(worker, /if \(!outcome \|\| \(!outcome\.startedWork && outcome\.interruptedMs <= 0\)\) return/,
+assert.match(worker, /if \(!outcome \|\| typeof outcome === "string" \|\| \(!outcome\.startedWork && outcome\.interruptedMs <= 0\)\) return/,
   "Timer and Stopwatch actions must not touch unrelated focus statistics");
 
 console.log("Round 17 static validation passed");
