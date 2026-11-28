@@ -22,7 +22,8 @@ import {
   resetFocusStats,
 } from "./lib/focus-stats.js";
 import { ownValue } from "./lib/dictionary.js";
-import { localePreferenceFromStored, LOCALE_OVERRIDE_KEY } from "./lib/i18n.js";
+import { getLocalePreference } from "./lib/i18n.js";
+import { withStorageLock } from "./lib/storage-lock.js";
 import { jsonContentEqual } from "./lib/json-content.js";
 import { MAX_NOTE_LENGTH } from "./lib/platform-limits.js";
 import { runIndependentEffects } from "./lib/independent-effects.js";
@@ -381,11 +382,12 @@ async function finishClockCompletion(instanceId: string, token: string): Promise
   if (!result.notify) return;
   const messageKey = block.type === "pomodoro" ? "pomodoroDone" : "timerDone";
   try {
+    const translate = await workerTranslator();
     await chrome.notifications.create(`start-tab-clock-${instanceId}-${token}`, {
       type: "basic",
       iconUrl: "icons/icon.128.png",
-      title: blockUsesDefaultTitle(block) ? await workerMessage(blockTitleKey(block.type)) : block.title,
-      message: await workerMessage(messageKey),
+      title: blockUsesDefaultTitle(block) ? translate(blockTitleKey(block.type)) : block.title,
+      message: translate(messageKey),
     });
   } catch (error) {
     // Runtime, statistics and next-phase alarms have already committed.
@@ -396,18 +398,22 @@ async function finishClockCompletion(instanceId: string, token: string): Promise
   }
 }
 
-async function workerMessage(key: string): Promise<string> {
-  const nativeMessage = chrome.i18n.getMessage(key);
+async function workerTranslator(): Promise<(key: string) => string> {
+  const fallback = (key: string): string => chrome.i18n.getMessage(key) || key;
   try {
-    const items = await chrome.storage.local.get(LOCALE_OVERRIDE_KEY);
-    const override = localePreferenceFromStored(items[LOCALE_OVERRIDE_KEY]);
-    if (override === "auto") return nativeMessage || key;
+    // One committed preference and catalog for the entire notification.
+    // A locale change between title and message must not mix languages.
+    const override = await withStorageLock("data-write", getLocalePreference);
+    if (override === "auto") return fallback;
     const response = await fetch(chrome.runtime.getURL(`_locales/${override}/messages.json`));
-    if (!response.ok) return nativeMessage || key;
-    const catalog = await response.json() as LocaleCatalog;
-    return catalog[key]?.message || nativeMessage || key;
+    if (!response.ok) return fallback;
+    const catalog = await response.json() as LocaleCatalog | null;
+    return (key: string): string => {
+      const localized = catalog?.[key]?.message;
+      return typeof localized === "string" && localized ? localized : fallback(key);
+    };
   } catch {
-    return nativeMessage || key;
+    return fallback;
   }
 }
 
