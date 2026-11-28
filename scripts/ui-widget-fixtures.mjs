@@ -495,6 +495,7 @@ try {
     const history=control.chrome.history;
     const search=history.search;
     const listenersBefore=history.onVisitRemoved.listeners.size;
+    const visitedBefore=history.onVisited.listeners.size;
     const cleanupStart=cleanups.length;
     // Clean up earlier standalone fixture widgets, which unlike the real
     // singleton history widget are all mounted simultaneously.
@@ -508,6 +509,32 @@ try {
       await until(()=>live.root.querySelector("a"));
       assert.match(live.root.textContent,/Private history/);
       assert.equal(history.onVisitRemoved.listeners.size,listenersBefore+1);
+      assert.equal(history.onVisited.listeners.size,visitedBefore+1);
+
+      // Visits in a different browser tab must refresh a long-lived page.
+      // Coalesce a synchronous burst without replacing the existing list.
+      history.search=async()=>{calls++;return [{title:"New visit",url:"https://visited.example/"}];};
+      const priorLink=one(live.root,"a");
+      history.onVisited.emit({url:"https://visited.example/"});
+      history.onVisited.emit({url:"https://visited.example/"});
+      assert.equal(one(live.root,"a"),priorLink);
+      await until(()=>live.root.querySelector("a")?.href==="https://visited.example/");
+      assert.equal(calls,1);
+
+      history.search=async()=>{calls++;return new Promise(resolve=>{releaseOld=resolve;});};
+      history.onVisited.emit({url:"https://another-visit.example/"});
+      await until(()=>releaseOld);
+      history.search=async()=>[];
+      history.onVisitRemoved.emit({allHistory:true});
+      assert.equal(live.root.querySelector("a"),null);
+      await until(()=>live.root.textContent==="emptyList");
+      releaseOld([{title:"Deleted while visiting",url:"https://visited.example/"}]);
+      await delay(30);
+      assert.equal(live.root.textContent,"emptyList");
+      releaseOld=undefined;
+      history.search=async()=>[{title:"Private history",url:"https://deleted.example/"}];
+      history.onVisited.emit({url:"https://deleted.example/"});
+      await until(()=>live.root.querySelector("a"));
 
       history.search=async()=>{calls++;return new Promise(resolve=>{releaseOld=resolve;});};
       history.onVisitRemoved.emit({allHistory:false,urls:["https://deleted.example/"]});
@@ -532,6 +559,7 @@ try {
 
       for(const cleanup of cleanups.splice(cleanupStart))cleanup();
       assert.equal(history.onVisitRemoved.listeners.size,listenersBefore);
+      assert.equal(history.onVisited.listeners.size,visitedBefore);
       live.root.remove();
       history.search=async()=>[];
       const reopened=widget("recent",{maxResults:21},"history-removal");
@@ -561,8 +589,14 @@ try {
       assert.deepEqual(events.map(e => e.listeners.size), listenerCounts.map(n => n+1));
 
       const initialCalls = calls;
+      const stableLink=one(live.root,"a");
+      stableLink.focus();
       tabs.onUpdated.emit(99, { title: "Unrelated" }, { id: 99, pinned: false });
+      for (const event of [tabs.onRemoved,tabs.onMoved,tabs.onAttached,tabs.onDetached]) event.emit(99,{});
+      tabs.onReplaced.emit(100,99);
       await delay(20);
+      assert.equal(one(live.root,"a"),stableLink);
+      assert.equal(document.activeElement,stableLink);
       assert.equal(calls, initialCalls);
       tabs.query = async () => { calls++; return new Promise(resolve => { releaseOld = resolve; }); };
       tabs.onUpdated.emit(42, { pinned: false }, { ...oldTab, pinned: false });
@@ -579,9 +613,9 @@ try {
 
       // All browser tab movement/replacement events must be wired up, not
       // silently skipped by incomplete Chrome API doubles.
-      for (const event of [tabs.onMoved, tabs.onAttached, tabs.onDetached, tabs.onReplaced]) {
+      for (const fire of [()=>tabs.onMoved.emit(43,{}),()=>tabs.onAttached.emit(43,{}),()=>tabs.onDetached.emit(43,{}),()=>tabs.onReplaced.emit(44,43)]) {
         const before = calls;
-        event.emit(43, {});
+        fire();
         assert.equal(live.root.querySelector("a"), null);
         await until(() => live.root.querySelector("a")?.href === newTab.url);
         assert.equal(calls, before+1);

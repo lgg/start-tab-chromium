@@ -196,9 +196,11 @@ async function recentHistory(maxResults: number): Promise<UrlItem[]> {
   return visibleWebUrlItems(items, maxResults);
 }
 
-async function browserPinnedTabs(): Promise<UrlItem[]> {
+async function browserPinnedTabs(): Promise<{ items: UrlItem[]; ids: Set<number> }> {
   const tabs = await chrome.tabs.query({ pinned: true });
-  return visibleWebUrlItems(tabs);
+  // Include pinned tabs without a usable URL: subsequent navigation can
+  // make them visible, and their removal/movement is still relevant.
+  return { items: visibleWebUrlItems(tabs), ids: new Set(tabs.flatMap(tab => typeof tab.id === "number" ? [tab.id] : [])) };
 }
 
 function urlList(items: readonly UrlItem[], i18n: I18n): HTMLElement {
@@ -225,28 +227,43 @@ export function renderRecent(
   // extension. Never reuse a cached pre-deletion history result on remount.
   let generation = 0;
   let active = true;
+  let refreshQueued = false;
+  const loading = (): void => container.replaceChildren(element("p", "empty-state", context.i18n.t("recentLoading")));
   const load = (): void => {
     const current = ++generation;
-    const status = element("p", "empty-state", context.i18n.t("recentLoading"));
-    container.replaceChildren(status);
-    const isCurrent = (): boolean => active && current === generation && attached(status);
+    const isCurrent = (): boolean => active && current === generation && attached(container);
     void recentHistory(block.config.maxResults).then((items) => {
-      if (isCurrent()) status.replaceWith(urlList(items, context.i18n));
+      if (isCurrent()) container.replaceChildren(urlList(items, context.i18n));
     }).catch(() => {
-      if (isCurrent()) status.textContent = context.i18n.t("recentUnavailable");
+      if (isCurrent()) container.replaceChildren(element("p", "empty-state", context.i18n.t("recentUnavailable")));
     });
   };
-  const historyRemoved = (): void => {
-    if (active && attached(container)) load();
+  const invalidate = (removed: boolean): void => {
+    if (!active || !attached(container)) return;
+    ++generation;
+    // Visits can refresh the current list without flicker. Deletions must
+    // synchronously hide private history, including when the read fails.
+    if (removed) loading();
+    if (refreshQueued) return;
+    refreshQueued = true;
+    queueMicrotask(() => {
+      refreshQueued = false;
+      if (active && attached(container)) load();
+    });
   };
-  // Subscribe before the first read so deletion also supersedes in-flight
-  // requests. Clear the visible list immediately, even if reload fails.
+  const historyVisited = (): void => invalidate(false);
+  const historyRemoved = (): void => invalidate(true);
+  // Subscribe before the first read so both kinds of mutation supersede
+  // in-flight requests, including a visit following a deletion.
+  chrome.history.onVisited?.addListener(historyVisited);
   chrome.history.onVisitRemoved?.addListener(historyRemoved);
   context.registerCleanup(() => {
     active = false;
     generation += 1;
+    chrome.history.onVisited?.removeListener(historyVisited);
     chrome.history.onVisitRemoved?.removeListener(historyRemoved);
   });
+  loading();
   load();
 }
 
@@ -256,13 +273,16 @@ export function renderBrowserPinned(container: HTMLElement, context: BlockRender
   let active = true;
   let generation = 0;
   let refreshQueued = false;
+  let knownIds: Set<number> | null = null;
   const load = (): void => {
     const current = ++generation;
     const status = element("p", "empty-state", context.i18n.t("browserPinnedLoading"));
     container.replaceChildren(status);
     const isCurrent = (): boolean => active && current === generation && attached(status);
-    void browserPinnedTabs().then((items) => {
-      if (isCurrent()) status.replaceWith(urlList(items, context.i18n));
+    void browserPinnedTabs().then(({ items, ids }) => {
+      if (!isCurrent()) return;
+      knownIds = ids;
+      status.replaceWith(urlList(items, context.i18n));
     }).catch(() => {
       if (isCurrent()) status.textContent = context.i18n.t("browserPinnedUnavailable");
     });
@@ -270,6 +290,7 @@ export function renderBrowserPinned(container: HTMLElement, context: BlockRender
   const invalidate = (): void => {
     if (!active || !attached(container)) return;
     ++generation;
+    knownIds = null;
     container.replaceChildren(element("p", "empty-state", context.i18n.t("browserPinnedLoading")));
     if (refreshQueued) return;
     refreshQueued = true;
@@ -282,23 +303,32 @@ export function renderBrowserPinned(container: HTMLElement, context: BlockRender
   const updated = (_id: number, change: chrome.tabs.TabChangeInfo, tab: chrome.tabs.Tab): void => {
     if (change.pinned !== undefined || (tab.pinned && (change.url !== undefined || change.title !== undefined))) invalidate();
   };
+  // Unrelated unpinned tabs must not tear down a stable list (and its
+  // keyboard focus) on every close, move or window transfer. While a
+  // query is pending or failed, conservatively refresh unknown identities.
+  const changed = (id: number): void => {
+    if (knownIds === null || knownIds.has(id)) invalidate();
+  };
+  const replaced = (addedId: number, removedId: number): void => {
+    if (knownIds === null || knownIds.has(addedId) || knownIds.has(removedId)) invalidate();
+  };
   chrome.tabs.onCreated?.addListener(created);
   chrome.tabs.onUpdated?.addListener(updated);
-  chrome.tabs.onRemoved?.addListener(invalidate);
-  chrome.tabs.onMoved?.addListener(invalidate);
-  chrome.tabs.onAttached?.addListener(invalidate);
-  chrome.tabs.onDetached?.addListener(invalidate);
-  chrome.tabs.onReplaced?.addListener(invalidate);
+  chrome.tabs.onRemoved?.addListener(changed);
+  chrome.tabs.onMoved?.addListener(changed);
+  chrome.tabs.onAttached?.addListener(changed);
+  chrome.tabs.onDetached?.addListener(changed);
+  chrome.tabs.onReplaced?.addListener(replaced);
   context.registerCleanup(() => {
     active = false;
     ++generation;
     chrome.tabs.onCreated?.removeListener(created);
     chrome.tabs.onUpdated?.removeListener(updated);
-    chrome.tabs.onRemoved?.removeListener(invalidate);
-    chrome.tabs.onMoved?.removeListener(invalidate);
-    chrome.tabs.onAttached?.removeListener(invalidate);
-    chrome.tabs.onDetached?.removeListener(invalidate);
-    chrome.tabs.onReplaced?.removeListener(invalidate);
+    chrome.tabs.onRemoved?.removeListener(changed);
+    chrome.tabs.onMoved?.removeListener(changed);
+    chrome.tabs.onAttached?.removeListener(changed);
+    chrome.tabs.onDetached?.removeListener(changed);
+    chrome.tabs.onReplaced?.removeListener(replaced);
   });
   load();
 }
