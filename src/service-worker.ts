@@ -213,7 +213,7 @@ async function handle(message: Message, sender: chrome.runtime.MessageSender): P
         message.completeOnboarding,
       )),
     };
-    case "clock-action": await runRuntimeJob(() => performClockAction(message.instanceId, message.action)); break;
+    case "clock-action": return runRuntimeJob(() => performClockAction(message.instanceId, message.action));
     case "complete-clock": return runRuntimeJob(() => finishClockCompletion(message.instanceId, message.token));
     case "reset-clocks": await runRuntimeJob(resetAllClocks); break;
     case "runtime-note": return { runtimeUpdatedAt: await runRuntimeJob(() => updateRuntimeNote(message.instanceId, message.value, message.expectedValue)) };
@@ -284,13 +284,13 @@ async function updateRuntimeLinkPage(instanceId: string, page: number, expectedP
   return { runtimeUpdatedAt: saved.updatedAt, savedLinkPage: ownValue(saved.linkPages, instanceId) ?? 0 };
 }
 
-async function performClockAction(instanceId: string, action: ClockAction): Promise<void> {
-  await mutateStartPageRuntimeStateWithAlarmsAndStorageEffect<{
+async function performClockAction(instanceId: string, action: ClockAction): Promise<HandlerResult | void> {
+  const outcome = await mutateStartPageRuntimeStateWithAlarmsAndStorageEffect<{
     next: ClockRuntimeState;
     interruptedMs: number;
     startedWork: boolean;
     occurredAt: number;
-  } | null>((runtime, settings) => {
+  } | string | null>((runtime, settings) => {
     const now = Date.now();
     const block = assertRuntimeMutationTarget(settings, instanceId, "clock");
     const clock = ownValue(runtime.clocks, instanceId) ?? defaultClockForBlock(block);
@@ -298,6 +298,14 @@ async function performClockAction(instanceId: string, action: ClockAction): Prom
     // state under the lock instead of inverting an already changed clock.
     if ((action === "start" && clock.running) || (action === "pause" && !clock.running)) {
       return { state: null, result: null };
+    }
+    // A late Pause (or legacy Toggle) cannot erase a countdown that
+    // already finished while its alarm or page callback was delayed.
+    // Return the token without mutating storage; the normal completion
+    // transaction rechecks it and owns statistics, alarms and notification.
+    if ((action === "pause" || action === "toggle") && clock.running
+      && clock.targetAt !== null && clock.targetAt <= now && clock.completionToken) {
+      return { state: null, result: clock.completionToken };
     }
     let next: ClockRuntimeState;
     let interruptedMs = 0;
@@ -322,13 +330,14 @@ async function performClockAction(instanceId: string, action: ClockAction): Prom
     runtime.clocks[instanceId] = next;
     return { state: runtime, result: { next, interruptedMs, startedWork, occurredAt: now } };
   }, [FOCUS_STATS_KEY], async (outcome) => {
-    if (!outcome || (!outcome.startedWork && outcome.interruptedMs <= 0)) return;
+    if (!outcome || typeof outcome === "string" || (!outcome.startedWork && outcome.interruptedMs <= 0)) return;
     await applyFocusClockStatsPatchInExistingTransaction({
       startedSessions: outcome.startedWork ? 1 : 0,
       interruptedFocusTimesMs: outcome.interruptedMs > 0 ? [outcome.interruptedMs] : [],
       occurredAt: outcome.occurredAt,
     });
   });
+  if (typeof outcome === "string") return finishClockCompletion(instanceId, outcome);
 }
 
 async function resetAllClocks(): Promise<void> {
