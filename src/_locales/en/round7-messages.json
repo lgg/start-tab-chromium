@@ -121,5 +121,8 @@
   },
   "migrationReportUnavailable": {
     "message": "The migration report could not be loaded."
+  },
+  "editorSaveNotCompleted": {
+    "message": "The change was not saved. Your draft is still open."
   }
 }

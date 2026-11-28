@@ -175,8 +175,35 @@ try {
     btn(row, "edit").click();
     dialog = one(document, "dialog[open]");
     value(one(dialog, 'input[type="text"]'), "Renamed note");
+    // A rejected storage mutation must keep the exact form and draft.
+    const originalSet = control.chrome.storage.local.set;
+    let releaseWrite, rejectedWrites = 0;
+    control.chrome.storage.local.set = async payload => {
+      if (payload.startPageSettings?.layout.blocks.some(b => b.title === "Renamed note")) {
+        rejectedWrites++;
+        await new Promise(resolve => { releaseWrite = resolve; });
+        throw Error("temporary block write failure");
+      }
+      return originalSet(payload);
+    };
+    try {
+      submit(one(dialog, "form"));
+      await until(() => releaseWrite);
+      submit(one(dialog, "form"));
+      assert.equal(btn(dialog,"save").disabled,true);
+      assert.equal(event(dialog,"cancel"),false);
+      const unloading=new window.Event("beforeunload",{cancelable:true});
+      window.dispatchEvent(unloading);
+      assert.equal(unloading.defaultPrevented,true);
+      releaseWrite();
+      await until(()=>!one(dialog,".form-error").hidden&&busyDone());
+      assert.equal(rejectedWrites,1);
+      assert.equal(dialog.open,true);
+      assert.equal(one(dialog,'input[type="text"]').value,"Renamed note");
+      assert.match(one(dialog,".form-error").textContent,/temporary block write failure/);
+    } finally { control.chrome.storage.local.set=originalSet; }
     submit(one(dialog, "form"));
-    await until(() => control.state.startPageSettings.layout.blocks.some(b => b.title === "Renamed note") && busyDone());
+    await until(() => control.state.startPageSettings.layout.blocks.some(b => b.title === "Renamed note") && busyDone() && !dialog.isConnected);
     row = [...section("blocks").querySelectorAll(".instance-row")].find(el => el.querySelector(".instance-row__title")?.textContent === "Renamed note");
     btn(row, "clearInstanceData").click();
     await until(() => control.messages.some(m => m.type === "delete-instance-runtime") && busyDone());
@@ -203,8 +230,28 @@ try {
     btn(themeCard, "edit").click();
     dialog = one(document, "dialog[open]");
     value(one(dialog, 'input[type="text"]'), "Options theme edited");
+    // A concurrent edit must not be overwritten or discard our draft.
+    const themeBeingEdited=control.state.startPageSettings.themes.customThemes.find(t=>t.name==="Options theme");
+    themeBeingEdited.name="External theme edit";
+    themeBeingEdited.updatedAt+=100;
+    control.state.startPageSettings.updatedAt+=100;
     submit(one(dialog, "form"));
-    await until(() => control.state.startPageSettings.themes.customThemes.some(t => t.name === "Options theme edited") && busyDone());
+    await until(()=>!one(dialog,".form-error").hidden&&busyDone());
+    assert.equal(dialog.open,true);
+    assert.equal(one(dialog,'input[type="text"]').value,"Options theme edited");
+    assert.match(one(dialog,".form-error").textContent,/changed in another extension context/);
+    assert.ok(control.state.startPageSettings.themes.customThemes.some(t=>t.name==="External theme edit"));
+    window.confirm=()=>false;
+    btn(dialog,"cancel").click();
+    assert.equal(dialog.open,true);
+    window.confirm=()=>true;
+    btn(dialog,"cancel").click();
+    themeCard=[...section("themes").querySelectorAll(".theme-card")].find(el=>el.querySelector(".theme-card__title")?.textContent==="External theme edit");
+    btn(themeCard,"edit").click();
+    dialog=one(document,"dialog[open]");
+    value(one(dialog,'input[type="text"]'),"Options theme edited");
+    submit(one(dialog, "form"));
+    await until(() => control.state.startPageSettings.themes.customThemes.some(t => t.name === "Options theme edited") && busyDone() && !dialog.isConnected);
     themeCard = [...section("themes").querySelectorAll(".theme-card")].find(el => el.querySelector(".theme-card__title")?.textContent === "Options theme edited");
     btn(themeCard, "delete").click();
     await until(() => !control.state.startPageSettings.themes.customThemes.some(t => t.name === "Options theme edited") && busyDone());
