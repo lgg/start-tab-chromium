@@ -221,13 +221,33 @@ export function renderRecent(
   container: HTMLElement,
   context: BlockRenderContext,
 ): void {
-  const status = element("p", "empty-state", context.i18n.t("recentLoading"));
-  container.append(status);
-  void requestCache.get(`recent:${block.config.maxResults}`, 30_000, () => recentHistory(block.config.maxResults)).then((items) => {
-    if (attached(status)) status.replaceWith(urlList(items, context.i18n));
-  }).catch(() => {
-    if (attached(status)) status.textContent = context.i18n.t("recentUnavailable");
+  // Browsing history is sensitive and may be deleted independently of the
+  // extension. Never reuse a cached pre-deletion history result on remount.
+  let generation = 0;
+  let active = true;
+  const load = (): void => {
+    const current = ++generation;
+    const status = element("p", "empty-state", context.i18n.t("recentLoading"));
+    container.replaceChildren(status);
+    const isCurrent = (): boolean => active && current === generation && attached(status);
+    void recentHistory(block.config.maxResults).then((items) => {
+      if (isCurrent()) status.replaceWith(urlList(items, context.i18n));
+    }).catch(() => {
+      if (isCurrent()) status.textContent = context.i18n.t("recentUnavailable");
+    });
+  };
+  const historyRemoved = (): void => {
+    if (active && attached(container)) load();
+  };
+  // Subscribe before the first read so deletion also supersedes in-flight
+  // requests. Clear the visible list immediately, even if reload fails.
+  chrome.history.onVisitRemoved?.addListener(historyRemoved);
+  context.registerCleanup(() => {
+    active = false;
+    generation += 1;
+    chrome.history.onVisitRemoved?.removeListener(historyRemoved);
   });
+  load();
 }
 
 export function renderBrowserPinned(container: HTMLElement, context: BlockRenderContext): void {
