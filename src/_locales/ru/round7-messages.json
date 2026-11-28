@@ -121,5 +121,8 @@
   },
   "migrationReportUnavailable": {
     "message": "Не удалось загрузить отчёт о миграции."
+  },
+  "editorSaveNotCompleted": {
+    "message": "Изменение не сохранено. Черновик остался открытым."
   }
 }

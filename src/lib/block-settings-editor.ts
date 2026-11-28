@@ -342,7 +342,7 @@ function configFields(
   }
 }
 
-export async function editBlockInstance(block: BlockInstance, i18n: I18n): Promise<BlockInstance | null> {
+export async function editBlockInstance(block: BlockInstance, i18n: I18n, persist?: (candidate: BlockInstance) => Promise<void>): Promise<BlockInstance | null> {
   if (focusExistingSettingsDialog()) return null;
   return new Promise<BlockInstance | null>((resolve) => {
     const result: DialogResult = { block: null };
@@ -385,12 +385,13 @@ export async function editBlockInstance(block: BlockInstance, i18n: I18n): Promi
     document.body.append(dialog);
 
     let dirty = false;
-    protectSettingsDialogDraft(dialog, () => dirty);
+    let saving = false;
+    protectSettingsDialogDraft(dialog, () => dirty || saving);
     const markDirty = (): void => { dirty = true; };
     form.addEventListener("input", markDirty);
     form.addEventListener("change", markDirty);
 
-    const confirmDiscard = (): boolean => !dirty || window.confirm(i18n.t("discardChangesConfirm"));
+    const confirmDiscard = (): boolean => !saving && (!dirty || window.confirm(i18n.t("discardChangesConfirm")));
     const closeWithoutSave = (): void => {
       if (!confirmDiscard()) return;
       result.block = null;
@@ -402,9 +403,9 @@ export async function editBlockInstance(block: BlockInstance, i18n: I18n): Promi
       if (!confirmDiscard()) event.preventDefault();
     });
 
-    form.addEventListener("submit", (event) => {
+    form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      if (!form.reportValidity()) return;
+      if (saving || !form.reportValidity()) return;
       const validation: ValidationIssue[] = [];
       const config = normalizeBlockConfig(block.type, configured.read(), {}, "config", validation);
       if (validation.length > 0) {
@@ -419,6 +420,30 @@ export async function editBlockInstance(block: BlockInstance, i18n: I18n): Promi
         : (requestedTitle || defaultTitleKey);
       next.enabled = enabled.checked;
       next.config = config as never;
+      if (persist) {
+        saving = true;
+        form.inert = true;
+        form.setAttribute("aria-busy", "true");
+        save.disabled = true;
+        cancel.disabled = true;
+        close.disabled = true;
+        error.hidden = true;
+        try {
+          await persist(next);
+        } catch (failure) {
+          dirty = true;
+          error.textContent = failure instanceof Error ? failure.message : String(failure);
+          error.hidden = false;
+          return;
+        } finally {
+          saving = false;
+          form.inert = false;
+          form.removeAttribute("aria-busy");
+          save.disabled = false;
+          cancel.disabled = false;
+          close.disabled = false;
+        }
+      }
       result.block = next;
       dirty = false;
       dialog.close("save");

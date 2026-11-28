@@ -228,12 +228,12 @@ async function runAction<T>(
   action: () => Promise<T>,
   successMessage: string | ((result: T) => string),
   savingGeneral = false,
-): Promise<void> {
-  if (actionGuard.pending) return;
+): Promise<boolean> {
+  if (actionGuard.pending) return false;
   if (!actionGuard.needsRefresh && !savingGeneral && generalDraft && !generalDraft.state.mayReplace(
     generalDraft.signature(), () => window.confirm(i18n.t("discardChangesConfirm")),
-  )) return;
-  if (!actionGuard.tryStart()) return;
+  )) return false;
+  if (!actionGuard.tryStart()) return false;
   setActionBusy(true);
   setStatus(i18n.t("working"));
   try {
@@ -246,7 +246,7 @@ async function runAction<T>(
       } catch (error) {
         setStatus(i18n.t("optionsRefreshRequired") + " · " + actionFailureText(error), true);
       }
-      return;
+      return false;
     }
     let result: T;
     try {
@@ -264,7 +264,7 @@ async function runAction<T>(
         failure = new AggregateError([error, refreshError], "The action failed and Options could not reload the latest state");
       }
       setStatus(actionFailureText(failure), true);
-      return;
+      return false;
     }
     // A successful mutation must not be reported as failed or replayed
     // merely because the subsequent read/render did not succeed.
@@ -278,9 +278,19 @@ async function runAction<T>(
     } catch (error) {
       setStatus([success, i18n.t("optionsSavedRefreshFailed"), actionFailureText(error)].filter(Boolean).join(" · "), true);
     }
+    return true;
   } finally {
     actionGuard.finish();
     setActionBusy(false);
+  }
+}
+
+// A modal owns its draft until the persistence boundary, not merely until
+// its local validation succeeds. Keep the actual failure visible inside it.
+async function persistEditor<T>(action: () => Promise<T>, success: string): Promise<void> {
+  if (!await runAction(action, success)) {
+    throw new Error(status.dataset.error === "true" && status.textContent
+      ? status.textContent : i18n.t("editorSaveNotCompleted"));
   }
 }
 
@@ -492,11 +502,8 @@ function blockActions(block: BlockInstance): HTMLElement {
   const actions = element("div", "instance-row__actions");
   const edit = button(i18n.t("edit"), "button button--secondary");
   edit.addEventListener("click", () => runUiTask(async () => {
-    const edited = await editBlockInstance(block, i18n);
-    if (!edited) return;
-    await runAction(async () => {
-      await updateBlockInstance(block.id, () => edited, block.updatedAt);
-    }, i18n.t("instanceUpdated"));
+    await editBlockInstance(block, i18n, (edited) =>
+      persistEditor(() => updateBlockInstance(block.id, () => edited, block.updatedAt), i18n.t("instanceUpdated")));
   }));
   const toggle = button(i18n.t(block.enabled ? "disable" : "enable"), "button button--secondary");
   toggle.addEventListener("click", () => void runAction(async () => {
@@ -550,9 +557,8 @@ function renderBlocks(): HTMLElement {
   }
   add.addEventListener("click", () => runUiTask(async () => {
     const created = createBlockInstanceDraft(settings, addSelect.value as BlockType);
-    const configured = await editBlockInstance(created, i18n);
-    if (!configured) return;
-    await runAction(() => saveNewBlockInstance(configured), i18n.t("instanceAdded"));
+    await editBlockInstance(created, i18n, (configured) =>
+      persistEditor(() => saveNewBlockInstance(configured), i18n.t("instanceAdded")));
   }));
   addRow.append(addSelect, add);
   const list = element("div", "instance-list");
@@ -589,11 +595,8 @@ function themeCard(theme: StartPageTheme): HTMLElement {
   if (!theme.builtIn) {
     const edit = button(i18n.t("edit"), "button button--secondary");
     edit.addEventListener("click", () => runUiTask(async () => {
-      const edited = await editTheme(theme, i18n);
-      if (!edited) return;
-      await runAction(async () => {
-        await updateCustomTheme(edited, theme.updatedAt);
-      }, i18n.t("themeUpdated"));
+      await editTheme(theme, i18n, (edited) =>
+        persistEditor(() => updateCustomTheme(edited, theme.updatedAt), i18n.t("themeUpdated")));
     }));
     const exportButton = button(i18n.t("exportTheme"), "button button--secondary");
     exportButton.addEventListener("click", () => downloadJson(`start-tab-theme-${theme.id}.json`, exportCustomTheme(theme)));
@@ -617,9 +620,8 @@ function renderThemes(): HTMLElement {
   create.disabled = themeCapacityReached;
   create.addEventListener("click", () => runUiTask(async () => {
     const created = createCustomThemeDraft(settings, i18n.t("newCustomTheme"), settings.themes.selectedThemeId);
-    const edited = await editTheme(created, i18n);
-    if (!edited) return;
-    await runAction(() => saveNewCustomTheme(edited), i18n.t("themeUpdated"));
+    await editTheme(created, i18n, (edited) =>
+      persistEditor(() => saveNewCustomTheme(edited), i18n.t("themeUpdated")));
   }));
   const importButton = button(i18n.t("importTheme"), "button button--secondary");
   importButton.disabled = themeCapacityReached;

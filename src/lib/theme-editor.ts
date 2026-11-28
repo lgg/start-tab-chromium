@@ -220,7 +220,7 @@ kind.addEventListener("change", draw);
 draw();
 return { root, read: () => readDynamic() };
 }
-export async function editTheme(theme: StartPageTheme, i18n: I18n): Promise<StartPageTheme | null> {
+export async function editTheme(theme: StartPageTheme, i18n: I18n, persist?: (candidate: StartPageTheme) => Promise<void>): Promise<StartPageTheme | null> {
 if (focusExistingSettingsDialog()) return null;
 return new Promise<StartPageTheme | null>((resolve) => {
 const working = cloneTheme(theme);
@@ -288,11 +288,12 @@ form.append(header, body, footer);
 dialog.append(form);
 document.body.append(dialog);
 let dirty = false;
-protectSettingsDialogDraft(dialog, () => dirty);
+let saving = false;
+protectSettingsDialogDraft(dialog, () => dirty || saving);
 let result: StartPageTheme | null = null;
 form.addEventListener("input", () => { dirty = true; });
 form.addEventListener("change", () => { dirty = true; });
-const confirmDiscard = (): boolean => !dirty || window.confirm(i18n.t("discardChangesConfirm"));
+const confirmDiscard = (): boolean => !saving && (!dirty || window.confirm(i18n.t("discardChangesConfirm")));
 const closeDialog = (): void => {
 if (!confirmDiscard()) return;
 dialog.close("cancel");
@@ -302,9 +303,9 @@ cancel.addEventListener("click", closeDialog);
 dialog.addEventListener("cancel", (event) => {
 if (!confirmDiscard()) event.preventDefault();
 });
-form.addEventListener("submit", (event) => {
+form.addEventListener("submit", async (event) => {
 event.preventDefault();
-if (!form.reportValidity()) return;
+if (saving || !form.reportValidity()) return;
 const candidate: StartPageTheme = {
 ...working,
 name: name.value.trim(),
@@ -329,14 +330,39 @@ spacing: readNumber(spacing, tokens.spacing),
 updatedAt: Date.now(),
 };
 const issues: ValidationIssue[] = [];
-result = normalizeTheme(candidate, working, "theme", issues);
-if (!result.name.trim()) issues.push({ path: "theme.name", messageKey: "validationRequired" });
+const normalized = normalizeTheme(candidate, working, "theme", issues);
+if (!normalized.name.trim()) issues.push({ path: "theme.name", messageKey: "validationRequired" });
 if (issues.length > 0) {
 error.textContent = issueText(i18n, issues);
 error.hidden = false;
 result = null;
 return;
 }
+if (persist) {
+  saving = true;
+  form.inert = true;
+  form.setAttribute("aria-busy", "true");
+  save.disabled = true;
+  cancel.disabled = true;
+  close.disabled = true;
+  error.hidden = true;
+  try {
+    await persist(normalized);
+  } catch (failure) {
+    dirty = true;
+    error.textContent = failure instanceof Error ? failure.message : String(failure);
+    error.hidden = false;
+    return;
+  } finally {
+    saving = false;
+    form.inert = false;
+    form.removeAttribute("aria-busy");
+    save.disabled = false;
+    cancel.disabled = false;
+    close.disabled = false;
+  }
+}
+result = normalized;
 dirty = false;
 dialog.close("save");
 });
