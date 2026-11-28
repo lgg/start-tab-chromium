@@ -29,7 +29,7 @@ import { runIndependentEffects } from "./lib/independent-effects.js";
 import { containsSplitViewMarker } from "./lib/split-view-markers.js";
 import { changedTabNavigationUrl, currentTabNavigationUrl, NewTabRedirectGuard } from "./lib/tab-navigation-change.js";
 import { assertRuntimeMutationTarget } from "./lib/runtime-mutation-target.js";
-import { isMessage, type Ack, type ClockAction, type Message } from "./lib/messages.js";
+import { clockCommandSnapshot, isMessage, type Ack, type ClockAction, type Message } from "./lib/messages.js";
 import { consumeNativeNewTabBypass, openNativeNewTab } from "./lib/native-new-tab.js";
 import { BlockedNavigationRegistry, isBlockedPageNavigation, readBlockedDestinationForSender, mayMutateFromBlockedPage, isCurrentBlockedPageSender } from "./lib/blocked-navigation.js";
 import {
@@ -213,7 +213,7 @@ async function handle(message: Message, sender: chrome.runtime.MessageSender): P
         message.completeOnboarding,
       )),
     };
-    case "clock-action": return runRuntimeJob(() => performClockAction(message.instanceId, message.action, message.expectedCompletionToken));
+    case "clock-action": return runRuntimeJob(() => performClockAction(message.instanceId, message.action, message.expectedCompletionToken, message.expectedClockState));
     case "complete-clock": return runRuntimeJob(() => finishClockCompletion(message.instanceId, message.token));
     case "reset-clocks": await runRuntimeJob(resetAllClocks); break;
     case "runtime-note": return { runtimeUpdatedAt: await runRuntimeJob(() => updateRuntimeNote(message.instanceId, message.value, message.expectedValue)) };
@@ -284,7 +284,7 @@ async function updateRuntimeLinkPage(instanceId: string, page: number, expectedP
   return { runtimeUpdatedAt: saved.updatedAt, savedLinkPage: ownValue(saved.linkPages, instanceId) ?? 0 };
 }
 
-async function performClockAction(instanceId: string, action: ClockAction, expectedCompletionToken?: string): Promise<HandlerResult | void> {
+async function performClockAction(instanceId: string, action: ClockAction, expectedCompletionToken?: string, expectedClockState?: string): Promise<HandlerResult | void> {
   const outcome = await mutateStartPageRuntimeStateWithAlarmsAndStorageEffect<{
     next: ClockRuntimeState;
     interruptedMs: number;
@@ -305,6 +305,11 @@ async function performClockAction(instanceId: string, action: ClockAction, expec
     if (action === "pause" && expectedCompletionToken !== undefined
       && clock.completionToken !== expectedCompletionToken) {
       throw new Error("Start Tab countdown changed in another extension context; retry after refreshing");
+    }
+    // Reset, stopwatch Pause and Start also need to match the displayed state.
+    // Check under the same storage lock, before touching alarms or statistics.
+    if (expectedClockState !== undefined && clockCommandSnapshot(clock) !== expectedClockState) {
+      throw new Error("Start Tab clock changed in another extension context; retry after refreshing");
     }
     // A late Pause (or legacy Toggle) cannot erase a countdown that
     // already finished while its alarm or page callback was delayed.

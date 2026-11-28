@@ -258,14 +258,18 @@ try {
     button(clock.root, "clockStart").click();
     await until(() => !![...clock.root.querySelectorAll("button")].find(b => b.textContent === "clockPause" && !b.disabled), type + " started");
     assert.equal(control.messages.at(-1).action, "start");
-    const displayedToken=context.runtime.clocks[clock.block.id].completionToken;
+    const displayedClock=context.runtime.clocks[clock.block.id];
+    const displayedToken=displayedClock.completionToken;
     button(clock.root, "clockPause").click();
     await until(() => !![...clock.root.querySelectorAll("button")].find(b => b.textContent === "clockStart" && !b.disabled), type + " paused");
     assert.equal(control.messages.at(-1).action, "pause");
     assert.equal(control.messages.at(-1).expectedCompletionToken,displayedToken ?? undefined);
+    assert.deepEqual(JSON.parse(control.messages.at(-1).expectedClockState), [displayedClock.type, displayedClock.running, displayedClock.startedAt, displayedClock.accumulatedMs, displayedClock.durationMs, displayedClock.targetAt, displayedClock.phase, displayedClock.focusSessionStartedAt, displayedClock.completionToken, displayedClock.lastCompletedToken]);
+    const pausedClock=context.runtime.clocks[clock.block.id];
     button(clock.root, "clockReset").click();
     await until(() => control.messages.at(-1).action === "reset" && !button(clock.root, "clockReset").disabled);
     assert.equal(control.messages.at(-1).instanceId, clock.block.id);
+    assert.deepEqual(JSON.parse(control.messages.at(-1).expectedClockState), [pausedClock.type, pausedClock.running, pausedClock.startedAt, pausedClock.accumulatedMs, pausedClock.durationMs, pausedClock.targetAt, pausedClock.phase, pausedClock.focusSessionStartedAt, pausedClock.completionToken, pausedClock.lastCompletedToken]);
     if (type === "pomodoro") assert.equal(one(clock.root, ".clock__phase").textContent, "pomodoroWork");
   }
   const recent = widget("recent");

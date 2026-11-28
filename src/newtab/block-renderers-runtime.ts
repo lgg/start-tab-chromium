@@ -1,6 +1,6 @@
 import { ownValue } from "../lib/dictionary.js";
 import { uniqueEntityId } from "../lib/start-page-validation-primitives.js";
-import { sendMessage, type ClockAction } from "../lib/messages.js";
+import { clockCommandSnapshot, sendMessage, type ClockAction } from "../lib/messages.js";
 import { MAX_LOCAL_TASKS_PER_INSTANCE, MAX_LOCAL_TASK_TITLE_LENGTH, MAX_NOTE_LENGTH } from "../lib/platform-limits.js";
 import {
   defaultClockForBlock,
@@ -39,6 +39,7 @@ export function renderClock(
 
   const runAction = async (action: ClockAction): Promise<void> => {
     if (disposed) return;
+    const expectedClockState = clockCommandSnapshot(clock);
     const expectedCompletionToken = action === "pause" ? clock.completionToken ?? undefined : undefined;
     const lease = clockRequests.begin(block.id);
     if (!lease) return;
@@ -46,7 +47,7 @@ export function renderClock(
     try {
       await settleClockMutation(
         async () => {
-          const ack = await sendMessage({ type: "clock-action", instanceId: block.id, action, ...(expectedCompletionToken === undefined ? {} : { expectedCompletionToken }) });
+          const ack = await sendMessage({ type: "clock-action", instanceId: block.id, action, expectedClockState, ...(expectedCompletionToken === undefined ? {} : { expectedCompletionToken }) });
           if (ack.notificationFailed) context.reportError(new Error(context.i18n.t("clockCompletedNotificationFailed")));
         },
         async () => { await refreshClock(context); },
