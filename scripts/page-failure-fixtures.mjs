@@ -375,9 +375,13 @@ try{
     await import("../src/newtab/newtab-gate.js?case="+(++serial));
     await window.startTabGateReady;
     assert.ok(overlay());
-    assert.equal(overlay().querySelectorAll("button").length,2);
+    assert.equal(overlay().querySelectorAll("button").length,3);
     assert.equal(one(document,"#startPage").hasAttribute("inert"),true);
-    assert.equal(document.activeElement,native());
+    const gateText=await loadI18n();
+    assert.ok(overlay().textContent.includes(gateText.t("splitViewQueryFailed")));
+    const retry=[...overlay().querySelectorAll("button")].find(b=>b.textContent===gateText.t("gateRetry"));
+    assert.ok(retry);
+    assert.equal(document.activeElement,retry);
     const panel=one(overlay(),'[role="dialog"]');
     const buttons=[...panel.querySelectorAll("button")];
     for(const b of buttons)b.disabled=true;
@@ -399,7 +403,8 @@ try{
     const before=generation;
     gate.chrome.storage.onChanged.emit({startPageSettings:{newValue:gate.state.startPageSettings}},"sync");
     await delay(20);assert.equal(generation,before);
-    gate.chrome.storage.onChanged.emit({startPageSettings:{newValue:gate.state.startPageSettings}},"local");
+    // A retry must recover without a storage change or page reload.
+    retry.click();
     await until(()=>overlay()?.querySelectorAll("button").length===4);
     assert.match(overlay().textContent,/https:\/\/untitled\.example\//);
     assert.match(overlay().textContent,/https:\/\/no-title\.example\//);
@@ -516,6 +521,20 @@ try{
       resolveTabs([{id:2,title:"Obsolete tab",url:"https://obsolete.example/"}]);
       await delay(30);
       assert.ok(!overlay().textContent.includes("Obsolete tab"));
+      // A rejection from an obsolete split lookup must not replace the
+      // current disabled overlay with a retry screen either.
+      let rejectTabs;
+      control.chrome.tabs.query=()=>new Promise((_,reject)=>{rejectTabs=reject});
+      window.name="split-view";
+      control.chrome.storage.onChanged.emit({startPageSettings:{newValue:control.state.startPageSettings}},"local");
+      await until(()=>rejectTabs);
+      const priorOverlay=overlay();
+      window.name="";
+      control.chrome.storage.onChanged.emit({startPageSettings:{newValue:control.state.startPageSettings}},"local");
+      await until(()=>overlay()!==priorOverlay&&overlay()?.textContent.includes(english.t("startTabDisabledTitle")));
+      rejectTabs(Error("obsolete query failure"));
+      await delay(30);
+      assert.ok(!overlay().textContent.includes(english.t("splitViewQueryFailed")));
       let pendingCatalog=[];
       globalThis.fetch=async url=>String(url).includes("/ru/")?new Promise(resolve=>pendingCatalog.push(()=>resolve(catalog(url)))):catalog(url);
       control.state.localeOverride="ru";

@@ -333,11 +333,20 @@
       if (split) {
         const current = await chrome.tabs.getCurrent().catch(() => null);
         if (!pageActive || generation !== applyGeneration) return;
-        const tabs = (await chrome.tabs.query({ currentWindow: true }).catch(() => []))
-          .filter((tab) => tab.id !== current?.id)
-          .map(webTab)
-          .filter(Boolean);
+        let candidates;
+        try {
+          candidates = await chrome.tabs.query({ currentWindow: true });
+        } catch {
+          // A rejected query is not an empty window. Expose a recovery
+          // action without allowing obsolete generations to replace the gate.
+          if (pageActive && generation === applyGeneration) {
+            showOverlay(text("splitViewTitle", "Choose a tab for Split View"),
+              text("splitViewQueryFailed", "Could not list open tabs. Try again."), [], true);
+          }
+          return;
+        }
         if (!pageActive || generation !== applyGeneration) return;
+        const tabs = candidates.filter((tab) => tab.id !== current?.id).map(webTab).filter(Boolean);
         showOverlay(text("splitViewTitle", "Choose a tab for Split View"), text("splitViewText", "Select an open tab below."), tabs);
         return;
       }
