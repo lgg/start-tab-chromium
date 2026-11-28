@@ -45,7 +45,7 @@ try {
     const command = settings => ({type:"replace-start-page-settings",settings,expectedSettingsUpdatedAt:saved.settings.updatedAt,expectedRuntimeUpdatedAt:saved.runtime.updatedAt,completeOnboarding:true});
     await reject(command(disabled), /disabled; onboarding/);
     assert.deepEqual(control.state,original);
-    control.state.startPageSettings=disabled;
+    control.state.startPageSettings=structuredClone(disabled);
     try {
       const before=structuredClone(control.state);
       await reject(command(saved.settings), /disabled; onboarding/);
