@@ -305,15 +305,33 @@
     return splitMarkers.some((marker) => normalized.includes(marker));
   }
 
+  function isWebAddress(value) {
+    if (typeof value !== "string" || !value) return false;
+    try {
+      const protocol = new URL(value).protocol;
+      return protocol === "http:" || protocol === "https:";
+    } catch {
+      return false;
+    }
+  }
+
   async function splitContext() {
     const current = await chrome.tabs.getCurrent().catch(() => null);
     if (!pageActive) return false;
-    const marked = [location.href, document.referrer, window.name].some(containsSplitMarker);
+    // A normal website can contain these words in its URL or title.
+    // Its referrer is not evidence of a browser-owned split picker.
+    const marked = [location.href, window.name].some(containsSplitMarker)
+      || (!isWebAddress(document.referrer) && containsSplitMarker(document.referrer));
     let openerMarked = false;
     if (!marked && typeof current?.openerTabId === "number") {
       const opener = await chrome.tabs.get(current.openerTabId).catch(() => null);
       if (!pageActive) return false;
-      openerMarked = [opener?.url, opener?.pendingUrl, opener?.title].some(containsSplitMarker);
+      // A pending web navigation also rules out relying on the old
+      // internal title/URL. Retain the title fallback for browser contexts
+      // that do not expose a URL at all.
+      const openerUrl = opener?.pendingUrl || opener?.url;
+      openerMarked = !isWebAddress(openerUrl)
+        && [openerUrl, opener?.title].some(containsSplitMarker);
     }
     const split = marked || openerMarked;
     if (split) {

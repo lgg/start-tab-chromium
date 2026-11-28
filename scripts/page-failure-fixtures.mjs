@@ -355,6 +355,33 @@ try{
     assert.equal(prompts,0);
   });
   console.log("Popup: unblock stale tab, committed/failed refresh, locale CAS and catalog failures");
+  // An ordinary web page mentioning split view must not hide Start Tab.
+  // Keep browser-owned opener hints and the URL-less title fallback working.
+  for(const [opener,referrer,expected] of [
+    [{url:"https://example.com/split-view",title:"Split View tutorial"},"",false],
+    [{url:"https://example.com/",title:"Tab-picker comparison"},"",false],
+    [{url:"chrome://tab-picker/",pendingUrl:"https://example.com/",title:"Tab-picker"},"",false],
+    [{url:"https://example.com/",title:"Article"},"https://example.com/tab-picker",false],
+    [{url:"chrome://tab-picker/",title:"Browser picker"},"",true],
+    [{title:"Side-by-side tab picker"},"",true],
+    [{url:"https://example.com/"},"chrome://tab-picker/",true],
+  ]){
+    const dom=await installDom("newtab/newtab.html","https://extension.example/newtab.html");
+    const control=installChrome(seed());
+    control.tab={id:1,openerTabId:10,url:"https://extension.example/newtab.html"};
+    control.chrome.tabs.get=async id=>({id,...opener});
+    let queried=0;
+    control.chrome.tabs.query=async()=>{queried++;return []};
+    Object.defineProperty(document,"referrer",{value:referrer,configurable:true});
+    try{
+      await import("../src/newtab/newtab-gate.js?case="+(++serial));
+      await window.startTabGateReady;
+      assert.equal(Boolean(document.getElementById("startTabGateOverlay")),expected,JSON.stringify({opener,referrer}));
+      assert.equal(one(document,"#startPage").hasAttribute("inert"),expected);
+      assert.equal(queried,expected?1:0);
+      assert.equal(Object.hasOwn(control.state,"startTabLastNativeNewTabContext"),expected);
+    }finally{window.dispatchEvent(new window.Event("pagehide"));dom.window.close()}
+  }
   // Gate starts in the browser's split context even when discovered through
   // an opener rather than window.name. Failure to list tabs must keep the
   // native/Settings fallback usable.
