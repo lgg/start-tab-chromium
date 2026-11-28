@@ -37,6 +37,32 @@ try{
       assert.equal(control.messages.length,1);
     }finally{dom.window.close()}
   }
+  // The host action may commit after the user navigates to another
+  // document on that host. The optional reload must not interrupt it.
+  {
+    const dom=await installDom("popup/popup.html");
+    const control=installChrome(seed());
+    control.tab={id:1,url:"https://blocked.example/first"};
+    const originalClose=window.close.bind(window);
+    try{
+      let closed=0;
+      window.close=()=>{closed++};
+      await import("../src/popup/popup.ts?residual="+(++serial));
+      const primary=one(document,"#primary");
+      await until(()=>!primary.hidden&&!primary.disabled);
+      let release;
+      control.handler=()=>new Promise(resolve=>{release=resolve});
+      primary.click();await until(()=>release);
+      assert.equal(control.messages.length,1);
+      assert.equal(control.messages[0].type,"unblock");
+      control.tab={id:1,url:"https://blocked.example/second"};
+      control.state.blockedSites=[];
+      release({ok:true,changed:true});
+      await until(()=>closed===1&&!primary.disabled);
+      assert.equal(control.calls.some(call=>Array.isArray(call)&&call[0]==="reload"),false);
+      assert.deepEqual(control.state.blockedSites,[]);
+    }finally{window.close=originalClose;dom.window.close()}
+  }
   // A non-Error platform failure during popup initialization gets a
   // readable fallback even before the locale catalog is loaded.
   {

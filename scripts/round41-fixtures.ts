@@ -215,11 +215,12 @@ assert.equal(await readStablePopupTarget(read97, async () => { active97 = { id: 
 active97 = { id: 7, url: "https://example.com/old" };
 assert.deepEqual(await readStablePopupTarget(read97, async () => { active97.url = "https://example.com/new"; return "example.com"; }),
   { tabId: 7, url: "https://example.com/new", host: "example.com", blockedHost: "example.com" });
-assert.equal(mayReloadPopupTarget(displayed, { id: 7, url: "https://example.com/current" }), true);
-assert.equal(mayReloadPopupTarget(displayed, { id: 7, url: "https://example.com/current", pendingUrl: "https://other.example/" }), false);
-assert.equal(mayReloadPopupTarget(displayed, { id: 7, url: "https://example.com/current", pendingUrl: "https://example.com/next" }), false);
+assert.equal(mayReloadPopupTarget(displayed, { id: 7, url: displayed.url }), true);
+assert.equal(mayReloadPopupTarget(displayed, { id: 7, url: "https://example.com/current" }), false);
+assert.equal(mayReloadPopupTarget(displayed, { id: 7, url: displayed.url, pendingUrl: "https://other.example/" }), false);
+assert.equal(mayReloadPopupTarget(displayed, { id: 7, url: displayed.url, pendingUrl: "https://example.com/next" }), false);
 assert.equal(mayReloadPopupTarget(displayed, { id: 7, url: "https://other.example/" }), false);
-assert.equal(mayReloadPopupTarget(displayed, { id: 8, url: "https://example.com/current" }), false);
+assert.equal(mayReloadPopupTarget(displayed, { id: 8, url: displayed.url }), false);
 assert.equal(mayReloadPopupTarget(displayed, undefined), false);
 console.log("Round 97 stable popup target and guarded reload regressions passed");
 

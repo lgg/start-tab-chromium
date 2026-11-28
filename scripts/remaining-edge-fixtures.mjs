@@ -186,7 +186,13 @@ await assert.rejects(rt.replaceStartPageSettingsWithRuntime(settings,settings.up
   assert.equal(mayReloadPopupTarget(target,undefined),false);
   assert.equal(mayReloadPopupTarget(target,{id:7}),false);
   assert.equal(mayReloadPopupTarget(target,{...valid,pendingUrl:"https://elsewhere.example/"}),false);
-  assert.equal(mayReloadPopupTarget(target,{...valid,pendingUrl:valid.url}),true);
+  // The new URL was the displayed target; the previously committed
+  // URL is not safe to reload even though it has the same hostname.
+  assert.equal(mayReloadPopupTarget(target,{...valid,pendingUrl:valid.url}),false);
+  assert.equal(mayReloadPopupTarget(target,{id:7,url:target.url}),true);
+  assert.equal(mayReloadPopupTarget(target,{id:7,url:target.url,pendingUrl:target.url}),true);
+  assert.equal(mayReloadPopupTarget(target,{id:7,url:target.url,pendingUrl:valid.url}),false);
+  assert.equal(mayReloadPopupTarget(target,{id:7,url:"https://example.com/newer"}),false);
   for(const next of [undefined,{id:8,url:valid.url},{id:7,url:"https://elsewhere.example/"},{id:7,pendingUrl:"chrome://settings/",url:valid.url}]){
     const states=[valid,next];
     assert.equal(await readStablePopupTarget(async()=>states.shift(),lookup),null);
