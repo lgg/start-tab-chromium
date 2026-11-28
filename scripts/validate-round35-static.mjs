@@ -56,7 +56,7 @@ for (const source of [editor, layoutEditor, newtab, runtimeRenderer, options, wo
 }
 assert.match(layoutEditor, /title: blockTitleKey\(type\)/,
   "Blocks added from the Start Tab palette must keep locale-adaptive default title keys");
-assert.match(worker, /title: blockUsesDefaultTitle\(block\) \? await workerMessage\(blockTitleKey\(block\.type\)\) : block\.title/,
+assert.match(worker, /const translate = await workerTranslator\(\);[\s\S]*title: blockUsesDefaultTitle\(block\) \? translate\(blockTitleKey\(block\.type\)\) : block\.title,[\s\S]*message: translate\(messageKey\)/,
   "Clock notifications must never expose raw internal title keys");
 
 assert.match(settings, /export function createBlockInstanceDraft/);

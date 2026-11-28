@@ -335,6 +335,41 @@ try {
     }
   }
 
+  // The locale can change while the first catalog request is in flight.
+  // Both notification fields must come from one committed snapshot.
+  {
+    const priorLocale=control.state.localeOverride,priorFetch=globalThis.fetch;
+    const priorSettings=structuredClone(control.state.startPageSettings);
+    try {
+      control.state.localeOverride="ru";
+      control.state.startPageSettings.layout.blocks.find(b=>b.id==="worker-timer").title="blockTitleTimer";
+      const urls=[];
+      globalThis.fetch=async url=>{
+        urls.push(String(url));
+        const russian=String(url).includes("/_locales/ru/");
+        control.state.localeOverride="en";
+        return Response.json({
+          blockTitleTimer:{message:russian?"Таймер":"Timer"},
+          timerDone:{message:russian?"Таймер завершен.":"Timer completed."},
+        });
+      };
+      await ok({type:"clock-action",instanceId:"worker-timer",action:"reset"});
+      await ok({type:"clock-action",instanceId:"worker-timer",action:"start"});
+      const clock=control.state.startPageRuntimeState.clocks["worker-timer"];
+      clock.startedAt=Date.now()-3000;clock.targetAt=clock.startedAt+clock.durationMs;
+      await ok({type:"complete-clock",instanceId:"worker-timer",token:clock.completionToken});
+      const notice=control.calls.filter(c=>c[0]==="notification").at(-1)[2];
+      assert.equal(notice.title,"Таймер");
+      assert.equal(notice.message,"Таймер завершен.");
+      assert.equal(urls.length,1);
+      assert.ok(urls[0].includes("/_locales/ru/"));
+      assert.equal(control.state.localeOverride,"en");
+    }finally{
+      globalThis.fetch=priorFetch;control.state.startPageSettings=priorSettings;
+      if(priorLocale===undefined)delete control.state.localeOverride;else control.state.localeOverride=priorLocale;
+    }
+  }
+
   // A renamed timer uses its own title, whereas a silent timer commits
   // the completed state without creating a notification at all.
   {
