@@ -220,6 +220,26 @@ const primitives=await import("../src/lib/start-page-validation-primitives.js");
     else await local.remove("localeOverride");
   }
 }
+// Check incoming future schemas before normalization, not only stored schemas.
+// Every failed write must preserve the entire storage/revision snapshot.
+{
+  const themeApi=await import("../src/lib/start-page-settings.js");
+  const runtimeApi=await import("../src/lib/start-page-runtime.js");
+  const current=await getStartPageSettings();
+  const theme=themeApi.createCustomThemeDraft(current,"Future input guard");
+  const saved=await themeApi.saveNewCustomTheme(theme);
+  try{
+    const runtime=await runtimeApi.getStartPageRuntimeState();
+    const before=await local.get(null);
+    const futureTheme={...saved,schemaVersion:999,futureField:"preserve"};
+    await assert.rejects(themeApi.saveNewCustomTheme(futureTheme),/newer extension version/);
+    await assert.rejects(themeApi.updateCustomTheme(futureTheme,saved.updatedAt),/newer extension version/);
+    await assert.rejects(themeApi.updateCustomTheme({...futureTheme,id:"future-new-theme"}),/newer extension version/);
+    await assert.rejects(runtimeApi.setStartPageRuntimeState({...runtime,version:999,futureField:"preserve"}),/newer extension version/);
+    await assert.rejects(runtimeApi.updateStartPageRuntimeState(state=>({...state,version:999,futureField:"preserve"})),/newer extension version/);
+    assert.deepEqual(await local.get(null),before);
+  }finally{await themeApi.deleteCustomTheme(saved.id);}
+}
 const beforeBackup=await backup.exportBackup();
 for(const [key,future] of [["startPageSettings",{schemaVersion:999}],["startPageRuntimeState",{version:999}],["focusStats",{version:999}]]){
   assert.throws(()=>backup.migrateBackup({...beforeBackup,storage:{...beforeBackup.storage,[key]:future}}),/newer extension version/);

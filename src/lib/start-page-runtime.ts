@@ -391,6 +391,9 @@ export async function getStartPageRuntimeState(inputSettings?: StartPageSettings
 }
 
 export async function setStartPageRuntimeState(state: StartPageRuntimeState): Promise<void> {
+  if (isFutureRuntimeSchema(state)) {
+    throw new Error("Start Tab runtime data was created by a newer extension version and cannot be modified safely");
+  }
   await withStorageLock("data-write", async () => {
     const { settings, raw } = await readRuntimeSettingsSnapshot(true);
     const items = await chrome.storage.local.get([START_PAGE_RUNTIME_KEY, LEGACY_INSTANCE_RUNTIME_KEY]);
@@ -439,6 +442,9 @@ async function runRuntimeMutation<T>(
     const current = normalizeRuntimeState(raw, settings, items[LEGACY_INSTANCE_RUNTIME_KEY]);
     const mutation = mutator(cloneRuntimeStateForMutation(current), settings);
     if (mutation.state === null) return { result: mutation.result, state: current };
+    if (isFutureRuntimeSchema(mutation.state)) {
+      throw new Error("Start Tab runtime data was created by a newer extension version and cannot be modified safely");
+    }
     const next = normalizeRuntimeState(mutation.state, settings);
     const rollbackKeys = uniqueStorageKeys(
       RUNTIME_STORAGE_KEYS,
