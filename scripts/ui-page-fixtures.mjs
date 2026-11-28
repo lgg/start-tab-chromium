@@ -339,9 +339,36 @@ try {
       btn(section("backup"), "syncRestore").click();
       await until(() => busyDone());
     } finally { window.HTMLAnchorElement.prototype.click = originalClick; }
-    value(one(section("blocker"), "input"), "added.example");
-    submit(one(section("blocker"), "form"));
-    await until(() => control.state.blockedSites.includes("added.example") && busyDone());
+    // Rebuilding Options after an independent action or a failed write must
+    // not discard a typed host. Clear only the acknowledged submission.
+    {
+      const siteInput=()=>one(section("blocker"),"input");
+      const siteForm=()=>one(section("blocker"),"form");
+      const previous=control.handler;
+      const unload=()=>{const e=new window.Event("beforeunload",{cancelable:true});window.dispatchEvent(e);return e.defaultPrevented};
+      value(siteInput(),"added.example");
+      assert.equal(unload(),true);
+      btn(section("backup"),"syncNow").click();
+      await until(()=>busyDone());
+      assert.equal(siteInput().value,"added.example");
+      const staleForm=siteForm();
+      control.handler=async m=>m.type==="block"?{ok:false,error:"block write refused"}:previous(m);
+      try {
+        submit(siteForm());
+        await until(()=>one(document,"#status").textContent.includes("block write refused")&&busyDone());
+        assert.equal(siteInput().value,"added.example");
+        assert.equal(unload(),true);
+        assert.ok(!control.state.blockedSites.includes("added.example"));
+        const n=control.messages.length;
+        submit(staleForm);
+        await delay(20);
+        assert.equal(control.messages.length,n);
+      } finally {control.handler=previous}
+      submit(siteForm());
+      await until(()=>control.state.blockedSites.includes("added.example")&&busyDone());
+      assert.equal(siteInput().value,"");
+      assert.equal(unload(),false);
+    }
     btn(section("blocker"), "clearBlocklist").click();
     await until(() => control.state.blockedSites.length === 0 && busyDone());
     await until(() => document.getElementById("statistics")?.querySelector(".stats-grid"));

@@ -190,9 +190,18 @@ let rendering = false;
 let renderGeneration = 0;
 const actionGuard = new OptionsActionGuard();
 let generalDraft: { state: GeneralFormDraft; signature: () => string; root: HTMLElement } | null = null;
+// Unlike a General form, adding a host is independent of other settings.
+// Keep its draft across every rebuild, including failed writes and refreshes.
+let blockerDraft = "";
+let blockerDraftGeneration = 0;
+function updateBlockerDraft(value: string): void {
+  if (blockerDraft === value) return;
+  blockerDraft = value;
+  blockerDraftGeneration++;
+}
 
 window.addEventListener("beforeunload", (event) => {
-  if (!generalDraft?.state.isDirty(generalDraft.signature())) return;
+  if (!blockerDraft.trim() && !generalDraft?.state.isDirty(generalDraft.signature())) return;
   event.preventDefault();
   event.returnValue = "";
 });
@@ -686,7 +695,10 @@ function renderBackup(): HTMLElement {
 function renderBlocker(): HTMLElement {
   const item = section("blocker", i18n.t("sectionBlocker"), i18n.t("sectionBlockerDescription"));
   const form = element("form", "add-site");
-  const input = textInput();
+  const input = textInput(blockerDraft);
+  input.addEventListener("input", () => {
+    if (input.isConnected) updateBlockerDraft(input.value);
+  });
   input.placeholder = i18n.t("blockSitePlaceholder");
   input.setAttribute("aria-label", i18n.t("blockSitePlaceholder"));
   const add = button(i18n.t("blockSite"), "button button--primary");
@@ -694,9 +706,18 @@ function renderBlocker(): HTMLElement {
   form.append(input, add);
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    const host = input.value.trim();
+    if (!form.isConnected || actionGuard.pending) return;
+    updateBlockerDraft(input.value);
+    const host = blockerDraft.trim();
     if (!host) return;
-    void runAction(async () => { await blockHost(host); input.value = ""; }, i18n.t("siteBlocked"));
+    const submittedGeneration = blockerDraftGeneration;
+    void runAction(async () => {
+      await blockHost(host);
+      if (blockerDraftGeneration === submittedGeneration) {
+        updateBlockerDraft("");
+        input.value = "";
+      }
+    }, i18n.t("siteBlocked"));
   });
   const list = element("div", "site-list");
   if (blockedSites.length === 0) list.append(element("p", "empty-state", i18n.t("emptyBlocklist")));
