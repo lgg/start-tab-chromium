@@ -118,6 +118,40 @@ try {
   assert.equal(failedNotice.notificationFailed, true);
   chrome.notifications.create = originalNotice;
 
+  // A user can click Pause after a countdown elapsed but before the
+  // browser delivers its alarm. Do not erase the completion token.
+  for (const action of ["pause", "toggle"]) {
+    await ok({type:"clock-action",instanceId:"worker-timer",action:"reset"});
+    await ok({type:"clock-action",instanceId:"worker-timer",action:"start"});
+    const clock=control.state.startPageRuntimeState.clocks["worker-timer"];
+    clock.startedAt=Date.now()-3000;
+    clock.targetAt=clock.startedAt+clock.durationMs;
+    const lateToken=clock.completionToken;
+    const notices=control.calls.filter(c=>c[0]==="notification").length;
+    await ok({type:"clock-action",instanceId:"worker-timer",action});
+    const completed=(await view()).runtime.clocks["worker-timer"];
+    assert.equal(completed.running,false);
+    assert.equal(completed.lastCompletedToken,lateToken);
+    assert.equal(completed.accumulatedMs,completed.durationMs);
+    await ok({type:"complete-clock",instanceId:"worker-timer",token:lateToken});
+    assert.equal(control.calls.filter(c=>c[0]==="notification").length,notices+1);
+  }
+  await ok({type:"clock-action",instanceId:"worker-pomodoro",action:"start"});
+  const expiredFocus=control.state.startPageRuntimeState.clocks["worker-pomodoro"];
+  expiredFocus.startedAt=Date.now()-expiredFocus.durationMs-1000;
+  expiredFocus.focusSessionStartedAt=expiredFocus.startedAt;
+  expiredFocus.targetAt=expiredFocus.startedAt+expiredFocus.durationMs;
+  const focusToken=expiredFocus.completionToken;
+  const beforeLatePause=(await getFocusStats()).totals;
+  await ok({type:"clock-action",instanceId:"worker-pomodoro",action:"pause"});
+  const afterLatePause=(await getFocusStats()).totals;
+  assert.equal((await view()).runtime.clocks["worker-pomodoro"].phase,"break");
+  assert.equal(afterLatePause.focusSessionsCompleted,beforeLatePause.focusSessionsCompleted+1);
+  assert.equal(afterLatePause.focusSessionsInterrupted,beforeLatePause.focusSessionsInterrupted);
+  await ok({type:"complete-clock",instanceId:"worker-pomodoro",token:focusToken});
+  assert.equal((await getFocusStats()).totals.focusSessionsCompleted,afterLatePause.focusSessionsCompleted);
+  await ok({type:"clock-action",instanceId:"worker-pomodoro",action:"reset"});
+
   // Worker uses the browser locale if catalog reads fail; alarm completion
   // must remain committed regardless of translation or delivery failures.
   const originalFetch=globalThis.fetch, originalMessage=chrome.i18n.getMessage;
