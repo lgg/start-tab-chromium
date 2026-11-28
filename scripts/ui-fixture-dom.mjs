@@ -105,7 +105,7 @@ export function installChrome(initial = {}) {
       getCurrent: async () => copy(control.tab), reload: async id => { calls.push(["reload", id]); }, update: async (id, options) => { calls.push(["update", id, options]); return { id, ...options }; },
       create: async options => { calls.push(["create", options]); return { id: 9, ...options }; }, remove: async id => { calls.push(["remove",id]); },
       onCreated: browserEvent(), onUpdated: browserEvent(), onRemoved: browserEvent() },
-    history: { search: async () => [{ title: "History", url: "https://history.example/" }, { title: "Internal", url: "chrome://settings/" }] },
+    history: { search: async () => [{ title: "History", url: "https://history.example/" }, { title: "Internal", url: "chrome://settings/" }], onVisitRemoved: browserEvent() },
     identity: { getAuthToken: async () => ({ token: "test-token" }), removeCachedAuthToken: async () => {} },
     i18n: { getUILanguage: () => "en", getMessage: k => k },
     webNavigation: { onBeforeNavigate: browserEvent(), getFrame: async () => ({ url: control.tab.url, documentId: "doc", documentLifecycle: "active" }) },
