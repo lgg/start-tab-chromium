@@ -489,10 +489,14 @@ try {
       const api=await import("../src/lib/chrome-sync.js");
       const message=key=>t.t(key);
       await control.chrome.storage.sync.remove(Object.keys(await control.chrome.storage.sync.get(null)));
+      const originalConfirm=window.confirm;
+      let prompts=0;
+      window.confirm=()=>{prompts++;return false};
       btn(section("backup"),"syncNow").click();
       await until(()=>busyDone()&&status().textContent===message("syncUploaded"));
       btn(section("backup"),"syncNow").click();
       await until(()=>busyDone()&&status().textContent===message("syncUnchanged"));
+      assert.equal(prompts,0,"Uploads and matching snapshots must not ask for restore consent");
       // Preserve the baseline, then publish remote-only content from a
       // separate mock profile and restore the original local profile.
       const savedLocal=await control.chrome.storage.local.get(null);
@@ -504,9 +508,19 @@ try {
         await api.uploadChromeSyncBackup();
         await control.chrome.storage.sync.set(await remote.chrome.storage.sync.get(null));
       }finally{globalThis.chrome=control.chrome}
+      const beforeCancel=await control.chrome.storage.local.get(null);
+      const remoteBeforeCancel=await control.chrome.storage.sync.get(null);
+      btn(section("backup"),"syncNow").click();
+      await until(()=>busyDone()&&status().textContent===message("syncCancelled"));
+      assert.equal(prompts,1);
+      assert.deepEqual(await control.chrome.storage.local.get(null),beforeCancel);
+      assert.deepEqual(await control.chrome.storage.sync.get(null),remoteBeforeCancel);
+      window.confirm=text=>{assert.equal(text,message("restoreDataConfirm"));prompts++;return true};
       btn(section("backup"),"syncNow").click();
       await until(()=>busyDone()&&status().textContent===message("syncRestored"));
+      assert.equal(prompts,2);
       assert.deepEqual(control.state.blockedSites,["remote-only-options.example"]);
+      window.confirm=originalConfirm;
     }
     // An existing note must not be discarded silently by a layout preset.
     {

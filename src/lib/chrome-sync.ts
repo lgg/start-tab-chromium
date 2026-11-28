@@ -42,7 +42,7 @@ class ChromeSyncRemoteConflictError extends Error {
     this.name = "ChromeSyncRemoteConflictError";
   }
 }
-export type ChromeSyncResult = "uploaded" | "restored" | "unchanged";
+export type ChromeSyncResult = "uploaded" | "restored" | "unchanged" | "cancelled";
 export { DATA_REVISION_KEY, markStartTabDataChanged };
 
 function chunkKey(index: number): string { return `${CHUNK_PREFIX}${index}`; }
@@ -458,17 +458,24 @@ export async function restoreChromeSyncBackup(): Promise<void> {
     await restoreChromeSyncBackupInTransaction(guard);
   });
 }
-async function syncChromeSyncBackupInTransaction(): Promise<ChromeSyncResult> {
+async function syncChromeSyncBackupInTransaction(confirmRestore?: () => boolean): Promise<ChromeSyncResult> {
   const remote = await readRemoteMeta();
   if (!remote) { await uploadChromeSyncBackupInTransaction(null); return "uploaded"; }
   const localSnapshot = await prepareSnapshot();
   const guard = snapshotRevisionGuard(localSnapshot);
+  const restore = async (): Promise<ChromeSyncResult> => {
+    // Confirmation belongs to the actual restore decision, not uploads or
+    // matching snapshots. The import still verifies both revision guards.
+    if (confirmRestore && !confirmRestore()) return "cancelled";
+    await restoreParsedSnapshot(remote, guard);
+    return "restored";
+  };
   if (remote.legacy) {
     const remoteBundle = await readVerifiedRemoteBundle(remote);
     const remoteChecksum = await checksum(canonicalBackupContent(remoteBundle));
     if (remoteChecksum === localSnapshot.contentChecksum) { await writeRemoteSnapshot(localSnapshot, remote); return "unchanged"; }
     if (isPristineBackup(localSnapshot.bundle) || remote.meta.contentUpdatedAt > localSnapshot.contentUpdatedAt) {
-      await restoreParsedSnapshot(remote, guard); return "restored";
+      return restore();
     }
     await writeRemoteSnapshot(localSnapshot, remote); return "uploaded";
   }
@@ -497,21 +504,21 @@ async function syncChromeSyncBackupInTransaction(): Promise<ChromeSyncResult> {
   await readVerifiedRemoteBundle(remote);
   const local = await readLocalMeta();
   if (!local || local.legacy) {
-    if (isPristineBackup(localSnapshot.bundle) || remoteWins(remote.meta, localSnapshot)) { await restoreParsedSnapshot(remote, guard); return "restored"; }
+    if (isPristineBackup(localSnapshot.bundle) || remoteWins(remote.meta, localSnapshot)) { return restore(); }
     await writeRemoteSnapshot(localSnapshot, remote); return "uploaded";
   }
   const localChanged = localSnapshot.contentChecksum !== local.meta.contentChecksum;
   const remoteChanged = remote.meta.contentChecksum !== local.meta.contentChecksum;
-  if (!localChanged && remoteChanged) { await restoreParsedSnapshot(remote, guard); return "restored"; }
+  if (!localChanged && remoteChanged) { return restore(); }
   if (localChanged && !remoteChanged) { await writeRemoteSnapshot(localSnapshot, remote); return "uploaded"; }
 
-  if (remoteWins(remote.meta, localSnapshot)) { await restoreParsedSnapshot(remote, guard); return "restored"; }
+  if (remoteWins(remote.meta, localSnapshot)) { return restore(); }
   await writeRemoteSnapshot(localSnapshot, remote);
   return "uploaded";
 }
-export async function syncChromeSyncBackup(): Promise<ChromeSyncResult> {
+export async function syncChromeSyncBackup(confirmRestore?: () => boolean): Promise<ChromeSyncResult> {
   return withStorageLock("chrome-sync", async () => {
     await assertCompatibleSyncMetadata();
-    return retrySyncConflicts(syncChromeSyncBackupInTransaction);
+    return retrySyncConflicts(() => syncChromeSyncBackupInTransaction(confirmRestore));
   });
 }

@@ -124,5 +124,6 @@
   },
   "editorSaveNotCompleted": {
     "message": "The change was not saved. Your draft is still open."
-  }
+  },
+  "syncCancelled": {"message": "Browser sync cancelled. Local data was not replaced."}
 }
