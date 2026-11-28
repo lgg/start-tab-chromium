@@ -10,6 +10,7 @@ const build = read("scripts/build.mjs");
 const buildValidation = read("scripts/validate-build-output.mjs");
 const options = read("src/options/options.ts");
 const blocked = read("src/blocked/blocked.ts");
+const worker = read("src/service-worker.ts");
 const deployment = read("docs/deployment-3.0.0.md");
 
 assert.match(packageJson.scripts["build:google"], /node build\.mjs --google --outdir=build-google/,
@@ -45,8 +46,9 @@ assert.match(blocked, /const active = host \? await blockedHostIsActive\(\) : fa
   "Stale blocked pages must leave without arming actions, but disposed pages must not query or redirect");
 assert.match(blocked, /if \(!await blockedHostIsActive\(\) \|\| !pageActive\) return "unchanged"/,
   "Countdown completion must recheck the current blocklist");
-assert.match(blocked, /if \(result === "removed"\)[\s\S]*record-unblock/,
-  "Countdown statistics must only be recorded for an actually active block");
+assert.match(worker, /const changed = await unblockHost\(message\.host, assertCurrent\);[\s\S]*?if \(changed && fromBlockedPage\) \{[\s\S]*?recordUnblockAfterCountdown\(message\.host\)/,
+  "Countdown statistics must be conditional on a committed interstitial removal");
+assert.doesNotMatch(blocked, /type: "record-unblock"/, "The page must not issue a second statistics mutation");
 
 assert.match(deployment, /inherited `GOOGLE_OAUTH_CLIENT_ID` value is ignored/,
   "Deployment documentation must describe deterministic default profiles");
