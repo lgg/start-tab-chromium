@@ -236,7 +236,7 @@ function actionFailureText(error: unknown): string {
 
 async function runAction<T>(
   action: () => Promise<T>,
-  successMessage: string | ((result: T) => string),
+  successMessage: string | ((result: T) => string | null),
   savingGeneral = false,
 ): Promise<boolean> {
   if (actionGuard.pending) return false;
@@ -279,6 +279,12 @@ async function runAction<T>(
     // A successful mutation must not be reported as failed or replayed
     // merely because the subsequent read/render did not succeed.
     const success = typeof successMessage === "function" ? successMessage(result) : successMessage;
+    // A cancelled smart restore committed nothing. Do not replace drafts
+    // or announce success when the user declined the destructive action.
+    if (success === null) {
+      setStatus(i18n.t("syncCancelled"));
+      return false;
+    }
     actionGuard.invalidate();
     try {
       await reloadState();
@@ -674,7 +680,7 @@ function renderBackup(): HTMLElement {
     void runAction(restoreChromeSyncBackup, i18n.t("syncRestored"));
   });
   const smart = button(i18n.t("syncNow"), "button button--primary");
-  smart.addEventListener("click", () => void runAction(syncChromeSyncBackup, (result) => i18n.t(
+  smart.addEventListener("click", () => void runAction(() => syncChromeSyncBackup(confirmDataRestore), (result) => result === "cancelled" ? null : i18n.t(
     result === "uploaded" ? "syncUploaded" : result === "restored" ? "syncRestored" : "syncUnchanged",
   )));
   browser.append(actionRow(upload, restore, smart));
