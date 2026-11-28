@@ -44,6 +44,7 @@ import {
 } from "./start-page-validation.js";
 import {
   START_PAGE_SCHEMA_VERSION,
+  THEME_SCHEMA_VERSION,
   type AnimatedEffectId,
   type BlockConfig,
   type BlockInstance,
@@ -612,7 +613,14 @@ export function createCustomThemeDraft(
   };
 }
 
+function assertCompatibleThemeInput(theme: StartPageTheme): void {
+  if (Number.isInteger(theme.schemaVersion) && theme.schemaVersion > THEME_SCHEMA_VERSION) {
+    throw new Error("Start Tab theme was created by a newer extension version and cannot be modified safely");
+  }
+}
+
 export async function saveNewCustomTheme(theme: StartPageTheme): Promise<StartPageTheme> {
+  assertCompatibleThemeInput(theme);
   let savedId = "";
   const result = await updateStartPageSettings((current) => {
     const now = Date.now();
@@ -643,6 +651,7 @@ export async function createCustomTheme(name: string, sourceThemeId?: string): P
 }
 
 export async function updateCustomTheme(theme: StartPageTheme, expectedUpdatedAt?: number): Promise<StartPageTheme> {
+  assertCompatibleThemeInput(theme);
   let savedId = theme.id;
   const result = await updateStartPageSettings((current) => {
     if (getBuiltInTheme(theme.id)) throw new Error("Built-in themes cannot be edited");
