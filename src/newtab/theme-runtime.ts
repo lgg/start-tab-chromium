@@ -1,12 +1,6 @@
 import type { StartPageTheme } from "../lib/start-page-settings.js";
 
-function cssUrl(value: string): string {
-  // Stored URLs retain their original text (including signed query data).
-  // Serialize with the same URL parser used by validation before passing
-  // the destination into CSS: raw newlines are invalid in quoted CSS URLs.
-  value = new URL(value).href;
-  return `url("${value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}")`;
-}
+import { themeImageCssUrl } from "../lib/start-page-theme-validation.js";
 
 function clearEffectState(root: HTMLElement, background: HTMLElement): void {
   for (const property of [
@@ -55,7 +49,7 @@ export function applyTheme(theme: StartPageTheme, background: HTMLElement): void
       background.style.backgroundImage = theme.background.css;
       break;
     case "image":
-      background.style.backgroundImage = cssUrl(theme.background.url);
+      background.style.backgroundImage = themeImageCssUrl(theme.background.url);
       background.style.backgroundSize = theme.background.fit;
       background.style.backgroundPosition = theme.background.position;
       break;

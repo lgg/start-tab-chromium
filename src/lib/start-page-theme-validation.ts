@@ -3,6 +3,14 @@ import { MAX_CUSTOM_THEMES } from "./platform-limits.js";
 import { THEME_SCHEMA_VERSION, type AnimatedEffectConfig, type BackgroundTile, type StartPageTheme, type ThemeBundle, type ValidationIssue, type ValidationResult } from "./start-page-types.js";
 import { booleanValue, finiteNumber, isRecord, normalizeEntityId, uniqueEntityId, oneOf, safeCssToken, safeGradient, safeWebUrl, stringValue, timestampValue, trimmedString } from "./start-page-validation-primitives.js";
 
+export function themeImageCssUrl(value: string): string {
+  // Stored URLs retain their original text (including signed query data).
+  // Serialize with the same URL parser used by validation before passing
+  // the destination into CSS: raw newlines are invalid in quoted CSS URLs.
+  value = new URL(value).href;
+  return `url("${value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}")`;
+}
+
 const EFFECT_IDS = ["animated-gradient", "aurora", "mesh", "spotlight", "noise", "matrix", "cyberpunk"] as const;
 
 export const NOISE_EFFECT_LIMITS = { speed: 2, intensity: 0.65 } as const;
