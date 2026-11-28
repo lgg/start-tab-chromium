@@ -213,7 +213,7 @@ async function handle(message: Message, sender: chrome.runtime.MessageSender): P
         message.completeOnboarding,
       )),
     };
-    case "clock-action": return runRuntimeJob(() => performClockAction(message.instanceId, message.action));
+    case "clock-action": return runRuntimeJob(() => performClockAction(message.instanceId, message.action, message.expectedCompletionToken));
     case "complete-clock": return runRuntimeJob(() => finishClockCompletion(message.instanceId, message.token));
     case "reset-clocks": await runRuntimeJob(resetAllClocks); break;
     case "runtime-note": return { runtimeUpdatedAt: await runRuntimeJob(() => updateRuntimeNote(message.instanceId, message.value, message.expectedValue)) };
@@ -284,7 +284,7 @@ async function updateRuntimeLinkPage(instanceId: string, page: number, expectedP
   return { runtimeUpdatedAt: saved.updatedAt, savedLinkPage: ownValue(saved.linkPages, instanceId) ?? 0 };
 }
 
-async function performClockAction(instanceId: string, action: ClockAction): Promise<HandlerResult | void> {
+async function performClockAction(instanceId: string, action: ClockAction, expectedCompletionToken?: string): Promise<HandlerResult | void> {
   const outcome = await mutateStartPageRuntimeStateWithAlarmsAndStorageEffect<{
     next: ClockRuntimeState;
     interruptedMs: number;
@@ -298,6 +298,13 @@ async function performClockAction(instanceId: string, action: ClockAction): Prom
     // state under the lock instead of inverting an already changed clock.
     if ((action === "start" && clock.running) || (action === "pause" && !clock.running)) {
       return { state: null, result: null };
+    }
+    // A stale tab may still display a previous running phase after an
+    // alarm or another tab started a new countdown. Do not pause that
+    // newer session using a command intended for the old token.
+    if (action === "pause" && expectedCompletionToken !== undefined
+      && clock.completionToken !== expectedCompletionToken) {
+      throw new Error("Start Tab countdown changed in another extension context; retry after refreshing");
     }
     // A late Pause (or legacy Toggle) cannot erase a countdown that
     // already finished while its alarm or page callback was delayed.

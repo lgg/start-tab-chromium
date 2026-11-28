@@ -258,8 +258,11 @@ try {
     button(clock.root, "clockStart").click();
     await until(() => !![...clock.root.querySelectorAll("button")].find(b => b.textContent === "clockPause" && !b.disabled), type + " started");
     assert.equal(control.messages.at(-1).action, "start");
+    const displayedToken=context.runtime.clocks[clock.block.id].completionToken;
     button(clock.root, "clockPause").click();
     await until(() => !![...clock.root.querySelectorAll("button")].find(b => b.textContent === "clockStart" && !b.disabled), type + " paused");
+    assert.equal(control.messages.at(-1).action, "pause");
+    assert.equal(control.messages.at(-1).expectedCompletionToken,displayedToken ?? undefined);
     button(clock.root, "clockReset").click();
     await until(() => control.messages.at(-1).action === "reset" && !button(clock.root, "clockReset").disabled);
     assert.equal(control.messages.at(-1).instanceId, clock.block.id);
