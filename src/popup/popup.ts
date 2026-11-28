@@ -83,8 +83,22 @@ async function sendAction(message: Message): Promise<boolean> {
     await sendMessage(message);
     return true;
   } catch (error) {
-    // Preserve the worker's real failure, including stale-action conflicts.
-    showError(error);
+    // A failed acknowledgement can mean another context changed the
+    // blocklist after our initial read, or that the reply was lost after
+    // committing. Refresh before allowing another mutation, while keeping
+    // the original worker failure visible.
+    try {
+      await render();
+      showError(error);
+    } catch (refreshError) {
+      blocklistNeedsRefresh = true;
+      hide(primaryEl);
+      show(noteEl, [
+        i18n.t("popupBlocklistRefreshRequired"),
+        errorText(error),
+        errorText(refreshError),
+      ].join(" · "));
+    }
     return false;
   }
 }
