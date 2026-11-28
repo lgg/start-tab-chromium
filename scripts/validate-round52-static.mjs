@@ -61,7 +61,7 @@ assert.match(chromeSync, /expectedCurrentDataRevisionFallback: guard\.dataRevisi
 assert.match(chromeSync,
   /export async function restoreChromeSyncBackup\(\): Promise<void> \{\s*const guard = await captureLocalRevisionGuard\(\);\s*await withStorageLock\("chrome-sync", async \(\) => \{\s*await assertCompatibleSyncMetadata\(\);\s*await restoreChromeSyncBackupInTransaction\(guard\)/,
   "Explicit Browser Sync Restore must capture its local revision before waiting for the sync lock or performing remote metadata I/O");
-assert.match(chromeSync, /return retrySyncConflicts\(syncChromeSyncBackupInTransaction\)/,
+assert.match(chromeSync, /return retrySyncConflicts\(\(\) => syncChromeSyncBackupInTransaction\(confirmRestore\)\)/,
   "Smart Sync must recalculate its decision after a local revision conflict");
 assert.match(chromeSync, /retrySyncConflicts\(uploadChromeSyncBackupInTransaction\)/,
   "Manual Browser Sync Upload must converge to a stable local snapshot before reporting success");
