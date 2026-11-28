@@ -152,6 +152,22 @@ try {
   assert.equal((await getFocusStats()).totals.focusSessionsCompleted,afterLatePause.focusSessionsCompleted);
   await ok({type:"clock-action",instanceId:"worker-pomodoro",action:"reset"});
 
+  // A stale Pause from another tab must not stop a newly started countdown.
+  await ok({type:"clock-action",instanceId:"worker-timer",action:"start"});
+  const oldToken=(await view()).runtime.clocks["worker-timer"].completionToken;
+  await ok({type:"clock-action",instanceId:"worker-timer",action:"reset"});
+  await ok({type:"clock-action",instanceId:"worker-timer",action:"start"});
+  const newToken=(await view()).runtime.clocks["worker-timer"].completionToken;
+  assert.notEqual(oldToken,newToken);
+  const beforeStalePause=structuredClone(control.state.startPageRuntimeState);
+  await reject({type:"clock-action",instanceId:"worker-timer",action:"pause",expectedCompletionToken:oldToken},/countdown changed/);
+  assert.deepEqual(control.state.startPageRuntimeState,beforeStalePause);
+  await reject({type:"clock-action",instanceId:"worker-timer",action:"pause",expectedCompletionToken:123},/Unsupported/);
+  await reject({type:"clock-action",instanceId:"worker-timer",action:"reset",expectedCompletionToken:newToken},/Unsupported/);
+  await ok({type:"clock-action",instanceId:"worker-timer",action:"pause",expectedCompletionToken:newToken});
+  assert.equal((await view()).runtime.clocks["worker-timer"].running,false);
+  await ok({type:"clock-action",instanceId:"worker-timer",action:"reset"});
+
   // Worker uses the browser locale if catalog reads fail; alarm completion
   // must remain committed regardless of translation or delivery failures.
   const originalFetch=globalThis.fetch, originalMessage=chrome.i18n.getMessage;

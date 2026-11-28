@@ -39,13 +39,14 @@ export function renderClock(
 
   const runAction = async (action: ClockAction): Promise<void> => {
     if (disposed) return;
+    const expectedCompletionToken = action === "pause" ? clock.completionToken ?? undefined : undefined;
     const lease = clockRequests.begin(block.id);
     if (!lease) return;
     update();
     try {
       await settleClockMutation(
         async () => {
-          const ack = await sendMessage({ type: "clock-action", instanceId: block.id, action });
+          const ack = await sendMessage({ type: "clock-action", instanceId: block.id, action, ...(expectedCompletionToken === undefined ? {} : { expectedCompletionToken }) });
           if (ack.notificationFailed) context.reportError(new Error(context.i18n.t("clockCompletedNotificationFailed")));
         },
         async () => { await refreshClock(context); },

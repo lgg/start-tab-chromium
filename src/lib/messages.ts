@@ -21,7 +21,7 @@ export type Message =
   | { type: "open-native-new-tab" }
   | { type: "reset-start-page" }
   | { type: "replace-start-page-settings"; settings: unknown; expectedSettingsUpdatedAt: number; expectedRuntimeUpdatedAt: number; localeChange?: LocaleChange; completeOnboarding?: true }
-  | { type: "clock-action"; instanceId: string; action: ClockAction }
+  | { type: "clock-action"; instanceId: string; action: ClockAction; expectedCompletionToken?: string }
   | { type: "complete-clock"; instanceId: string; token: string }
   | { type: "reset-clocks" }
   | { type: "runtime-note"; instanceId: string; value: string; expectedValue: string }
@@ -97,7 +97,8 @@ export function isMessage(value: unknown): value is Message {
         && (value.completeOnboarding === undefined || value.completeOnboarding === true);
     case "clock-action":
       return isSafeIdentifier(value.instanceId) && (value.action === "toggle" || value.action === "start"
-        || value.action === "pause" || value.action === "reset");
+        || value.action === "pause" || value.action === "reset")
+        && (value.expectedCompletionToken === undefined || (value.action === "pause" && isSafeIdentifier(value.expectedCompletionToken)));
     case "complete-clock":
       return isSafeIdentifier(value.instanceId) && isSafeIdentifier(value.token);
     case "runtime-note":
