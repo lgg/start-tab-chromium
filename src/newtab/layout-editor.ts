@@ -298,15 +298,18 @@ export class LayoutEditor {
     if (!block) return;
     const expectedSettingsUpdatedAt = this.saved.updatedAt;
     const epoch = this.draftVersion.epoch;
-    const configured = await editBlockInstance(cloneBlock(block), this.options.i18n);
-    if (!configured) return;
-    if (this.saved.updatedAt !== expectedSettingsUpdatedAt || !this.active
-      || this.savePending || this.isPointerActive || !this.draftVersion.isCurrent(epoch)) {
-      throw new Error("Start Tab settings changed in another extension context; reload before saving");
-    }
-    this.updateBlock(id, () => this.draft.layout.mode === "grid"
-      ? placeGridBlock(configured, this.draft.layout.blocks, this.draft.layout.columns)
-      : clampFreeGeometry(configured));
+    // Accept the configured block before closing its dialog. If an external
+    // revision or another layout edit invalidated this draft, keep the user's
+    // input in the open dialog rather than discarding it on rejection.
+    await editBlockInstance(cloneBlock(block), this.options.i18n, async (configured) => {
+      if (this.saved.updatedAt !== expectedSettingsUpdatedAt || !this.active
+        || this.savePending || this.isPointerActive || !this.draftVersion.isCurrent(epoch)) {
+        throw new Error("Start Tab settings changed in another extension context; reload before saving");
+      }
+      this.updateBlock(id, () => this.draft.layout.mode === "grid"
+        ? placeGridBlock(configured, this.draft.layout.blocks, this.draft.layout.columns)
+        : clampFreeGeometry(configured));
+    });
   }
 
   private allocateDraftBlockId(type: BlockType): string {
